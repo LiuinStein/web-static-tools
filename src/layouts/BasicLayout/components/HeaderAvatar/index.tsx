@@ -40,9 +40,9 @@ const HeaderAvatar = (props: Props) => {
       <div className={styles.avatarPopup}>
         <UserProfile {...props} />
         <Menu className={styles.menu}>
-          <Item><Icon size="small" type="account" />个人设置</Item>
-          <Item><Icon size="small" type="set" />系统设置</Item>
-          <Item><Icon size="small" type="exit" />退出</Item>
+          <Item onClick={() => {
+            window.open('https://www.shaoqunliu.cn/');
+          }}><Icon size="small" type="account" />个人主页</Item>
         </Menu>
       </div>
     </Popup>
@@ -50,9 +50,9 @@ const HeaderAvatar = (props: Props) => {
 };
 
 HeaderAvatar.defaultProps = {
-  name: 'MyName',
-  mail: 'name@gmail.com',
-  avatar: 'https://img.alicdn.com/tfs/TB1.ZBecq67gK0jSZFHXXa9jVXa-904-826.png',
+  name: 'Shaoqun Liu',
+  mail: 'liuinstein@gmail.com',
+  avatar: 'https://bucket.shaoqunliu.cn/image/avatar.png',
 };
 
 export default HeaderAvatar;

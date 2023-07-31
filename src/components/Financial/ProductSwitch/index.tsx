@@ -20,23 +20,23 @@ export default function () {
                 responsive
                 labelAlign="top"
             >
-                <FormItem {...formItemLayout} label="原收益率 % p.a." required requiredMessage="必填">
+                <FormItem {...formItemLayout} label="原收益率/日均万元收益" required requiredMessage="必填">
                     <Input placeholder="2.5" onChange={(v) => {
                         setInvestSwitch({ ...investSwitch, original: v });
                     }} />
                 </FormItem>
-                <FormItem {...formItemLayout} label="新收益率 % p.a." required requiredMessage="必填">
+                <FormItem {...formItemLayout} label="新收益率/日均万元收益" required requiredMessage="必填">
                     <Input placeholder="3.6" onChange={(v) => {
                         setInvestSwitch({ ...investSwitch, novel: v });
                     }} />
                 </FormItem>
-                <FormItem {...formItemLayout} label="耽误交易日（天）" required requiredMessage="必填">
+                <FormItem {...formItemLayout} label="耽误收益日（天）" required requiredMessage="必填">
                     <Input placeholder="3" onChange={(v) => {
                         setInvestSwitch({ ...investSwitch, delay: v });
                     }} />
                 </FormItem>
 
-                <FormItem {...formItemLayout} label="回本日">
+                <FormItem {...formItemLayout} label="回本日 T+">
                     <Input placeholder="0" value={(investSwitch.original * investSwitch.delay / (investSwitch.novel - investSwitch.original)).toFixed(4)} readOnly />
                 </FormItem>
             </Form>

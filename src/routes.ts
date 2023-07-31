@@ -3,8 +3,8 @@ import UserLayout from '@/layouts/UserLayout';
 import BasicLayout from '@/layouts/BasicLayout';
 
 const CommonTools = lazy(() => import('@/pages/CommonTools'));
+const MonetaryTools = lazy(() => import('@/pages/MonetaryTools'));
 const BondTools = lazy(() => import('@/pages/BondTools'));
-
 
 const routerConfig: IRouterConfig[] = [
   {
@@ -14,6 +14,10 @@ const routerConfig: IRouterConfig[] = [
       {
         path: '/common',
         component: CommonTools,
+      },
+      {
+        path: '/finance/monetary',
+        component: MonetaryTools,
       },
       {
         path: '/finance/bond',

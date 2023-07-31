@@ -12,7 +12,11 @@ const asideMenuConfig = [
     icon: 'chart-pie',
     children: [
       {
-        name: '货币、固收、债券类',
+        name: '货币、固收类',
+        path: '/finance/monetary'
+      },
+      {
+        name: '债券类',
         path: '/finance/bond'
       }
     ]
