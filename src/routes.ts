@@ -1,5 +1,4 @@
 import { IRouterConfig, lazy } from 'ice';
-import UserLayout from '@/layouts/UserLayout';
 import BasicLayout from '@/layouts/BasicLayout';
 
 const CommonTools = lazy(() => import('@/pages/CommonTools'));
