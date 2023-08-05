@@ -95,7 +95,7 @@ const Navigation = (props, context) => {
   }, [pathname]);
 
   return (
-    <Nav
+    !isCollapse && <Nav
       type="normal"
       openKeys={openKeys}
       selectedKeys={[pathname]}
