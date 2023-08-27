@@ -24,7 +24,18 @@ const asideMenuConfig = [
         path: '/finance/stock'
       }
     ]
-  }
+  },
+  {
+    name: '程序员',
+    path: '/',
+    icon: 'account',
+    children: [
+      {
+        name: '编解码类',
+        path: '/code/encoding'
+      }
+    ]
+  },
 ];
 
 export { headerMenuConfig, asideMenuConfig };
