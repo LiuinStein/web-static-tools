@@ -59,7 +59,7 @@ export default function () {
                     }} />
                 </FormItem>
                 <FormItem {...formItemLayout} label="票面价格" required requiredMessage="必填">
-                    <Input value="100" onChange={(v) => {
+                    <Input value={bondInterest.nominalPrice} onChange={(v) => {
                         setBondInterest({ ...bondInterest, nominalPrice: v });
                     }} />
                 </FormItem>

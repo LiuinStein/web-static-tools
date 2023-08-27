@@ -43,7 +43,7 @@ export default function () {
                     }} />
                 </FormItem>
                 <FormItem {...formItemLayout} label="股数" required requiredMessage="必填">
-                    <Input value="100" onChange={(v) => {
+                    <Input value={stockCommission.quantity} onChange={(v) => {
                         setStockCommission({ ...stockCommission, quantity: Number(v) })
                     }} />
                 </FormItem>
