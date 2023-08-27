@@ -18,6 +18,10 @@ const asideMenuConfig = [
       {
         name: '债券类',
         path: '/finance/bond'
+      },
+      {
+        name: '股票类',
+        path: '/finance/stock'
       }
     ]
   }
