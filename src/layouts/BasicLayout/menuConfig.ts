@@ -22,6 +22,10 @@ const asideMenuConfig = [
       {
         name: '股票类',
         path: '/finance/stock'
+      },
+      {
+        name: '期货类',
+        path: '/finance/future'
       }
     ]
   },
