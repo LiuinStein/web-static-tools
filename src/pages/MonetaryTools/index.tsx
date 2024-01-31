@@ -4,6 +4,7 @@ import { ResponsiveGrid } from '@alifd/next';
 import PageHeader from '@/components/PageHeader';
 import DateCalculator from '@/components/DateCalculator';
 import PaTo10kPerDay from '@/components/Financial/PaTo10kPerDay';
+import PeriodRateToPa from '@/components/Financial/PeriodRateToPa';
 import InterestByDay from '@/components/Financial/InterestByDay';
 import ProductSwitch from '@/components/Financial/ProductSwitch';
 
@@ -22,6 +23,10 @@ export default function() {
 
             <Cell colSpan={12}>
                 <PaTo10kPerDay />
+            </Cell>
+
+            <Cell colSpan={12}>
+                <PeriodRateToPa />
             </Cell>
 
             <Cell colSpan={12}>
