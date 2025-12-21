@@ -6,6 +6,7 @@ const MonetaryTools = lazy(() => import('@/pages/MonetaryTools'));
 const BondTools = lazy(() => import('@/pages/BondTools'));
 const StockTools = lazy(() => import('@/pages/StockTools'));
 const FutureTools = lazy(() => import('@/pages/FutureTools'));
+const ReturnTools = lazy(() => import('@/pages/ReturnTools'));
 const EncodingTools = lazy(() => import('@/pages/EncodingTools'));
 
 const routerConfig: IRouterConfig[] = [
@@ -32,6 +33,10 @@ const routerConfig: IRouterConfig[] = [
       {
         path: '/finance/future',
         component: FutureTools,
+      },
+      {
+        path: '/finance/return',
+        component: ReturnTools,
       },
       {
         path: '/code/encoding',

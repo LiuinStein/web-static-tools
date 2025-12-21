@@ -7,7 +7,6 @@ import PaTo10kPerDay from '@/components/Financial/PaTo10kPerDay';
 import PeriodRateToPa from '@/components/Financial/PeriodRateToPa';
 import InterestByDay from '@/components/Financial/InterestByDay';
 import ProductSwitch from '@/components/Financial/ProductSwitch';
-import InterestRateCalculator from '@/components/Financial/InterestRateCalculator';
 
 const { Cell } = ResponsiveGrid;
 
@@ -28,10 +27,6 @@ export default function() {
 
             <Cell colSpan={12}>
                 <PeriodRateToPa />
-            </Cell>
-
-            <Cell colSpan={12}>
-                <InterestRateCalculator />
             </Cell>
 
             <Cell colSpan={12}>

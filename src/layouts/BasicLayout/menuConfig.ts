@@ -26,6 +26,10 @@ const asideMenuConfig = [
       {
         name: '期货类',
         path: '/finance/future'
+      },
+      {
+        name: '收益率',
+        path: '/finance/return'
       }
     ]
   },
