@@ -24,7 +24,6 @@
   "dependencies": {
     "@alifd/next": "^1.21.0",
     "@alifd/theme-design-pro": "0.x",
-    "@railpath/finance-toolkit": "^0.5.4",
     "ahooks": "^2.0.0",
     "bizcharts": "^3.5.6",
     "lodash.debounce": "^4.0.8",
