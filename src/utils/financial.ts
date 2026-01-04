@@ -5,6 +5,13 @@ export function onlyDate(date?: Date | number): Date {
     )
 }
 
+export function percentage(percent: number, toFixed?: number): string {
+    return (percent * 100).toFixed(toFixed ? toFixed : 2)
+}
+
+export function annualize(rate: number, totalTimeYears: number): number {
+    return Math.pow(1 + rate, 1 / totalTimeYears) - 1;
+}
 
 //#region Exchange Fee
 
@@ -90,13 +97,13 @@ export function calcualteExchangeFee(unitPrice: number, quantity: number, feeTab
 export class TimeWeightedReturnOptions {
     portfolioValues: number[];
     cashFlows: number[];
-    annualizationFactor: number;
+    totalTimeYears: number;
 }
 
 export function calculateTimeWeightedReturn(
     options: TimeWeightedReturnOptions
 ) {
-    const { portfolioValues, cashFlows, annualizationFactor } = options;
+    const { portfolioValues, cashFlows, totalTimeYears } = options;
 
     if (portfolioValues.length !== cashFlows.length) {
         throw new Error('Portfolio values and cash flows must have same length');
@@ -131,7 +138,7 @@ export function calculateTimeWeightedReturn(
 
     // Annualize TWR
     const periods = periodReturns.length;
-    const annualizedTWR = Math.pow(1 + twr, annualizationFactor / periods) - 1;
+    const annualizedTWR = annualize(twr, totalTimeYears);
 
     return {
         twr,
@@ -201,7 +208,7 @@ export function calculateMoneyWeightedReturn(
     const totalTimeYears = timePeriods[timePeriods.length - 1];
 
     // Annualize MWR
-    const annualizedMWR = Math.pow(1 + mwr, 1 / totalTimeYears) - 1;
+    const annualizedMWR = annualize(mwr, totalTimeYears);
 
     // Calculate NPV at the found rate
     const npv = calculateNPV(allCashFlows, timePeriods, mwr);
