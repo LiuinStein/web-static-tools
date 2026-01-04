@@ -207,15 +207,12 @@ export function calculateMoneyWeightedReturn(
     // Calculate total time period
     const totalTimeYears = timePeriods[timePeriods.length - 1];
 
-    // Annualize MWR
-    const annualizedMWR = annualize(mwr, totalTimeYears);
-
     // Calculate NPV at the found rate
     const npv = calculateNPV(allCashFlows, timePeriods, mwr);
 
     return {
         mwr,
-        annualizedMWR,
+        annualizedMWR: mwr,
         cashFlowCount: allCashFlows.length,
         timePeriodYears: totalTimeYears,
         npv

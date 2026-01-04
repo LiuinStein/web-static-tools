@@ -20,16 +20,15 @@ export default function () {
     const [result, setResult] = React.useState<any>({});
 
     React.useEffect(() => {
+        const nowDate = onlyDate().getTime();
+
         setResult({
-            shares: calc(),
+            shares: dataSource.map((item: any) => item.shares).reduce((p, c) => p + c, 0),
+            longestDays: (nowDate - dataSource.reduce((p, c) => Math.min(c.date.getTime(), p), nowDate)) / (24 * 3600 * 1000),
             xirr: calcXIRR(),
             twr: calcTWR()
         })
     }, [dataSource, balance])
-
-    const calc = (): number => {
-        return dataSource.map((item: any) => item.shares).reduce((p, c) => p + c, 0)
-    }
 
     const calcXIRR = () => {
         if (dataSource.length == 0 || balance == 0) {
@@ -118,7 +117,7 @@ export default function () {
                     <Table dataSource={dataSource}>
                         <Table.Column title="日期" dataIndex="date" cell={(value, index) => {
                             return <DatePicker defaultValue={moment()} onChange={(v: Moment) => {
-                                dataSource[index].date = v.toDate()
+                                dataSource[index].date = onlyDate(v.toDate())
                                 setDataSource([...dataSource])
                             }} />
                         }} />
@@ -156,16 +155,16 @@ export default function () {
                     }} />
                 </FormItem>
 
-                <FormItem colSpan={4} label="XIRR %" >
-                    <Input readOnly value={percentage(result?.xirr?.mwr)} />
+                <FormItem colSpan={4} label="总计份额" >
+                    <Input readOnly value={result?.shares} />
+                </FormItem>
+
+                <FormItem colSpan={4} label="最大投资时长" >
+                    <Input readOnly value={result?.longestDays} />
                 </FormItem>
 
                 <FormItem colSpan={4} label="XIRR % p.a." >
-                    <Input readOnly value={percentage(result?.xirr?.annualizedMWR)} />
-                </FormItem>
-
-                <FormItem colSpan={4} label="总计份额" >
-                    <Input readOnly value={result?.shares} />
+                    <Input readOnly value={percentage(result?.xirr?.mwr)} />
                 </FormItem>
 
                 <FormItem colSpan={4} label="TWR %" >
