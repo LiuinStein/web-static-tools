@@ -5,6 +5,11 @@ export function onlyDate(date?: Date | number): Date {
     )
 }
 
+export function diffYears(left: Date, right: Date, daysOfYear?: number): number {
+    const diffTime = onlyDate(left).getTime() - onlyDate(right).getTime();
+    return diffTime / (1000 * 60 * 60 * 24 * (daysOfYear ? daysOfYear : 365)); // Convert to years
+}
+
 export function percentage(percent: number, toFixed?: number): string {
     return (percent * 100).toFixed(toFixed ? toFixed : 2)
 }
@@ -90,6 +95,28 @@ export function calcualteExchangeFee(unitPrice: number, quantity: number, feeTab
 
 
 //#region Investment Return
+
+/**
+ * HPR (Holding Period Return)
+ */
+export class HoldingPeriodReturnOptions {
+    beforeAmount: number;
+    afterAmount: number;
+    beforeDate: Date;
+    afterDate: Date;
+}
+
+export function calcualteHoldingPeriodReturn(
+    options: HoldingPeriodReturnOptions
+) {
+    const { beforeAmount, afterAmount, beforeDate, afterDate } = options;
+
+    const hpr = afterAmount / beforeAmount - 1;
+    return {
+        hpr,
+        annualizedHpr: annualize(hpr, diffYears(afterDate, beforeDate))
+    }
+}
 
 /**
  * TWR (Time Weighted Return)
@@ -196,10 +223,7 @@ export function calculateMoneyWeightedReturn(
 
     // Calculate time periods in years from first date
     const startDate = allDates[0];
-    const timePeriods: number[] = allDates.map(date => {
-        const diffTime = date.getTime() - startDate.getTime();
-        return diffTime / (1000 * 60 * 60 * 24 * daysOfYear); // Convert to years
-    });
+    const timePeriods: number[] = allDates.map(date => diffYears(date, startDate));
 
     // Calculate IRR using Newton-Raphson method
     const mwr = calculateIRR(allCashFlows, timePeriods, maxIterations, tolerance);

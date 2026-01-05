@@ -2,12 +2,13 @@ import * as React from 'react';
 import { Form, Card, Input, Table, Button, DatePicker } from '@alifd/next';
 
 import moment, { Moment } from 'moment';
-import { calculateTimeWeightedReturn, calculateMoneyWeightedReturn, onlyDate, percentage } from '@/utils/financial';
+import { calculateTimeWeightedReturn, calculateMoneyWeightedReturn, calcualteHoldingPeriodReturn, onlyDate, percentage } from '@/utils/financial';
 
 class Data {
     date: Date;
     change: number;
     shares: number;
+    annualizedHpr: string;
 }
 
 export default function () {
@@ -20,11 +21,13 @@ export default function () {
     const [result, setResult] = React.useState<any>({});
 
     React.useEffect(() => {
-        const nowDate = onlyDate().getTime();
+        const shares = dataSource.map((item: any) => item.shares).reduce((p, c) => p + c, 0);
 
         setResult({
-            shares: dataSource.map((item: any) => item.shares).reduce((p, c) => p + c, 0),
-            longestDays: (nowDate - dataSource.reduce((p, c) => Math.min(c.date.getTime(), p), nowDate)) / (24 * 3600 * 1000),
+            shares,
+            lastHpr: calcHPR([dataSource[dataSource.length - 1] || {}, {
+                date: onlyDate(), change: balance, shares: shares, annualizedHpr: "0.00"
+            }], 1),
             xirr: calcXIRR(),
             twr: calcTWR()
         })
@@ -103,6 +106,19 @@ export default function () {
         }
     }
 
+    const calcHPR = (ds: Data[], index: number): string => {
+        if (index < 1) {
+            return "0.00"
+        }
+
+        return percentage(calcualteHoldingPeriodReturn({
+            beforeAmount: ds[index - 1].change / ds[index - 1].shares,
+            afterAmount: ds[index].change / ds[index].shares,
+            beforeDate: ds[index - 1].date,
+            afterDate: ds[index].date
+        }).annualizedHpr)
+    }
+
     return <Card free>
         <Card.Header
             title="XIRR & TWR"
@@ -118,21 +134,28 @@ export default function () {
                         <Table.Column title="日期" dataIndex="date" cell={(value, index) => {
                             return <DatePicker defaultValue={moment()} onChange={(v: Moment) => {
                                 dataSource[index].date = onlyDate(v.toDate())
+                                dataSource[index].annualizedHpr = calcHPR(dataSource, index)
+
                                 setDataSource([...dataSource])
                             }} />
                         }} />
                         <Table.Column title="变更额" dataIndex="change" cell={(value, index) => {
                             return <Input autoFocus onChange={(v: string) => {
                                 dataSource[index].change = parseFloat(v)
+                                dataSource[index].annualizedHpr = calcHPR(dataSource, index)
+
                                 setDataSource([...dataSource])
                             }} />
                         }} />
-                        <Table.Column title="变更份额（仅计算 TWR 时使用）" dataIndex="shares" cell={(value, index) => {
+                        <Table.Column title="变更份额" dataIndex="shares" cell={(value, index) => {
                             return <Input onChange={(v: string) => {
                                 dataSource[index].shares = parseFloat(v)
+                                dataSource[index].annualizedHpr = calcHPR(dataSource, index)
+
                                 setDataSource([...dataSource])
                             }} />
                         }} />
+                        <Table.Column title="HPR % p.a." dataIndex="annualizedHpr" />
                         <Table.Column title="操作" dataIndex='operation' cell={(value, index) => {
                             return <>
                                 <Button type='normal' text style={{ color: '#f52743' }} onClick={() => {
@@ -144,7 +167,7 @@ export default function () {
 
                     <Button style={{ width: '100%' }} onClick={() => {
                         setDataSource([...dataSource, {
-                            date: onlyDate(), change: 0, shares: 0
+                            date: onlyDate(), change: 0, shares: 0, annualizedHpr: "0.00"
                         }])
                     }}>+ 添加</Button>
                 </FormItem>
@@ -156,11 +179,11 @@ export default function () {
                 </FormItem>
 
                 <FormItem colSpan={4} label="总计份额" >
-                    <Input readOnly value={result?.shares} />
+                    <Input readOnly value={result?.shares?.toFixed(2)} />
                 </FormItem>
 
-                <FormItem colSpan={4} label="最大投资时长" >
-                    <Input readOnly value={result?.longestDays} />
+                <FormItem colSpan={4} label="last HPR % p.a." >
+                    <Input readOnly value={result?.lastHpr} />
                 </FormItem>
 
                 <FormItem colSpan={4} label="XIRR % p.a." >
