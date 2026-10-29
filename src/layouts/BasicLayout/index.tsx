@@ -52,7 +52,10 @@ export default function BasicLayout({
     }
   };
 
-  const [device, setDevice] = useState(getDevice(NaN));
+  const [device, setDevice] = useState(getDevice(
+    typeof window === 'undefined' ? NaN : window.innerWidth,
+  ));
+  const [navigationCollapsed, setNavigationCollapsed] = useState(true);
 
   if (typeof window !== 'undefined') {
     window.addEventListener('optimizedResize', (e) => {
@@ -82,8 +85,15 @@ export default function BasicLayout({
           <HeaderAvatar />
         </Shell.Action>
 
-        <Shell.Navigation>
-          <PageNav />
+        <Shell.Navigation
+          collapse={device === 'phone' ? navigationCollapsed : undefined}
+          onCollapseChange={(collapse) => setNavigationCollapsed(!!collapse)}
+        >
+          <PageNav onItemClick={() => {
+            if (device === 'phone') {
+              setNavigationCollapsed(true);
+            }
+          }} />
         </Shell.Navigation>
 
         <Shell.Content>{children}</Shell.Content>

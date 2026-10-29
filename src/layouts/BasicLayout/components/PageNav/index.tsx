@@ -74,7 +74,7 @@ function getSubMenuOrItem(item: IMenuItem, index?: number | string, auth?: any) 
 const Navigation = (props, context) => {
   const [openKeys, setOpenKeys] = useState<string[]>([]);
 
-  const { location } = props;
+  const { location, onItemClick } = props;
   const { pathname } = location;
   const { isCollapse } = context;
 
@@ -99,6 +99,7 @@ const Navigation = (props, context) => {
       type="normal"
       openKeys={openKeys}
       selectedKeys={[pathname]}
+      onItemClick={onItemClick}
       defaultSelectedKeys={[pathname]}
       embeddable
       activeDirection="right"
