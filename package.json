@@ -24,8 +24,11 @@
   "dependencies": {
     "@alifd/next": "^1.21.0",
     "@alifd/theme-design-pro": "0.x",
+    "@azure/msal-browser": "^4.30.0",
+    "@microsoft/microsoft-graph-client": "^3.0.7",
     "ahooks": "^2.0.0",
     "bizcharts": "^3.5.6",
+    "exceljs": "^4.4.0",
     "lodash.debounce": "^4.0.8",
     "moment": "^2.24.0",
     "prop-types": "^15.5.8",
@@ -52,7 +55,8 @@
     "lint": "npm run eslint && npm run stylelint",
     "eslint": "eslint --cache --ext .js,.jsx,.ts,.tsx ./",
     "eslint:fix": "npm run eslint -- --fix",
-    "stylelint": "stylelint \"**/*.{css,scss,less}\""
+    "stylelint": "stylelint \"**/*.{css,scss,less}\"",
+    "test:journal": "node --test tests/trading-journal.test.cjs"
   },
   "publishConfig": {
     "access": "public"

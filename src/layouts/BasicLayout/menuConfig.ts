@@ -34,6 +34,11 @@ const asideMenuConfig = [
     ]
   },
   {
+    name: '交易日记',
+    path: '/trading-journal',
+    icon: 'edit'
+  },
+  {
     name: '程序员',
     path: '/',
     icon: 'account',
