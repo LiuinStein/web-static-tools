@@ -161,3 +161,196 @@ test('OneDrive edit/delete sync preserves unrelated remote rows and retries uplo
   assert.equal(remote.length, 2);
   assert.equal(remote.find(item => item.id === original.id).amount, 3001.5);
 });
+
+const { SyncQueue, completeSync } = require('../src/pages/TradingJournal/sync-queue.ts');
+const { InteractionRequiredAuthError } = require('@azure/msal-browser');
+test('background upload preserves new local records and serializes the next upload', async () => {
+  const states = [];
+  const queue = new SyncQueue(value => states.push(value));
+  const first = trade('first');
+  const second = trade('second');
+  let cache = { remote: [], pending: [first], changes: [] };
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  let secondStarted = false;
+  const background = queue.run(async () => {
+    const sent = cache;
+    await gate;
+    cache = completeSync(cache, sent, [first]);
+  });
+  await Promise.resolve();
+  // Saving locally is possible while the cloud request is still in flight.
+  cache = { ...cache, pending: [...cache.pending, second] };
+  const foreground = queue.run(async () => {
+    secondStarted = true;
+    assert.deepEqual(cache.remote, [first]);
+    assert.deepEqual(cache.pending, [second]);
+    const sent = cache;
+    cache = completeSync(cache, sent, mergeForSync(cache.remote, cache.pending, cache.changes));
+  });
+  assert.equal(secondStarted, false);
+  assert.equal(queue.busy, true);
+  release();
+  await Promise.all([background, foreground]);
+  assert.deepEqual(cache.remote.map(row => row.id), ['first', 'second']);
+  assert.deepEqual(cache.pending, []);
+  assert.equal(queue.busy, false);
+  assert.deepEqual(states, [true, false]);
+});
+test('editing or deleting during an earlier upload rebases only the uploaded local operation', () => {
+  const original = trade();
+  const first = { ...original, amount: 2000 };
+  const second = { ...first, reason: 'Edited while upload is pending' };
+  const sent = { remote: [original], pending: [], changes: queueChange([original], [], [], original, first) };
+  for (const after of [second, undefined]) {
+    const latest = { ...sent, changes: queueChange(sent.remote, [], sent.changes, first, after) };
+    const next = completeSync(latest, sent, [first]);
+    assert.deepEqual(next.changes[0].before, first);
+    assert.deepEqual(mergeForSync(next.remote, next.pending, next.changes), after ? [second] : []);
+    const otherDevice = { ...first, reason: 'Remote concurrent edit' };
+    assert.throws(() => mergeForSync([otherDevice], next.pending, next.changes), /其他设备/);
+  }
+});
+test('a rejected background request does not stall later uploads or leave the queue busy', async () => {
+  const states = [];
+  const queue = new SyncQueue(value => states.push(value));
+  const failed = queue.run(async () => { throw new Error('offline'); });
+  const next = queue.run(async () => 'retried');
+  await assert.rejects(failed, /offline/);
+  assert.equal(await next, 'retried');
+  assert.equal(queue.busy, false);
+  assert.deepEqual(states, [true, false]);
+});
+test('automatic sync never opens an authorization popup and restores manual authorization after failure', async () => {
+  const service = Object.create(OneDriveJournal.prototype);
+  let popups = 0;
+  service.auth = {
+    async acquireTokenSilent() { throw new InteractionRequiredAuthError('interaction_required'); },
+    async acquireTokenPopup() { popups += 1; return { accessToken: 'test-token' }; },
+  };
+  service.syncWorkbook = async () => {
+    await service.accessToken();
+    return [];
+  };
+  await assert.rejects(service.sync([], [], false), /登录已过期/);
+  assert.equal(popups, 0);
+  assert.deepEqual(await service.sync([], [], true), []);
+  assert.equal(popups, 1);
+});
+
+async function versionedOneDrive() {
+  const service = Object.create(OneDriveJournal.prototype);
+  service.config = { path: '文档/BalanceSheet/TradingJournal.xlsx' };
+  const state = {
+    item: { id: 'file', eTag: 'v1', size: 1024 },
+    trades: [trade()], metadata: 0, downloads: 0, uploads: 0,
+    failUpload: false, omitSavedVersion: false, headers: [],
+  };
+  const { workbook } = await readWorkbook();
+  workbook.addWorksheet('说明').addRow(['Preserve this sheet']);
+  state.data = await writeWorkbook(workbook, state.trades);
+  service.client = { api(endpoint) {
+    const request = {
+      select() { return request; },
+      responseType() { return request; },
+      header(name, value) { if (name === 'If-Match') state.headers.push(value); return request; },
+      async get() {
+        if (!state.item) throw { statusCode: 404 };
+        if (endpoint.endsWith('/content')) {
+          state.downloads += 1;
+          return state.data;
+        }
+        state.metadata += 1;
+        return { ...state.item };
+      },
+      async put(data) {
+        state.uploads += 1;
+        if (state.failUpload) throw { statusCode: 403, message: 'Upload denied' };
+        const result = await readWorkbook(data);
+        assert.equal(result.workbook.getWorksheet('说明').getCell('A1').text, 'Preserve this sheet');
+        state.data = data;
+        state.trades = result.trades;
+        state.item = { ...state.item, eTag: `saved-${state.uploads}` };
+        return state.omitSavedVersion ? undefined : { ...state.item };
+      },
+    };
+    return request;
+  } };
+  return { service, state };
+}
+test('unchanged idle sync checks metadata once and does not download or expose mutable cached records', async () => {
+  const { service, state } = await versionedOneDrive();
+  const first = await service.read();
+  assert.equal(state.downloads, 1);
+  first[0].name = 'Changed by caller';
+  const before = state.metadata;
+  assert.deepEqual(await service.sync([], [], false), [trade()]);
+  assert.equal(state.metadata - before, 1);
+  assert.equal(state.downloads, 1);
+  assert.equal(state.uploads, 0);
+});
+test('changed version or file ID reloads cloud records even when there are no pending local changes', async () => {
+  const { service, state } = await versionedOneDrive();
+  await service.read();
+  const otherDevice = trade('other-device');
+  const { workbook } = await readWorkbook(state.data);
+  state.data = await writeWorkbook(workbook, [trade(), otherDevice]);
+  state.item.eTag = 'v2';
+  assert.equal((await service.sync([])).length, 2);
+  assert.equal(state.downloads, 2);
+  state.item.id = 'replacement-file'; // eTag alone is not a cache key.
+  await service.sync([]);
+  assert.equal(state.downloads, 3);
+});
+test('local changes always fetch a fresh workbook; successful upload versions avoid the next idle download', async () => {
+  const { service, state } = await versionedOneDrive();
+  await service.read();
+  const extra = trade('local-new');
+  assert.equal((await service.sync([extra])).length, 2);
+  assert.equal(state.downloads, 2);
+  assert.deepEqual(state.headers, ['v1']);
+  assert.equal(state.uploads, 1);
+  assert.equal((await service.sync([])).length, 2);
+  assert.equal(state.downloads, 2);
+  const edited = { ...trade(), reason: 'New reason' };
+  const changes = queueChange(state.trades, [], [], trade(), edited);
+  await service.sync([], changes);
+  assert.equal(state.downloads, 3);
+  assert.equal(state.trades.find(row => row.id === trade().id).reason, 'New reason');
+});
+test('deleted/recreated files clear version cache and metadata failures never report cached success', async () => {
+  const { service, state } = await versionedOneDrive();
+  await service.read();
+  const previous = state.item;
+  state.item = null;
+  assert.deepEqual(await service.sync([]), []);
+  state.item = previous;
+  await service.sync([]);
+  assert.equal(state.downloads, 2);
+  service.client = { api() { return { select() { return this; }, async get() { throw { statusCode: 403 }; } }; } };
+  await assert.rejects(service.sync([]), error => error.statusCode === 403);
+});
+test('failed uploads and successful uploads without version metadata require a fresh verified read', async () => {
+  const { service, state } = await versionedOneDrive();
+  await service.read();
+  state.failUpload = true;
+  await assert.rejects(service.sync([trade('new')]), error => error.statusCode === 403);
+  assert.equal(state.downloads, 2);
+  await service.sync([]);
+  assert.equal(state.downloads, 3);
+  state.failUpload = false;
+  state.omitSavedVersion = true;
+  await service.sync([trade('new')]);
+  assert.equal(state.downloads, 4);
+  assert.equal((await service.sync([])).length, 2);
+  assert.equal(state.downloads, 5);
+});
+test('missing cloud version disables cache reuse and prevents unprotected uploads', async () => {
+  const { service, state } = await versionedOneDrive();
+  delete state.item.eTag;
+  await service.read();
+  await service.sync([]);
+  assert.equal(state.downloads, 2);
+  await assert.rejects(service.sync([trade('new')]), /无法读取云端文件版本/);
+  assert.equal(state.uploads, 0);
+});

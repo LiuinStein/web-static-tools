@@ -6,7 +6,6 @@ import {
   TradeChange,
   calculateFee,
   mergeTrades,
-  sameTrade,
   queueChange,
   visibleTrades,
   today,
@@ -15,6 +14,7 @@ import {
 import { DriveConfig, OneDriveJournal } from './onedrive';
 import { exportTrades } from './workbook';
 import { oneDriveConfig } from './config';
+import { SyncQueue, completeSync } from './sync-queue';
 import './style.css';
 
 interface Cache {
@@ -62,6 +62,9 @@ export default function TradingJournal() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('全部');
   const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState('');
+  const syncQueue = useRef(new SyncQueue(setSyncing));
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const busyRef = useRef(false);
@@ -87,7 +90,7 @@ export default function TradingJournal() {
     ...cache.pending.map((trade) => trade.id),
     ...(cache.changes || []).map((change) => change.id),
   ]).size;
-  if (drive) syncLabel = pendingCount ? `${pendingCount} 条待同步` : '已同步';
+  if (drive) syncLabel = syncing ? '正在同步…' : syncError ? '同步失败，待重试' : pendingCount ? `${pendingCount} 条待同步` : '已同步';
   let saveLabel = drive ? '保存并同步到 OneDrive' : '保存到本机';
   if (editing) saveLabel = drive ? '保存修改并同步到 OneDrive' : '保存修改';
   const connectionLabel = drive ? syncLabel : '仅本机保存';
@@ -117,7 +120,9 @@ export default function TradingJournal() {
   useEffect(() => {
     if (!drive) return undefined;
     const refresh = () => {
-      if (document.visibilityState === 'visible' && navigator.onLine) run(() => synchronize(cacheRef.current));
+      if (document.visibilityState === 'visible' && navigator.onLine && !busyRef.current && !syncQueue.current.busy) {
+        synchronize(cacheRef.current, true).catch(() => {});
+      }
     };
     window.addEventListener('online', refresh);
     document.addEventListener('visibilitychange', refresh);
@@ -136,21 +141,27 @@ export default function TradingJournal() {
     const existing = all.find((trade) => trade.type === type && trade.code.toLowerCase() === code.trim().toLowerCase());
     setDraft({ ...draft, type, code, name: existing ? existing.name : '' });
   }
-  async function synchronize(current = cache) {
+  async function synchronize(current = cache, background = false) {
     if (!drive) throw new Error('请先连接 OneDrive');
-    const stored = readJSON(cacheKey, current) as Cache;
-    const pending = mergeTrades(current.pending, stored.pending);
-    const changes = stored.changes || [];
-    const remote = await drive.sync(pending, changes);
-    const uploadedOperations = new Set(changes.map((change) => change.operationId));
-    const latest = readJSON(cacheKey, current) as Cache;
-    persist({
-      remote,
-      pending: latest.pending.filter((trade) => !pending.some((uploaded) => sameTrade(trade, uploaded))),
-      changes: (latest.changes || []).filter((change) => !uploadedOperations.has(change.operationId)),
-      lastSync: new Date().toISOString(),
-    });
-    setNotice('已同步到 OneDrive，Excel 文件已更新。');
+    try {
+      await syncQueue.current.run(async () => {
+        // Read after earlier uploads finish, so newly saved edits use the latest baseline.
+        const stored = readJSON(cacheKey, current) as Cache;
+        const pending = stored.pending;
+        const changes = stored.changes || [];
+        const remote = await drive.sync(pending, changes, !background);
+        const latest = readJSON(cacheKey, stored) as Cache;
+        persist({
+          ...completeSync(latest, stored, remote),
+          lastSync: new Date().toISOString(),
+        });
+        setSyncError('');
+        if (!background) setNotice('已同步到 OneDrive，Excel 文件已更新。');
+      });
+    } catch (err) {
+      setSyncError(`同步失败：${err.message || '请稍后重试'}。本机记录已保留，可点击“立即同步”重试。`);
+      throw err;
+    }
   }
   async function run(action: () => Promise<void>) {
     if (busyRef.current) return;
@@ -286,7 +297,7 @@ export default function TradingJournal() {
           <span className={`journal-dot ${drive ? 'online' : ''}`}>{busy ? '正在处理…' : connectionLabel}</span>
           <Button
             className="j-btn"
-            disabled={busy}
+            disabled={busy || syncing}
             type="normal"
             onClick={() => (drive ? run(() => synchronize()) : setShowSettings(true))}
           >
@@ -335,17 +346,18 @@ export default function TradingJournal() {
               <Button className="j-btn" disabled={busy} type="normal" onClick={() => run(() => exportTrades([]))}>
                 下载空白 Excel 模板
               </Button>
-              <Button className="j-btn j-btn-primary" disabled={busy || !!drive} onClick={connect} type="primary">
+              <Button className="j-btn j-btn-primary" disabled={busy || syncing || !!drive} onClick={connect} type="primary">
                 登录并加载 Excel
               </Button>
               {drive && (
                 <Button
                   className="j-btn"
-                  disabled={busy}
+                  disabled={busy || syncing}
                   type="normal"
                   onClick={() =>
                     run(async () => {
                       await drive.disconnect();
+                      setSyncError('');
                       localStorage.setItem(settingsKey, JSON.stringify({ config }));
                       setDrive(null);
                       setEditing(null);
@@ -368,6 +380,9 @@ export default function TradingJournal() {
         <div role="alert" className="journal-alert error">
           {error}
         </div>
+      )}
+      {syncError && !error && (
+        <div role="alert" className="journal-alert error">{syncError}</div>
       )}
       {notice && (
         <div role="status" className="journal-alert">

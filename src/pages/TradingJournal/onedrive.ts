@@ -7,6 +7,11 @@ export interface DriveConfig {
   clientId: string;
   path: string;
 }
+interface RemoteFile {
+  id: string;
+  eTag?: string;
+  size?: number;
+}
 const scopes = ['Files.ReadWrite'];
 export function normalizePath(path: string): string {
   const clean = path.trim().replace(/^\/+|\/+$/g, '');
@@ -23,6 +28,8 @@ export class OneDriveJournal {
   private auth: PublicClientApplication;
   private client: Client;
   private account: AccountInfo;
+  private allowInteractiveAuth = true;
+  private cachedRead?: { id: string; eTag: string; trades: Trade[] };
   readonly config: DriveConfig;
   constructor(config: DriveConfig) {
     if (!/^[0-9a-f-]{36}$/i.test(config.clientId.trim())) throw new Error('请输入 Microsoft 应用的客户端 ID');
@@ -37,18 +44,18 @@ export class OneDriveJournal {
     });
     this.client = Client.initWithMiddleware({
       authProvider: {
-        getAccessToken: async () => {
-          let result;
-          try {
-            result = await this.auth.acquireTokenSilent({ scopes, account: this.account });
-          } catch (error) {
-            if (!(error instanceof InteractionRequiredAuthError)) throw error;
-            result = await this.auth.acquireTokenPopup({ scopes, account: this.account });
-          }
-          return result.accessToken;
-        },
+        getAccessToken: () => this.accessToken(),
       },
     });
+  }
+  private async accessToken(): Promise<string> {
+    try {
+      return (await this.auth.acquireTokenSilent({ scopes, account: this.account })).accessToken;
+    } catch (error) {
+      if (!(error instanceof InteractionRequiredAuthError)) throw error;
+      if (!this.allowInteractiveAuth) throw new Error('Microsoft 登录已过期，请点击“立即同步”重新授权');
+      return (await this.auth.acquireTokenPopup({ scopes, account: this.account })).accessToken;
+    }
   }
   async restore(accountId: string): Promise<AccountInfo | null> {
     await this.auth.initialize();
@@ -66,30 +73,52 @@ export class OneDriveJournal {
     return this.account;
   }
   async disconnect(): Promise<void> {
+    this.cachedRead = undefined;
     await this.auth.clearCache({ account: this.account });
   }
   private endpoint(): string {
     return `/me/drive/root:/${this.config.path.split('/').map(encodeURIComponent).join('/')}`;
   }
-  private async load() {
-    let item;
+  private remember(item: RemoteFile | null | undefined, trades: Trade[]): void {
+    this.cachedRead = item && item.id && item.eTag
+      ? { id: item.id, eTag: item.eTag, trades: trades.map((trade) => ({ ...trade })) }
+      : undefined;
+  }
+  private async metadata(): Promise<RemoteFile | null> {
+    let item: RemoteFile;
     try {
       item = await this.client.api(this.endpoint()).select('id,eTag,size').get();
     } catch (error) {
-      if (error.statusCode === 404 || error.code === 'itemNotFound') return { ...(await readWorkbook()), item: null };
+      if (error.statusCode === 404 || error.code === 'itemNotFound') {
+        this.cachedRead = undefined;
+        return null;
+      }
       throw error;
     }
-    if (item.size > 10 * 1024 * 1024) throw new Error('Excel 超过 10MB，请先归档旧记录后重试');
+    if ((item.size || 0) > 10 * 1024 * 1024) throw new Error('Excel 超过 10MB，请先归档旧记录后重试');
+    return item;
+  }
+  private async load(knownItem?: RemoteFile | null) {
+    const item = knownItem === undefined ? await this.metadata() : knownItem;
+    if (!item) return { ...(await readWorkbook()), item: null };
     const data = await this.client
       .api(`/me/drive/items/${item.id}/content`)
       .responseType(ResponseType.ARRAYBUFFER)
       .get();
     const latest = await this.client.api(`/me/drive/items/${item.id}`).select('eTag').get();
     if (latest.eTag !== item.eTag) throw new Error('文件正在被其他设备修改，请重新同步');
-    return { ...(await readWorkbook(data)), item };
+    const result = await readWorkbook(data);
+    this.remember(item, result.trades);
+    return { ...result, item };
   }
   async read(): Promise<Trade[]> {
-    return (await this.load()).trades;
+    const item = await this.metadata();
+    const cached = this.cachedRead;
+    if (item && item.eTag && cached && cached.id === item.id && cached.eTag === item.eTag) {
+      return cached.trades.map((trade) => ({ ...trade }));
+    }
+    if (!item) return [];
+    return (await this.load(item)).trades;
   }
   private async ensureFolders(): Promise<void> {
     const parts = this.config.path.split('/').slice(0, -1);
@@ -114,28 +143,42 @@ export class OneDriveJournal {
       parent = `/me/drive/items/${folder.id}`;
     }
   }
-  async sync(pending: Trade[], changes: TradeChange[] = []): Promise<Trade[]> {
+  async sync(pending: Trade[], changes: TradeChange[] = [], interactive = true): Promise<Trade[]> {
+    this.allowInteractiveAuth = interactive;
+    try {
+      return await this.syncWorkbook(pending, changes);
+    } finally {
+      this.allowInteractiveAuth = true;
+    }
+  }
+  private async syncWorkbook(pending: Trade[], changes: TradeChange[]): Promise<Trade[]> {
+    if (!pending.length && !changes.length) return this.read();
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const { workbook, trades, item } = await this.load();
       const merged = mergeForSync(trades, pending, changes);
-      if (!pending.length && !changes.length) return merged;
       const data = await writeWorkbook(workbook, merged);
       try {
+        // A failed/ambiguous upload must never leave an old version cached as current.
+        this.cachedRead = undefined;
+        let uploaded: RemoteFile | undefined;
         if (item) {
-          await this.client
+          if (!item.eTag) throw new Error('无法读取云端文件版本，请重新同步');
+          uploaded = await this.client
             .api(`/me/drive/items/${item.id}/content`)
             .header('If-Match', item.eTag)
             .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             .put(data);
         } else {
           await this.ensureFolders();
-          await this.client
+          uploaded = await this.client
             .api(`${this.endpoint()}:/content`)
             .query({ '@microsoft.graph.conflictBehavior': 'fail' })
             .header('If-None-Match', '*')
             .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             .put(data);
         }
+        // Graph returns the saved file's version. Without it, verify via a fresh read next time.
+        this.remember(uploaded, merged);
         return merged;
       } catch (error) {
         if (![409, 412].includes(error.statusCode) || attempt === 2) throw error;
