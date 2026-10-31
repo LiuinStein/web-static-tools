@@ -41,6 +41,10 @@ const asideMenuConfig = [
       {
         name: '交易日记',
         path: '/trading-journal'
+      },
+      {
+        name: '月度复盘',
+        path: '/monthly-review'
       }
     ]
   },

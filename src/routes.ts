@@ -9,12 +9,17 @@ const FutureTools = lazy(() => import('@/pages/FutureTools'));
 const ReturnTools = lazy(() => import('@/pages/ReturnTools'));
 const EncodingTools = lazy(() => import('@/pages/EncodingTools'));
 const TradingJournal = lazy(() => import('@/pages/TradingJournal'));
+const MonthlyReview = lazy(() => import('@/pages/MonthlyReview'));
 
 const routerConfig: IRouterConfig[] = [
   {
     path: '/',
     component: BasicLayout,
     children: [
+      {
+        path: '/monthly-review',
+        component: MonthlyReview,
+      },
       {
         path: '/trading-journal',
         component: TradingJournal,

@@ -26,7 +26,7 @@ export function normalizePath(path: string): string {
 }
 export class OneDriveJournal {
   private auth: PublicClientApplication;
-  private client: Client;
+  protected client: Client;
   private account: AccountInfo;
   private allowInteractiveAuth = true;
   private cachedRead?: { id: string; eTag: string; trades: Trade[] };

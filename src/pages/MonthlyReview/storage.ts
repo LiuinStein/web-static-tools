@@ -1,0 +1,6 @@
+import { DriveFile } from './onedrive';
+
+export interface Draft { id: string; name: string; data: Uint8Array; updated: string; source?: DriveFile; scope?: string; published?: string; }
+function database(): Promise<IDBDatabase> { return new Promise((resolve, reject) => { const req = indexedDB.open('shaoqun-monthly-review', 1); req.onupgradeneeded = () => req.result.createObjectStore('drafts', { keyPath: 'id' }); req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error); }); }
+export async function saveDraft(draft: Draft): Promise<void> { const db = await database(); try { await new Promise<void>((resolve, reject) => { const tx = db.transaction('drafts', 'readwrite'); tx.objectStore('drafts').put(draft); tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error || new Error('保存草稿失败')); }); } finally { db.close(); } }
+export async function listDrafts(): Promise<Draft[]> { const db = await database(); try { return await new Promise<Draft[]>((resolve, reject) => { const req = db.transaction('drafts').objectStore('drafts').getAll(); req.onsuccess = () => resolve(req.result.sort((a: Draft, b: Draft) => b.updated.localeCompare(a.updated))); req.onerror = () => reject(req.error); }); } finally { db.close(); } }
