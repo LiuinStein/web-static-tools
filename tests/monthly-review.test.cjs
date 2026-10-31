@@ -8,6 +8,8 @@ require.extensions['.ts'] = (m, f) => m._compile(ts.transpileModule(fs.readFileS
 const { FormulaEngine, serialDate, xirr } = require('../src/pages/MonthlyReview/formula.ts');
 const { MonthlyWorkbook, rewriteReferences } = require('../src/pages/MonthlyReview/workbook.ts');
 const { MonthlyDrive, normalizeFolder } = require('../src/pages/MonthlyReview/onedrive.ts');
+const { productGroups, createProductEntry } = require('../src/pages/MonthlyReview/product-entry.ts');
+const { cashFlowSummary } = require('../src/pages/MonthlyReview/transactions.ts');
 async function fixture() {
   const wb = new ExcelJS.Workbook();
   for (const name of ['Assets', 'XIRR', 'Liabilities', 'Analyze', 'WTH', 'XIRR-WTH']) wb.addWorksheet(name);
@@ -20,7 +22,7 @@ async function fixture() {
   }
   const a = wb.getWorksheet('Analyze'); a.getCell('O3').value = { formula: 'Assets!D1+WTH!D1' }; a.getCell('Q3').value = { formula: 'O3-Liabilities!D1' };
   wb.getWorksheet('Liabilities').getCell('D1').value = 10;
-  wb.getWorksheet('Assets').getCell('D61').value = 7; wb.getWorksheet('Assets').getCell('D81').value = 0.9;
+  for (const [row, currency, rate] of [[61, 'USD', 7], [81, 'HKD', 0.9]]) { const assets = wb.getWorksheet('Assets'); assets.getCell(`A${row}`).value = 'Assets'; assets.getCell(`B${row}`).value = `in ${currency}`; assets.getCell(`D${row}`).value = rate; }
   const zip = await JSZip.loadAsync(await wb.xlsx.writeBuffer()); zip.file('custom/untouched.xml', '<keep>original</keep>');
   return MonthlyWorkbook.open(await zip.generateAsync({ type: 'uint8array' }));
 }
@@ -70,6 +72,50 @@ test('transactions reject oversells, missing dates and future dates before mutat
 });
 test('new months preserve historical transactions and independently snapshot opening values', async () => {
   const b = await fixture(); b.rollover('2026-11-30'); assert.equal(b.value('Assets', 'H3'), 1100); assert.equal(b.value('Assets', 'N1'), serialDate('2026-10-31')); assert.equal(b.value('Assets', 'H1'), 1100); assert.throws(() => b.rollover('2026-10-01'));
+});
+test('new products use member/currency/category groups, start without an opening balance and accept new accounts', async () => {
+  let b = await fixture(); const groups = productGroups(b.products()); assert.equal(groups.length, 2);
+  assert.ok(groups.every(g => !('name' in g) && !('account' in g)));
+  const group = groups.find(g => g.sheet === 'Assets');
+  const p = createProductEntry(b, group.key, { name: '  新产品  ', account: '  新账户  ', balance: 1100, flow: 1000, previous: 999, due: '', note: '' }, 'manual');
+  assert.equal(p.name, '新产品'); assert.equal(p.account, '新账户'); assert.equal(p.previous, 0); assert.equal(p.flow, 1000); assert.equal(p.category, group.category);
+  assert.equal(b.number(p.sheet, `J${p.row}`), 100); assert.equal(b.transactions(p.block).length, 0);
+  assert.equal(productGroups(b.products()).length, 2);
+  b = await MonthlyWorkbook.open(await b.export()); assert.ok(b.products().some(x => x.account === '新账户' && x.previous === 0 && x.flow === 1000));
+});
+test('a new product can record multiple purchases, sales and distributions across a multi-month accounting period', async () => {
+  let b = await fixture(); b.set('Assets', 'N1', serialDate('2026-07-05')); b.set('Assets', 'L1', serialDate('2026-10-11'));
+  const group = productGroups(b.products()).find(g => g.sheet === 'Assets');
+  const rows = [
+    { kind: 'buy', date: '2026-07-06', amount: 1000, shares: 100, price: 10 },
+    { kind: 'buy', date: '2026-08-01', amount: 500, shares: 50, price: 10 },
+    { kind: 'sell', date: '2026-09-01', amount: 220, shares: 20, price: 11 },
+    { kind: 'dividend', date: '2026-10-01', amount: 10, shares: 0, price: 11 },
+  ];
+  let p = createProductEntry(b, group.key, { name: '多笔交易产品', account: '新账户', balance: 1400, flow: 999999, due: '', note: '' }, 'transactions', rows);
+  assert.equal(p.previous, 0); assert.equal(p.flow, 1270); assert.equal(b.number(p.sheet, `J${p.row}`), 130);
+  assert.equal(b.transactions(p.block).length, 4); assert.equal(b.number(p.block.sheet, `F${p.block.end}`), 130); assert.equal(typeof b.value(p.sheet, `K${p.row}`), 'number');
+  b = await MonthlyWorkbook.open(await b.export()); p = b.products().find(x => x.name === '多笔交易产品');
+  assert.equal(p.flow, 1270); assert.equal(p.previous, 0); assert.equal(b.transactions(p.block).length, 4);
+  assert.deepEqual(cashFlowSummary(rows, serialDate('2026-07-05'), serialDate('2026-10-11')), { buys: 1500, sales: 220, dividends: 10, net: 1270 });
+});
+test('new-product initial trades are validated before insertion and net cash flow uses decimal arithmetic', async () => {
+  const b = await fixture(), group = productGroups(b.products())[0], before = b.products().length;
+  const values = { name: '校验产品', account: '新账户', balance: 0, flow: 0, due: '', note: '' };
+  assert.throws(() => createProductEntry(b, group.key, values, 'transactions', [{ kind: 'buy', date: '2026-09-30', amount: 10, shares: 1, price: 10 }]), /上次记账日期之后/);
+  assert.throws(() => createProductEntry(b, group.key, values, 'transactions', [{ kind: 'sell', date: '2026-10-01', amount: 10, shares: 1, price: 10 }]), /超过持仓/);
+  assert.equal(b.products().length, before);
+  const rows = [{ kind: 'buy', date: '2026-10-01', amount: 0.1, shares: 1, price: 0.1 }, { kind: 'buy', date: '2026-10-02', amount: 0.2, shares: 1, price: 0.2 }];
+  assert.equal(cashFlowSummary(rows, serialDate('2026-09-30'), serialDate('2026-10-31')).net, 0.3);
+  const p = createProductEntry(b, group.key, values, 'transactions', [{ kind: 'buy', date: '2026-10-01', amount: 1000, shares: 100, price: 10 }, { kind: 'sell', date: '2026-10-15', amount: 1100, shares: 100, price: 11 }]);
+  assert.equal(p.balance, 0); assert.equal(p.flow, -100); assert.equal(b.number(p.sheet, `J${p.row}`), 100);
+});
+test('new product rows keep FX lookup, settings writes and next-period FX snapshots on their currency headers', async () => {
+  const b = await fixture(), group = productGroups(b.products()).find(g => g.sheet === 'Assets');
+  createProductEntry(b, group.key, { name: '插行产品', account: '新账户', balance: 10, flow: 10, due: '', note: '' }, 'manual');
+  assert.equal(b.exchangeRate('USD'), 7); assert.equal(b.exchangeRate('HKD'), 0.9); assert.equal(b.rateAddress('USD'), 'D62');
+  b.set('Assets', b.rateAddress('USD'), 7.1); b.rollover('2026-11-30');
+  assert.equal(b.value('Assets', b.rateAddress('USD', true)), 7.1); assert.equal(b.value('Assets', b.rateAddress('HKD', true)), 0.9);
 });
 test('OneDrive rejects conflicts, creates without replacement and propagates failures', async () => {
   assert.equal(normalizeFolder('/月度复盘/'), '月度复盘'); assert.throws(() => normalizeFolder('../private'));

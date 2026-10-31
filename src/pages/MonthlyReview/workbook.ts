@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { FormulaEngine, Scalar, letters, column, serialDate, isoDate } from './formula';
+import { cashFlowSummary, validateTransactions } from './transactions';
 
 const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const children = (node: any, name: string): any[] => Array.from(node.childNodes || []).filter((x: any) => x.localName === name);
@@ -91,6 +92,18 @@ export class MonthlyWorkbook {
   }
   value(sheet: string, address: string): Scalar { return this.engine.get(sheet, address); }
   number(sheet: string, address: string): number { const v = this.value(sheet, address); return typeof v === 'number' ? v : 0; }
+  rateAddress(currency: 'USD' | 'HKD', previous = false): string {
+    for (const address of this.sheet('Assets').cells.keys()) {
+      if (!/^A\d+$/.test(address) || this.value('Assets', address) !== 'Assets') continue;
+      const row = address.slice(1);
+      if (this.value('Assets', `B${row}`) === `in ${currency}`) return `${previous ? 'H' : 'D'}${row}`;
+    }
+    throw new Error(`模板缺少 ${currency} 汇率分区`);
+  }
+  exchangeRate(currency: string): number {
+    if (currency === 'RMB') return 1;
+    try { return this.number('Assets', this.rateAddress(currency as 'USD' | 'HKD')); } catch { return 0; }
+  }
   private element(doc: any, name: string, text?: string) { const node = doc.createElementNS(NS, name); if (text !== undefined) node.appendChild(doc.createTextNode(text)); return node; }
   node(sheet: string, address: string): any {
     const s = this.sheet(sheet); let c = s.cells.get(address); if (c) return c;
@@ -262,17 +275,8 @@ export class MonthlyWorkbook {
     this.shiftRows(p.sheet, p.row, 1, true);
   }
   saveTransactions(p: Product, transactions: Transaction[]) {
-    if (!transactions.length) throw new Error('请至少保留一笔交易；误建产品可使用删除产品');
-    let remaining = 0; let previousDate = 0;
     const endDate = this.number('Assets', 'L1');
-    for (const t of transactions) {
-      const d = t.date ? serialDate(t.date) : 0;
-      if (!d || d < previousDate || d > endDate) throw new Error('交易日期须完整、按时间排序，且不晚于记账日期');
-      if (!(t.amount > 0) || !Number.isFinite(t.amount) || !Number.isFinite(t.shares) || !Number.isFinite(t.price) || t.price <= 0 || (t.kind !== 'dividend' && t.shares <= 0) || (t.kind === 'dividend' && t.shares !== 0)) throw new Error('金额、份额或价格无效；分红份额应为 0');
-      remaining += t.kind === 'buy' ? t.shares : t.kind === 'sell' ? -t.shares : 0;
-      if (remaining < -1e-7 || (t.kind === 'dividend' && remaining <= 0)) throw new Error('卖出份额超过持仓，或分红时没有持仓');
-      previousDate = d;
-    }
+    const remaining = validateTransactions(transactions, endDate);
     if (p.block?.shared) p = this.splitShared(p);
     const xs = p.sheet === 'Assets' ? 'XIRR' : 'XIRR-WTH'; let b = p.block;
     if (!b && this.cell(p.sheet, `K${p.row}`)?.formula) throw new Error('该产品使用跨账户收益公式，需先在 Excel 拆分流水后编辑');
@@ -301,7 +305,7 @@ export class MonthlyWorkbook {
     this.set(xs, `F${summary}`, 'annualized TWR:'); this.formula(xs, `G${summary}`, `POWER(PRODUCT(H${start}:H${end}+1),365/(IF(F${end}=0,D${end - 1},D${end})-D${start}))-1`);
     this.set(xs, `H${summary}`, 'Principle:'); this.formula(xs, `I${summary}`, `SUM(E${start}:E${end - 1})`);
     this.formula(p.sheet, `K${p.row}`, `${quote(xs)}!E${summary}`); this.formula(p.sheet, `L${p.row}`, `${quote(xs)}!G${summary}`); this.formula(p.sheet, `M${p.row}`, `${quote(xs)}!I${end}`);
-    const previous = this.number('Assets', 'N1'); const flow = transactions.reduce((sum, t) => serialDate(t.date) > previous ? sum + (t.kind === 'buy' ? t.amount : -t.amount) : sum, 0);
+    const previous = this.number('Assets', 'N1'); const flow = cashFlowSummary(transactions, previous, endDate).net;
     this.set(p.sheet, `I${p.row}`, flow);
     this.formula(p.sheet, `J${p.row}`, `E${p.row}-H${p.row}-I${p.row}`);
     if (Math.abs(remaining) < 1e-7) this.set(p.sheet, `E${p.row}`, 0); else this.set(p.sheet, `E${p.row}`, oldBalance);
@@ -318,7 +322,7 @@ export class MonthlyWorkbook {
     for (const a of this.sheet('Liabilities').cells.keys()) if (/^H\d+$/.test(a) && !this.cell('Liabilities', a)?.formula && typeof this.cell('Liabilities', a)?.value === 'number') values.push(['Liabilities', a, this.value('Liabilities', a.replace('H', 'D'))]);
     for (const [s, a, v] of values) this.set(s, a, v);
     for (const s of ['Assets', 'WTH']) for (const a of this.sheet(s).cells.keys()) if (/^I\d+$/.test(a) && !this.cell(s, a)?.formula && typeof this.cell(s, a)?.value === 'number') this.set(s, a, 0);
-    for (const a of ['D61', 'D81']) { const row = a.slice(1); this.set('Assets', `H${row}`, this.value('Assets', a)); }
+    for (const currency of ['USD', 'HKD'] as const) this.set('Assets', this.rateAddress(currency, true), this.value('Assets', this.rateAddress(currency)));
     this.set('Liabilities', 'F1', liabilities); this.set('Assets', 'N1', current); this.set('Assets', 'L1', next); this.set('Analyze', 'C5', 0); this.set('Analyze', 'I5', 0);
   }
   async export(): Promise<Uint8Array> {
