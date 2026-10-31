@@ -15,7 +15,7 @@ export function normalizePath(path: string): string {
     !clean.toLowerCase().endsWith('.xlsx') ||
     clean.split('/').some((part) => !part || part === '.' || part === '..' || /[\\:*?"<>|]/.test(part))
   ) {
-    throw new Error('请输入有效的 .xlsx 文件路径，例如 交易日记/交易日记.xlsx');
+    throw new Error('请输入有效的 .xlsx 文件路径，例如 文档/BalanceSheet/TradingJournal.xlsx');
   }
   return clean;
 }

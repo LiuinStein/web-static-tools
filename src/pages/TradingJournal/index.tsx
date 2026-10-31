@@ -328,7 +328,7 @@ export default function TradingJournal() {
               />
             </label>
             <p className="j-help">
-              默认 /交易日记/交易日记.xlsx。请使用本页导出的 Excel
+              默认 /文档/BalanceSheet/TradingJournal.xlsx。请使用本页导出的 Excel
               格式；目录和新文件会在首次保存时创建。连接后进入该账户独立日记，本机独立日记不会自动上传。
             </p>
             <div className="j-button-row">

@@ -2,6 +2,6 @@
 // Add the deployed origin + pathname (without the hash route) as its redirect URI.
 // Client IDs are public identifiers. Never put a client secret in this frontend.
 export const oneDriveConfig = {
-  clientId: '',
-  path: '交易日记/交易日记.xlsx',
+  clientId: 'eea4a732-93a0-4d41-8910-e6b5c3d1ad19',
+  path: '文档/BalanceSheet/TradingJournal.xlsx',
 };

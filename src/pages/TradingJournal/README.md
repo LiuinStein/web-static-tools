@@ -16,7 +16,7 @@
 2. 添加 **单页应用 SPA** 平台，重定向 URI 为部署网址的 origin + pathname，不包括 `#`。本机开发可注册 `http://localhost:3333/`；必须与实际访问地址完全一致。
 3. 配置 Microsoft Graph 委托权限 `Files.ReadWrite`，组织租户如有要求由管理员批准。此权限允许用户授权后的文件读写。
 4. 将公开的应用客户端 ID 填入本目录 `config.ts`，也可在页面设置里输入。**不能在前端放客户端密钥**。
-5. 默认路径 `交易日记/交易日记.xlsx`，可在配置或页面中修改。登录后读取，首次保存创建缺失目录和文件。
+5. 默认路径 `文档/BalanceSheet/TradingJournal.xlsx`，可在配置或页面中修改。登录后读取，首次保存创建缺失目录和文件。
 6. 网络需要 `login.microsoftonline.com`、`graph.microsoft.com` 及 OneDrive 实际下载目标域名（账户相关）。浏览器须允许 Microsoft 登录弹窗，线上须使用 HTTPS。
 
 登录使用 MSAL Browser 的授权码 + PKCE，Graph 通过官方 JavaScript SDK 访问。令牌缓存在会话存储中，不写入 Excel、配置文件或交易缓存。登录会话可用时刷新页面会自动恢复；新设备需登录同一账户并配置同一路径。连接后每分钟、回到页面或网络恢复时自动刷新/同步。
