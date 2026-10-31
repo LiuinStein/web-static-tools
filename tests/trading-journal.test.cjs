@@ -354,3 +354,57 @@ test('missing cloud version disables cache reuse and prevents unprotected upload
   await assert.rejects(service.sync([trade('new')]), /无法读取云端文件版本/);
   assert.equal(state.uploads, 0);
 });
+
+test('fund unit price is optional; stocks require it and supplied prices must be positive', () => {
+  assert.doesNotThrow(() => validateTrade({ ...trade(), price: undefined }));
+  assert.doesNotThrow(() => validateTrade({ ...trade(), type: '股票', price: 1 }));
+  assert.throws(() => validateTrade({ ...trade(), type: '股票', price: undefined }), /股票单价必填/);
+  for (const type of ['股票', '基金-债券类', '基金-股票类', '基金']) {
+    for (const price of [0, -1, NaN, Infinity, null]) {
+      assert.throws(() => validateTrade({ ...trade(), type, price }), /单价/);
+    }
+  }
+});
+test('blank fund prices survive Excel export/import and editing; blank stock prices are rejected', async () => {
+  const fund = { ...trade(), price: undefined };
+  const { workbook } = await readWorkbook();
+  await writeWorkbook(workbook, [fund]);
+  assert.equal(workbook.getWorksheet('交易记录').getCell('I2').value, null);
+  const imported = await readWorkbook(await workbook.xlsx.writeBuffer());
+  assert.deepEqual(imported.trades, [fund]);
+  const edited = { ...fund, reason: 'Updated fund without unit price' };
+  const changes = queueChange(imported.trades, [], [], fund, edited);
+  const merged = mergeForSync(imported.trades, [], changes);
+  assert.deepEqual((await readWorkbook(await writeWorkbook(imported.workbook, merged))).trades, [edited]);
+  imported.workbook.getWorksheet('交易记录').getCell('C2').value = '股票';
+  await assert.rejects(readWorkbook(await imported.workbook.xlsx.writeBuffer()), /股票单价必填/);
+});
+
+
+test('both fund categories allow blank prices and roundtrip through Excel unchanged', async () => {
+  const categories = require('../src/pages/TradingJournal/model.ts').assetTypes;
+  assert.deepEqual(categories, ['股票', '基金-债券类', '基金-股票类']);
+  const records = [
+    { ...trade('bond-fund'), type: '基金-债券类', price: undefined, shares: undefined },
+    { ...trade('equity-fund'), type: '基金-股票类', price: undefined, shares: 100 },
+    { ...trade('stock'), type: '股票', price: 10 },
+    trade('historical-fund'),
+  ];
+  records.forEach(row => assert.doesNotThrow(() => validateTrade(row)));
+  const { workbook } = await readWorkbook();
+  assert.deepEqual((await readWorkbook(await writeWorkbook(workbook, records))).trades, records);
+  assert.throws(() => validateTrade({ ...trade(), type: '债券' }), /交易分类/);
+});
+test('historical fund records can be explicitly reclassified and synced without changing record IDs', async () => {
+  const original = trade('historical-fund');
+  for (const type of ['基金-债券类', '基金-股票类']) {
+    const updated = { ...original, type, price: undefined };
+    const changes = queueChange([original], [], [], original, updated);
+    const merged = mergeForSync([original], [], changes);
+    assert.deepEqual(merged, [updated]);
+    assert.deepEqual(mergeForSync(merged, [], changes), [updated]);
+    const { workbook } = await readWorkbook();
+    assert.deepEqual((await readWorkbook(await writeWorkbook(workbook, merged))).trades, [updated]);
+    assert.throws(() => validateTrade({ ...updated, type: '股票' }), /股票单价必填/);
+  }
+});

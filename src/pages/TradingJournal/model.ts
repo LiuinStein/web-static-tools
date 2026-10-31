@@ -1,4 +1,6 @@
-export type AssetType = '股票' | '基金';
+export const assetTypes = ['股票', '基金-债券类', '基金-股票类'] as const;
+// Keep historical fund records readable until the user explicitly classifies them.
+export type AssetType = typeof assetTypes[number] | '基金';
 export interface Trade {
   id: string;
   date: string;
@@ -8,7 +10,7 @@ export interface Trade {
   stance: '看多' | '看空' | '平仓';
   direction: '买入' | '卖出';
   amount: number;
-  price: number;
+  price?: number;
   shares?: number;
   fee: number;
   reason: string;
@@ -35,11 +37,14 @@ export function validateTrade(trade: Trade): void {
   ) throw new Error('请输入有效交易日期');
   if (!trade.id || !trade.code.trim() || !trade.name.trim()) throw new Error('代码和名称必填');
   if (
-    !['股票', '基金'].includes(trade.type) ||
+    ![...assetTypes, '基金'].includes(trade.type) ||
     !['看多', '看空', '平仓'].includes(trade.stance) ||
     !['买入', '卖出'].includes(trade.direction)
   ) throw new Error('交易分类无效');
-  if (![trade.amount, trade.price].every((value) => Number.isFinite(value) && value > 0)) throw new Error('金额和单价必须大于 0');
+  if (!Number.isFinite(trade.amount) || trade.amount <= 0) throw new Error('金额必须大于 0');
+  if (trade.price === undefined) {
+    if (trade.type === '股票') throw new Error('股票单价必填');
+  } else if (!Number.isFinite(trade.price) || trade.price <= 0) throw new Error('单价必须大于 0，基金可留空');
   if (!Number.isFinite(trade.fee)) throw new Error('交易费用无效');
   if (trade.shares !== undefined && (!Number.isFinite(trade.shares) || trade.shares <= 0)) throw new Error('份额需大于 0，或留空');
 }

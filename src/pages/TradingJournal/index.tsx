@@ -3,6 +3,7 @@ import { Button, Dialog } from '@alifd/next';
 import PageHeader from '@/components/PageHeader';
 import {
   Trade,
+  assetTypes,
   TradeChange,
   calculateFee,
   mergeTrades,
@@ -190,7 +191,7 @@ export default function TradingJournal() {
         stance: draft.stance,
         direction: draft.direction,
         amount: Number(draft.amount),
-        price: Number(draft.price),
+        price: draft.price === '' ? undefined : Number(draft.price),
         shares: draft.shares === '' ? undefined : Number(draft.shares),
         fee,
         reason: draft.reason.trim(),
@@ -246,7 +247,7 @@ export default function TradingJournal() {
       stance: trade.stance,
       direction: trade.direction,
       amount: String(trade.amount),
-      price: String(trade.price),
+      price: trade.price === undefined ? '' : String(trade.price),
       shares: trade.shares === undefined ? '' : String(trade.shares),
       fee: String(trade.fee),
       reason: trade.reason,
@@ -436,9 +437,9 @@ export default function TradingJournal() {
           </div>
           <div className="journal-toolbar">
             <div className="j-tabs">
-              {['全部', '股票', '基金'].map((type) => (
+              {['全部', ...assetTypes, ...(all.some((trade) => trade.type === '基金') ? ['基金'] : [])].map((type) => (
                 <button key={type} className={filter === type ? 'active' : ''} onClick={() => setFilter(type)}>
-                  {type}
+                  {type === '基金' ? '基金（待分类）' : type}
                 </button>
               ))}
             </div>
@@ -485,7 +486,7 @@ export default function TradingJournal() {
                         <span className="j-trade-date">{trade.date}</span>
                         <strong>{trade.name}</strong>
                         <span className="j-subtle">
-                          {trade.code} <span className="j-asset-tag">{trade.type}</span>
+                          {trade.code} <span className="j-asset-tag">{trade.type === '基金' ? '基金（待分类）' : trade.type}</span>
                         </span>
                       </td>
                       <td>
@@ -496,7 +497,7 @@ export default function TradingJournal() {
                       </td>
                       <td>
                         <strong className="j-numeric">{number(trade.amount)}</strong>
-                        <span className="j-subtle">单价 {number(trade.price)}</span>
+                        <span className="j-subtle">单价 {trade.price === undefined ? '—' : number(trade.price)}</span>
                       </td>
                       <td>
                         <span className="j-numeric">{number(trade.fee)}</span>
@@ -579,8 +580,8 @@ export default function TradingJournal() {
                   value={draft.type}
                   onChange={(e) => updateAsset(e.target.value as Trade['type'], draft.code)}
                 >
-                  <option>股票</option>
-                  <option>基金</option>
+                  {assetTypes.map((type) => <option key={type}>{type}</option>)}
+                  {draft.type === '基金' && <option value="基金" disabled>基金（旧记录，待分类）</option>}
                 </select>
               </label>
               <label className="j-field">
@@ -657,14 +658,14 @@ export default function TradingJournal() {
                 />
               </label>
               <label className="j-field">
-                单价 <em>*</em>
+                单价 {draft.type === '股票' ? <em>*</em> : <span className="j-optional">选填</span>}
                 <input
                   aria-label="单价"
                   type="number"
                   min="0.000001"
                   step="any"
-                  required
-                  placeholder="0.00"
+                  required={draft.type === '股票'}
+                  placeholder={draft.type === '股票' ? '0.00' : '可留空'}
                   value={draft.price}
                   onChange={(e) => field('price', e.target.value)}
                 />
