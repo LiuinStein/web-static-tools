@@ -34,9 +34,15 @@ const asideMenuConfig = [
     ]
   },
   {
-    name: '交易日记',
-    path: '/trading-journal',
-    icon: 'edit'
+    name: '复盘工具',
+    path: '/review',
+    icon: 'edit',
+    children: [
+      {
+        name: '交易日记',
+        path: '/trading-journal'
+      }
+    ]
   },
   {
     name: '程序员',

@@ -15,6 +15,7 @@ import {
 import { DriveConfig, OneDriveJournal } from './onedrive';
 import { exportTrades } from './workbook';
 import { oneDriveConfig } from './config';
+import { calculateHoldings } from './holdings';
 import { SyncQueue, completeSync } from './sync-queue';
 import './style.css';
 
@@ -62,6 +63,8 @@ export default function TradingJournal() {
   const [showSettings, setShowSettings] = useState(false);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('全部');
+  const [holdingsSearch, setHoldingsSearch] = useState('');
+  const [holdingsFilter, setHoldingsFilter] = useState('全部');
   const [busy, setBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState('');
@@ -73,6 +76,12 @@ export default function TradingJournal() {
   const cacheRef = useRef(cache);
   cacheRef.current = cache;
   const all = visibleTrades(cache.remote, cache.pending, cache.changes || []);
+  const holdings = calculateHoldings(all);
+  const filteredHoldings = holdings.filter(
+    (holding) =>
+      (holdingsFilter === '全部' || holding.type === holdingsFilter) &&
+      `${holding.code} ${holding.name}`.toLowerCase().includes(holdingsSearch.toLowerCase()),
+  );
   const filtered = all.filter(
     (trade) =>
       (filter === '全部' || trade.type === filter) &&
@@ -423,6 +432,7 @@ export default function TradingJournal() {
         </div>
       </div>
       <div className="journal-workspace">
+        <div className="journal-records-stack">
         <section className="j-panel journal-records">
           <div className="j-section-heading">
             <div>
@@ -545,6 +555,80 @@ export default function TradingJournal() {
             共 {filtered.length} 笔记录 <span>点击交易原因，展开完整思考</span>
           </div>
         </section>
+        <section className="j-panel journal-records journal-holdings" aria-labelledby="journal-holdings-heading">
+          <div className="j-section-heading">
+            <div>
+              <h2 id="journal-holdings-heading">当前持仓 <span className="j-count">{filteredHoldings.length}</span></h2>
+              <p className="j-help">根据全部交易记录实时汇总，查看当前成本与份额。</p>
+            </div>
+          </div>
+          <div className="journal-toolbar">
+            <div className="j-tabs" role="group" aria-label="持仓类型筛选">
+              {['全部', ...assetTypes, ...(holdings.some((holding) => holding.type === '基金') ? ['基金'] : [])].map((type) => (
+                <button
+                  key={type}
+                  className={holdingsFilter === type ? 'active' : ''}
+                  aria-pressed={holdingsFilter === type}
+                  onClick={() => setHoldingsFilter(type)}
+                >
+                  {type === '基金' ? '基金（待分类）' : type}
+                </button>
+              ))}
+            </div>
+            <input
+              aria-label="搜索持仓"
+              placeholder="搜索代码或名称"
+              value={holdingsSearch}
+              onChange={(e) => setHoldingsSearch(e.target.value)}
+            />
+          </div>
+          {!filteredHoldings.length ? (
+            <div className="journal-empty">
+              <h3>{holdings.length ? '没有找到匹配的持仓' : '暂无持仓'}</h3>
+              <p>{holdings.length ? '试试其他关键词或持仓类型。' : '新增交易后自动汇总，已清仓标的不显示。'}</p>
+            </div>
+          ) : (
+          <div className="journal-table-wrap">
+            <table className="journal-table" aria-label="当前持仓">
+              <thead>
+                <tr>
+                  <th scope="col">代码</th>
+                  <th scope="col">名称</th>
+                  <th scope="col">类型</th>
+                  <th scope="col">总成本</th>
+                  <th scope="col">份额</th>
+                  <th scope="col">摊薄均价</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredHoldings.map((holding) => (
+                  <tr key={JSON.stringify([holding.type, holding.code])}>
+                    <td className="j-numeric">{holding.code}</td>
+                    <td><strong>{holding.name}</strong></td>
+                    <td><span className="j-asset-tag">{holding.type === '基金' ? '基金（待分类）' : holding.type}</span></td>
+                    <td className="j-numeric"><strong>{number(holding.totalCost)}</strong></td>
+                    <td className="j-numeric">
+                      {holding.shares === undefined ? '—' : holding.shares.toLocaleString('zh-CN', { maximumFractionDigits: 8 })}
+                      {!!holding.missingShares && <span className="j-subtle">{holding.missingShares} 笔交易未填份额</span>}
+                    </td>
+                    <td className="j-numeric">
+                      {holding.averagePrice === undefined ? '—' : holding.averagePrice.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          )}
+          <div className="journal-table-footer">
+            共 {filteredHoldings.length} 个持仓 <span>实时计算，不写入 Excel</span>
+          </div>
+          <details className="journal-holdings-details">
+            <summary>持仓计算说明</summary>
+            <p>按类型和代码汇总全部交易，不受交易列表搜索和筛选影响。买入增加成本和份额，卖出扣减卖出总价和份额；摊薄均价＝总成本÷份额，费用不重复计入。缺少份额时显示“—”，本机待同步变更也会计入。</p>
+          </details>
+        </section>
+        </div>
         <section className="j-panel journal-entry" ref={formRef}>
           <div className="j-section-heading">
             <div>

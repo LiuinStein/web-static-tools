@@ -408,3 +408,75 @@ test('historical fund records can be explicitly reclassified and synced without 
     assert.throws(() => validateTrade({ ...updated, type: '股票' }), /股票单价必填/);
   }
 });
+
+const { calculateHoldings } = require('../src/pages/TradingJournal/holdings.ts');
+test('holdings net buy/sell amounts and shares, without adding fees twice', () => {
+  const bought = { ...trade('buy'), amount: 1000, shares: 100, fee: 20 };
+  const sold = { ...trade('sell'), direction: '卖出', amount: 330, shares: 30, fee: -5 };
+  const rows = [bought, sold];
+  const snapshot = JSON.stringify(rows);
+  const [holding] = calculateHoldings(rows);
+  assert.equal(holding.totalCost, 670);
+  assert.equal(holding.shares, 70);
+  assert.equal(holding.averagePrice, 670 / 70);
+  assert.equal(JSON.stringify(rows), snapshot);
+});
+test('holdings group by type and normalized text code, preserve leading zeros and use newest name', () => {
+  const rows = [
+    { ...trade('old'), name: '旧名称', date: '2026-10-01', amount: 100, shares: 10, type: '基金-债券类' },
+    { ...trade('new'), name: '新名称', date: '2026-10-30', amount: 200, shares: 20, type: '基金-债券类' },
+    { ...trade('equity'), amount: 900, shares: 30, type: '基金-股票类' },
+    { ...trade('stock-a'), code: 'aapl', type: '股票', amount: 100, shares: 1 },
+    { ...trade('stock-b'), code: 'AAPL', type: '股票', amount: 200, shares: 1 },
+  ];
+  const holdings = calculateHoldings(rows);
+  assert.equal(holdings.length, 3);
+  const bond = holdings.find(row => row.type === '基金-债券类');
+  assert.equal(bond.code, '005827');
+  assert.equal(bond.name, '新名称');
+  assert.equal(bond.totalCost, 300);
+  assert.equal(bond.shares, 30);
+  assert.equal(holdings.find(row => row.type === '股票').totalCost, 300);
+});
+test('closed positions including fractional share residue are hidden; remaining cost may be negative', () => {
+  assert.deepEqual(calculateHoldings([
+    { ...trade('one'), amount: 10, shares: 0.1 },
+    { ...trade('two'), amount: 20, shares: 0.2 },
+    { ...trade('three'), direction: '卖出', amount: 40, shares: 0.3 },
+  ]), []);
+  const [holding] = calculateHoldings([
+    { ...trade('buy'), amount: 100, shares: 10 },
+    { ...trade('sell'), direction: '卖出', amount: 120, shares: 5 },
+  ]);
+  assert.equal(holding.totalCost, -20);
+  assert.equal(holding.shares, 5);
+  assert.equal(holding.averagePrice, -4);
+});
+test('missing shares leave quantity and average unknown without losing known total cost', () => {
+  const [holding] = calculateHoldings([
+    { ...trade('buy'), amount: 100, shares: undefined, price: 10 },
+    { ...trade('sell'), direction: '卖出', amount: 40, shares: 4 },
+  ]);
+  assert.equal(holding.totalCost, 60);
+  assert.equal(holding.shares, undefined);
+  assert.equal(holding.averagePrice, undefined);
+  assert.equal(holding.missingShares, 1);
+});
+test('holdings immediately follow pending creates, edits and deletions and stay out of Excel', async () => {
+  const original = { ...trade('old'), amount: 100, shares: 10 };
+  const added = { ...trade('new'), amount: 200, shares: 20 };
+  const edited = { ...original, amount: 150, shares: 15 };
+  let changes = queueChange([original], [added], [], original, edited);
+  let visible = visibleTrades([original], [added], changes);
+  assert.equal(calculateHoldings(visible)[0].totalCost, 350);
+  changes = queueChange([original], [added], changes, added);
+  visible = visibleTrades([original], [added], changes);
+  assert.equal(calculateHoldings(visible)[0].shares, 15);
+  const { workbook } = await readWorkbook();
+  const imported = await readWorkbook(await writeWorkbook(workbook, visible));
+  assert.deepEqual(imported.workbook.worksheets.map(sheet => sheet.name), ['交易记录']);
+  assert.equal(imported.workbook.getWorksheet('交易记录').columnCount, 12);
+  assert.deepEqual(imported.trades, [edited]);
+  assert.deepEqual(calculateHoldings(imported.trades), calculateHoldings(visible));
+  assert.deepEqual(calculateHoldings([]), []);
+});
