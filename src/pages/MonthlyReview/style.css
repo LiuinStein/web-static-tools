@@ -53,3 +53,27 @@
 .mr-entry-summary strong { display: block; margin-top: 8px; font-size: 16px; font-weight: 500; color: #35455e; }
 .mr-product-dialog .mr-field input { min-width: 0; width: 100%; }
 @media (max-width: 600px) { .mr-entry-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.mr-batch-bar { position: sticky; top: 12px; z-index: 5; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding: 16px 20px; margin: 0 0 20px; border: 1px solid #bfd5f9; border-radius: 8px; background: #f1f6ff; box-shadow: 0 3px 14px #25344c0a; }
+.mr-batch-bar strong { font-size: 15px; margin-right: 16px; }
+.mr-batch-bar span { font-size: 12px; color: #536d94; }
+.mr-batch-bar p, .mr-batch-help p { font-size: 12px; line-height: 1.8; color: #6f8199; margin: 8px 0 0; }
+.mr-batch-help { margin: 14px 0 18px; padding: 14px 16px; background: #f8fafc; border-radius: 6px; }
+.mr-batch-help p { margin: 0 0 10px; }
+.mr-batch-help label { display: flex; gap: 8px; align-items: center; font-size: 12px; margin-right: 10px; }
+.mr-batch-help button { padding: 6px 10px; font-size: 12px; }
+.mr-assets-table input[data-balance-input] { width: 140px; min-width: 120px; padding: 8px 10px; font-variant-numeric: tabular-nums; }
+.mr-assets-table input[aria-invalid=true] { border-color: #ce5749; background: #fff6f4; }
+.mr-assets-table .mr-input-error { color: #b54536; }
+.mr-assets-table input[type=checkbox], .mr-batch-help input[type=checkbox] { width: 15px; height: 15px; padding: 0; margin: 0; accent-color: #3577eb; cursor: pointer; }
+.mr-assets-table tr.mr-balance-changed td { background: #f3f8ff; }
+.monthly-review .mr-assets-table td .mr-product-name { display: flex; align-items: center; gap: 8px; }
+.mr-change-tag { display: inline-block; flex-shrink: 0; min-width: 3em; color: #3577eb; font-size: 10px; }
+.mr-change-tag.reviewed { color: #248774; }
+.mr-assets-table th, .mr-assets-table td { white-space: nowrap; }
+@media (max-width: 600px) { .mr-batch-bar { position: static; padding: 14px; } .mr-batch-bar .mr-toolbar-group { width: 100%; } .mr-batch-bar strong { display: block; margin-bottom: 7px; } }
+.mr-assets-table input[data-flow-input] { width: 130px; min-width: 115px; padding: 8px 10px; font-variant-numeric: tabular-nums; }
+.monthly-review .mr-assets-table .mr-sort-button { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; border-radius: 0; color: inherit; background: transparent; font: inherit; white-space: nowrap; }
+.mr-sort-button span { font-size: 12px; color: #9aa8bb; }
+.mr-assets-table th[aria-sort=ascending], .mr-assets-table th[aria-sort=descending], .mr-assets-table th[aria-sort=ascending] span, .mr-assets-table th[aria-sort=descending] span { color: #3577eb; }
+.mr-assets-table input[readonly], .mr-dialog input[readonly] { background: #f5f7fa; color: #7a879a; cursor: default; }

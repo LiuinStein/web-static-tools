@@ -1,4 +1,5 @@
 import JSZip from 'jszip';
+import { isCashAccount, normalizeProductCategory } from './categories';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { FormulaEngine, Scalar, letters, column, serialDate, isoDate } from './formula';
 import { cashFlowSummary, validateTransactions } from './transactions';
@@ -11,7 +12,7 @@ const parse = (s: string): any => new DOMParser().parseFromString(s.replace(/^\u
 const xml = (d: any) => new XMLSerializer().serializeToString(d);
 const quote = (s: string) => `'${s.replace(/'/g, "''")}'`;
 export interface Sheet { name: string; path: string; doc: any; cells: Map<string, any>; }
-export interface Product { sheet: string; row: number; name: string; account: string; category: string; currency: string; member: string; balance: number; previous: number; flow: Scalar; due: string; note: string; block?: Block; }
+export interface Product { sheet: string; row: number; name: string; account: string; category: string; sourceCategory?: string; currency: string; member: string; balance: number; previous: number; flow: Scalar; due: string; note: string; block?: Block; }
 export interface Block { sheet: string; start: number; end: number; summary: number; sourceRows?: number[]; shared?: boolean; }
 export interface Transaction { row?: number; date: string; amount: number; shares: number; price: number; kind: 'buy' | 'sell' | 'dividend'; }
 
@@ -39,6 +40,14 @@ export class MonthlyWorkbook {
   private shared: string[] = [];
   private extras = new Map<string, any>();
   private constructor(private zip: JSZip) { this.engine = new FormulaEngine((s, a) => this.cell(s, a)); }
+  clone(): MonthlyWorkbook {
+    // The archive is immutable; edits and export use separate XML documents/archives.
+    const next = new MonthlyWorkbook(this.zip);
+    next.shared = [...this.shared];
+    next.sheets = this.sheets.map(s => ({ ...s, doc: s.doc.cloneNode(true), cells: new Map() }));
+    next.extras = new Map([...this.extras].map(([path, doc]) => [path, doc.cloneNode(true)]));
+    next.reindex(); return next;
+  }
   static async open(data: ArrayBuffer | Uint8Array): Promise<MonthlyWorkbook> {
     if (data.byteLength > 10 * 1024 * 1024) throw new Error('文件不能超过 10MB');
     const zip = await JSZip.loadAsync(data); const book = new MonthlyWorkbook(zip);
@@ -68,7 +77,7 @@ export class MonthlyWorkbook {
     }
     book.extras.set('xl/workbook.xml', wb);
     for (const path of Object.keys(zip.files).filter(p => /charts\/.*\.xml$/.test(p))) book.extras.set(path, parse(await read(path)));
-    book.reindex(); book.validate(); return book;
+    book.reindex(); book.applyCashAccountRules(); book.validate(); return book;
   }
   validate() {
     for (const name of ['Assets', 'XIRR', 'Liabilities', 'Analyze', 'WTH', 'XIRR-WTH']) if (!this.sheets.some(s => s.name === name)) throw new Error(`模板不匹配：缺少 ${name} 工作表`);
@@ -132,7 +141,7 @@ export class MonthlyWorkbook {
         if (b && b !== 'Sub Total' && b !== 'Category') category = String(b).trim();
         if (c && c !== 'Sub Total' && c !== 'Account' && c !== 'Grand Total' && c !== 'Exchange Rate:') account = String(c);
         if (typeof name !== 'string' || !name || name === 'Product' || row < 3 || !category || /Exchange Rate/.test(String(c))) continue;
-        const product: Product = { sheet: s.name, row, name, account, category, currency, member: s.name === 'Assets' ? '本人' : 'WTH', balance: this.number(s.name, `E${row}`), previous: this.number(s.name, `H${row}`), flow: val('I'), due: isoDate(val('G')), note: String(val('N') || '') };
+        const product: Product = { sheet: s.name, row, name, account, category: normalizeProductCategory(category), sourceCategory: category, currency, member: s.name === 'Assets' ? '本人' : 'WTH', balance: this.number(s.name, `E${row}`), previous: this.number(s.name, `H${row}`), flow: val('I'), due: isoDate(val('G')), note: String(val('N') || '') };
         product.block = this.blockFor(product); out.push(product);
       }
     }
@@ -194,7 +203,7 @@ export class MonthlyWorkbook {
   addProduct(anchor: Product, name: string, account: string): Product {
     if (!name.trim() || !account.trim()) throw new Error('请填写产品名称和账户');
     const at = anchor.row; this.shiftRows(anchor.sheet, at, 1); this.copyStyle(anchor.sheet, at + 1, at, 14);
-    for (const [c, v] of [['B', anchor.category], ['C', account.trim()], ['D', name.trim()], ['E', 0], ['H', 0], ['I', 0], ['N', '']] as Array<[string, Scalar]>) this.set(anchor.sheet, `${c}${at}`, v);
+    for (const [c, v] of [['B', anchor.sourceCategory || anchor.category], ['C', account.trim()], ['D', name.trim()], ['E', 0], ['H', 0], ['I', 0], ['N', '']] as Array<[string, Scalar]>) this.set(anchor.sheet, `${c}${at}`, v);
     for (const c of ['F', 'J']) { const f = this.cell(anchor.sheet, `${c}${at + 1}`)?.formula; if (f) this.formula(anchor.sheet, `${c}${at}`, f.replace(new RegExp(`(?<![0-9])${at + 1}(?![0-9])`, 'g'), String(at))); }
     this.formula(anchor.sheet, `J${at}`, `E${at}-H${at}-I${at}`);
     // Inserting at the beginning of a group puts the new row outside an old range's start.
@@ -212,6 +221,7 @@ export class MonthlyWorkbook {
     }
     this.reindex();
     const product = this.products().find(p => p.sheet === anchor.sheet && p.row === at)!;
+    this.cashAccountFlow(product);
     this.createEmptyBlock(product, this.products().find(p => p.sheet === anchor.sheet && p.row === at + 1));
     return this.products().find(p => p.sheet === anchor.sheet && p.row === at)!;
   }
@@ -263,6 +273,7 @@ export class MonthlyWorkbook {
     if (following && !this.cell(p.sheet, `C${following.row}`)?.value) this.set(p.sheet, `C${following.row}`, following.account);
     for (const [c, v] of [['C', values.account], ['D', values.name], ['E', values.balance], ['H', values.previous], ['I', values.flow], ['G', due], ['N', values.note]] as Array<[string, Scalar]>) this.set(p.sheet, `${c}${p.row}`, v);
     if (p.block && !p.block.shared) { this.set(p.block.sheet, `B${p.block.start}`, values.account); this.set(p.block.sheet, `C${p.block.start}`, values.name); }
+    this.cashAccountFlow(p);
   }
   deleteProduct(p: Product) {
     if (p.block?.shared) p = this.splitShared(p);
@@ -270,7 +281,7 @@ export class MonthlyWorkbook {
     const combined = this.blocks(p.sheet === 'Assets' ? 'XIRR' : 'XIRR-WTH').some(b => (this.cell(b.sheet, `E${b.end}`)?.formula || '').includes(`${p.sheet}!E${p.row}`));
     if (combined && !block) throw new Error('此产品使用跨账户合并流水，请先在 Excel 中拆分关联区块后再删除');
     const next = this.products().find(x => x.sheet === p.sheet && x.row > p.row);
-    if (next) { this.set(next.sheet, `B${next.row}`, next.category); this.set(next.sheet, `C${next.row}`, next.account); }
+    if (next) { this.set(next.sheet, `B${next.row}`, next.sourceCategory || next.category); this.set(next.sheet, `C${next.row}`, next.account); }
     if (block) this.shiftRows(block.sheet, block.start, block.summary - block.start + 1, true);
     this.shiftRows(p.sheet, p.row, 1, true);
   }
@@ -308,8 +319,8 @@ export class MonthlyWorkbook {
     const previous = this.number('Assets', 'N1'); const flow = cashFlowSummary(transactions, previous, endDate).net;
     this.set(p.sheet, `I${p.row}`, flow);
     this.formula(p.sheet, `J${p.row}`, `E${p.row}-H${p.row}-I${p.row}`);
-    if (Math.abs(remaining) < 1e-7) this.set(p.sheet, `E${p.row}`, 0); else this.set(p.sheet, `E${p.row}`, oldBalance);
-    this.reindex();
+    if (!isCashAccount(p.category) && Math.abs(remaining) < 1e-7) this.set(p.sheet, `E${p.row}`, 0); else this.set(p.sheet, `E${p.row}`, oldBalance);
+    this.cashAccountFlow(p); this.reindex();
   }
   rollover(date: string) {
     const current = this.number('Assets', 'L1'), next = serialDate(date); if (next <= current) throw new Error('新记账日期必须晚于上次');
@@ -325,7 +336,14 @@ export class MonthlyWorkbook {
     for (const currency of ['USD', 'HKD'] as const) this.set('Assets', this.rateAddress(currency, true), this.value('Assets', this.rateAddress(currency)));
     this.set('Liabilities', 'F1', liabilities); this.set('Assets', 'N1', current); this.set('Assets', 'L1', next); this.set('Analyze', 'C5', 0); this.set('Analyze', 'I5', 0);
   }
+  private cashAccountFlow(p: Product) {
+    if (!isCashAccount(p.category)) return;
+    const formula = `E${p.row}-H${p.row}`;
+    if (this.cell(p.sheet, `I${p.row}`)?.formula !== formula) this.formula(p.sheet, `I${p.row}`, formula);
+  }
+  applyCashAccountRules() { for (const p of this.products()) this.cashAccountFlow(p); }
   async export(): Promise<Uint8Array> {
+    this.applyCashAccountRules();
     // Patch only XML parts we understand. Original styles, drawings and package relationships stay intact.
     const result = await JSZip.loadAsync(await this.zip.generateAsync({ type: 'uint8array' }));
     const serializer = new XMLSerializer();
