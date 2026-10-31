@@ -52,6 +52,19 @@ export default function MonthlyReview() {
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; listDrafts().then(setDrafts).catch(e => setError(`无法读取本机草稿：${e.message}`)); return () => { mounted.current = false; }; }, []);
   useEffect(() => {
+    let cancelled = false;
+    if (config.clientId.trim()) run(async () => {
+      const service = new MonthlyDrive(config.clientId, config.folder);
+      const user = await service.restore();
+      if (!user || cancelled) return;
+      const listed = await service.list();
+      if (cancelled) return;
+      setDrive(service); setFiles(listed); setAccount(user.username || user.name || 'Microsoft 账户');
+      setScope(`${service.config.clientId}:${user.homeAccountId}:${service.folder}`);
+    });
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => {
     if (!book) return;
     setFinance({ date: isoDate(book.value('Assets', 'L1')), usd: String(book.value('Assets', 'D61') || ''), hkd: String(book.value('Assets', 'D81') || ''), salary: String(book.value('Analyze', 'C5') || 0), wthSalary: String(book.value('Analyze', 'I5') || 0) });
   }, [book]);
@@ -78,15 +91,16 @@ export default function MonthlyReview() {
   const issues = products.filter(p => ['K', 'L', 'M'].some(c => { const v = val(p.sheet, `${c}${p.row}`); return typeof v === 'string' && v !== 'N/A' && v !== ''; }));
   const savedStatus = draft?.published ? `已发布 · ${new Date(draft.published).toLocaleString('zh-CN')}` : '草稿仅保存在当前浏览器';
   function editProduct(p: Product) { setSelected(p); setProductForm({ name: p.name, account: p.account, balance: String(p.balance), previous: String(p.previous), flow: String(p.flow ?? 0), due: p.due, note: p.note }); setModal('product'); }
-  async function connect() {
-    const service = new MonthlyDrive(config.clientId, config.folder); const user = await service.connect();
-    const key = `${config.clientId}:${user.homeAccountId}:${service.folder}`;
+  async function connect(switchAccount = false) {
+    const service = new MonthlyDrive(config.clientId, config.folder); const user = await service.connect(switchAccount);
+    const key = `${service.config.clientId}:${user.homeAccountId}:${service.folder}`;
     const listed = await service.list(); setDrive(service); setFiles(listed); setAccount(user.username || user.name || 'Microsoft 账户'); setScope(key);
-    localStorage.setItem('monthly-review:settings', JSON.stringify(config)); setSettings(false); setNotice('OneDrive 已连接。选择文件打开，或发布当前本机草稿。');
+    const applied = { clientId: service.config.clientId, folder: service.folder };
+    localStorage.setItem('monthly-review:settings', JSON.stringify(applied)); setConfig(applied); setSettings(false); setNotice('OneDrive 已连接，当前目录已加载。两页共用登录，各自保留目录设置。');
   }
   async function publish() {
     if (!drive || !book || !draft) return;
-    if (draft.scope && draft.scope !== scope) throw new Error('此账本来自其他账户或文件夹，请连接原账户和文件夹后发布');
+    if (draft.scope && draft.scope !== scope) throw new Error('此账本来自其他账户或目录。请打开当前目录的账本，或先另存为当前目录副本。');
     if (!window.confirm(`将“${draft.name}”发布到 ${account} 的 /${drive.folder}/。${draft.source ? '更新原文件。' : '创建新文件；同名文件不会被覆盖。'}`)) return;
     const data = await book.export(); const result = await drive.publish(draft.name, data, draft.source);
     const updated = { ...draft, data, source: result, scope, published: new Date().toISOString() };
@@ -104,8 +118,12 @@ export default function MonthlyReview() {
       <div className="mr-toolbar-group"><button disabled={busy || !book} onClick={() => run(async () => { if (!book || !draft) return; const data = await book.export(); const url = URL.createObjectURL(new Blob([data as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })); const a = document.createElement('a'); a.href = url; a.download = draft.name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); setNotice('Excel 已生成，包含原有公式及当前计算结果。'); })}>↓ 下载 Excel</button><button className="primary" disabled={busy || !book || !drive} onClick={() => run(publish)}>发布到 OneDrive</button><button disabled={busy} onClick={() => setSettings(!settings)}>同步设置</button></div>
     </div>
     {error && <div className="mr-message error" role="alert">{error}</div>}{notice && <div className="mr-message" role="status">{notice}</div>}
-    {settings && <section className="mr-panel"><h2>OneDrive 连接</h2><p>默认与交易日记使用相同的 Microsoft 应用和账本目录，可独立配置。请在 Entra 中注册当前站点的重定向网址，并授予 Files.ReadWrite 权限。</p><div className="mr-grid">{field('应用客户端 ID', config.clientId, v => setConfig({ ...config, clientId: v }))}{field('账本文件夹', config.folder, v => setConfig({ ...config, folder: v }))}</div><div className="mr-actions"><button disabled={busy} onClick={() => setConfig({ ...monthlyOneDriveConfig })}>恢复默认配置</button><button className="primary" disabled={busy} onClick={() => run(connect)}>{drive ? '重新连接' : '连接 OneDrive'}</button>{drive && <button disabled={busy} onClick={() => run(async () => { await drive.disconnect(); setDrive(null); setFiles([]); setScope(''); setAccount(''); })}>断开连接</button>}</div></section>}
+    {settings && <section className="mr-panel"><h2>OneDrive 连接</h2><p>与交易日记共用 Microsoft 登录，账本目录独立。连接后修改目录并应用即可，无需重复登录。请在 Entra 中注册当前站点的重定向网址，并授予 Files.ReadWrite 权限。</p><div className="mr-grid">{field('应用客户端 ID', config.clientId, v => setConfig({ ...config, clientId: v }))}{field('账本文件夹', config.folder, v => setConfig({ ...config, folder: v }))}</div><div className="mr-actions"><button disabled={busy} onClick={() => setConfig({ ...monthlyOneDriveConfig })}>恢复默认配置</button><button className="primary" disabled={busy} onClick={() => run(() => connect())}>{drive ? '应用目录' : '连接 OneDrive'}</button>{drive && <button disabled={busy} onClick={() => run(() => connect(true))}>切换账户</button>}{drive && <button disabled={busy} onClick={() => run(async () => { await drive.disconnect(); setDrive(null); setFiles([]); setScope(''); setAccount(''); })}>断开共享登录</button>}</div></section>}
     {drive && <div className="mr-cloud"><span>● {account} · /{drive.folder}/</span><select aria-label="打开 OneDrive Excel" disabled={busy} value="" onChange={e => { const file = files.find(f => f.id === e.target.value); if (file) run(async () => { const result = await drive.download(file); await activate(new Uint8Array(result.data), result.file.name, { source: result.file, scope, published: new Date().toISOString() }); }); }}><option value="">选择云端 Excel…</option>{files.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}</select><button disabled={busy} onClick={() => run(async () => setFiles(await drive.list()))}>刷新文件</button></div>}
+    {drive && book && draft?.scope && draft.scope !== scope && <div className="mr-message">当前账本来自其他账户或目录，原文件保持原位。可打开当前目录账本，或 <button disabled={busy} onClick={() => run(async () => {
+      if (!draft || !window.confirm(`将“${draft.name}”另存为当前账户 /${drive.folder}/ 的副本？原账本保留，发布时不会覆盖同名文件。`)) return;
+      await activate(draft.data, draft.name, { scope }); setNotice('已创建当前目录的本机副本，点击发布后才会上传。');
+    })}>另存为当前目录副本</button>。</div>}
     {!book ? <section className="mr-empty"><div className="mr-empty-icon">月</div><h2>从你现有的月度 Excel 开始</h2><p>导入原模板账本，即可管理产品、记录买卖，并实时查看收益。<br />账本保存在当前浏览器，只有点击发布才会上传。</p><button className="primary" disabled={busy} onClick={() => setSettings(true)}>从 OneDrive 打开</button><button disabled={busy} onClick={() => input.current?.click()}>选择 Excel 账本</button><div className="mr-empty-features"><span>原模板与公式保留</span><span>买入 · 卖出 · 分红</span><span>随时下载与发布</span></div></section> : <>
       <div className="mr-bookline"><strong>{draft?.name}</strong><span>记账日期 {isoDate(val('Assets', 'L1'))} · 上次 {isoDate(val('Assets', 'N1'))}</span><span>{products.length} 个产品 · {issues.length} 项收益待核实</span></div>
       <nav className="mr-tabs" aria-label="复盘内容">{['总览', '资产与产品', '负债', '记账设置', '待核实事项'].map(t => <button key={t} aria-current={tab === t ? 'page' : undefined} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}{t === '待核实事项' && issues.length > 0 ? ` (${issues.length})` : ''}</button>)}</nav>

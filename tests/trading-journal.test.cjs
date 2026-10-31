@@ -163,7 +163,6 @@ test('OneDrive edit/delete sync preserves unrelated remote rows and retries uplo
 });
 
 const { SyncQueue, completeSync } = require('../src/pages/TradingJournal/sync-queue.ts');
-const { InteractionRequiredAuthError } = require('@azure/msal-browser');
 test('background upload preserves new local records and serializes the next upload', async () => {
   const states = [];
   const queue = new SyncQueue(value => states.push(value));
@@ -224,9 +223,13 @@ test('a rejected background request does not stall later uploads or leave the qu
 test('automatic sync never opens an authorization popup and restores manual authorization after failure', async () => {
   const service = Object.create(OneDriveJournal.prototype);
   let popups = 0;
-  service.auth = {
-    async acquireTokenSilent() { throw new InteractionRequiredAuthError('interaction_required'); },
-    async acquireTokenPopup() { popups += 1; return { accessToken: 'test-token' }; },
+  service.account = { homeAccountId: 'account-a' };
+  service.session = {
+    async token(id, interactive) {
+      assert.equal(id, 'account-a');
+      if (!interactive) throw new Error('Microsoft 登录已过期');
+      popups += 1; return 'test-token';
+    },
   };
   service.syncWorkbook = async () => {
     await service.accessToken();

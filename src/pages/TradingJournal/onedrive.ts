@@ -1,4 +1,5 @@
-import { PublicClientApplication, InteractionRequiredAuthError, AccountInfo } from '@azure/msal-browser';
+import { AccountInfo } from '@azure/msal-browser';
+import { OneDriveSession, oneDriveSession } from '../../services/onedrive-session';
 import { Client, ResponseType } from '@microsoft/microsoft-graph-client';
 import { Trade, TradeChange, mergeForSync } from './model';
 import { readWorkbook, writeWorkbook } from './workbook';
@@ -12,7 +13,6 @@ interface RemoteFile {
   eTag?: string;
   size?: number;
 }
-const scopes = ['Files.ReadWrite'];
 export function normalizePath(path: string): string {
   const clean = path.trim().replace(/^\/+|\/+$/g, '');
   if (
@@ -25,7 +25,7 @@ export function normalizePath(path: string): string {
   return clean;
 }
 export class OneDriveJournal {
-  private auth: PublicClientApplication;
+  private session: OneDriveSession;
   protected client: Client;
   private account: AccountInfo;
   private allowInteractiveAuth = true;
@@ -33,15 +33,8 @@ export class OneDriveJournal {
   readonly config: DriveConfig;
   constructor(config: DriveConfig) {
     if (!/^[0-9a-f-]{36}$/i.test(config.clientId.trim())) throw new Error('请输入 Microsoft 应用的客户端 ID');
-    this.config = { clientId: config.clientId.trim(), path: normalizePath(config.path) };
-    this.auth = new PublicClientApplication({
-      auth: {
-        clientId: this.config.clientId,
-        authority: 'https://login.microsoftonline.com/common',
-        redirectUri: `${window.location.origin}${window.location.pathname}`,
-      },
-      cache: { cacheLocation: 'sessionStorage' },
-    });
+    this.config = { clientId: config.clientId.trim().toLowerCase(), path: normalizePath(config.path) };
+    this.session = oneDriveSession(this.config.clientId);
     this.client = Client.initWithMiddleware({
       authProvider: {
         getAccessToken: () => this.accessToken(),
@@ -49,32 +42,23 @@ export class OneDriveJournal {
     });
   }
   private async accessToken(): Promise<string> {
-    try {
-      return (await this.auth.acquireTokenSilent({ scopes, account: this.account })).accessToken;
-    } catch (error) {
-      if (!(error instanceof InteractionRequiredAuthError)) throw error;
-      if (!this.allowInteractiveAuth) throw new Error('Microsoft 登录已过期，请点击“立即同步”重新授权');
-      return (await this.auth.acquireTokenPopup({ scopes, account: this.account })).accessToken;
-    }
+    if (!this.account) throw new Error('请先连接 OneDrive');
+    return this.session.token(this.account.homeAccountId, this.allowInteractiveAuth);
   }
-  async restore(accountId: string): Promise<AccountInfo | null> {
-    await this.auth.initialize();
-    const account = this.auth.getAllAccounts().find((item) => item.homeAccountId === accountId);
+  async restore(accountId?: string): Promise<AccountInfo | null> {
+    const account = await this.session.restore(accountId);
     if (!account) return null;
     this.account = account;
-    await this.auth.acquireTokenSilent({ scopes, account });
     return account;
   }
-  async connect(): Promise<AccountInfo> {
-    await this.auth.initialize();
-    const result = await this.auth.loginPopup({ scopes, prompt: 'select_account' });
-    if (!result.account) throw new Error('Microsoft 登录未返回账户');
-    this.account = result.account;
-    return this.account;
+  async connect(switchAccount = false): Promise<AccountInfo> {
+    const account = await this.session.connect(switchAccount);
+    this.account = account;
+    return account;
   }
   async disconnect(): Promise<void> {
     this.cachedRead = undefined;
-    await this.auth.clearCache({ account: this.account });
+    await this.session.disconnect(this.account?.homeAccountId);
   }
   private endpoint(): string {
     return `/me/drive/root:/${this.config.path.split('/').map(encodeURIComponent).join('/')}`;

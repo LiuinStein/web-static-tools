@@ -60,7 +60,8 @@
     "eslint:fix": "npm run eslint -- --fix",
     "stylelint": "stylelint \"**/*.{css,scss,less}\"",
     "test:journal": "node --test tests/trading-journal.test.cjs",
-    "test:monthly": "node tests/monthly-review.test.cjs"
+    "test:monthly": "node tests/monthly-review.test.cjs",
+    "test:onedrive": "node tests/onedrive-session.test.cjs"
   },
   "publishConfig": {
     "access": "public"

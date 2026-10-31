@@ -108,7 +108,7 @@ export default function TradingJournal() {
   useEffect(() => {
     let cancelled = false;
     const saved = settings.current;
-    if (saved.config.clientId && saved.accountId) {
+    if (saved.config.clientId) {
       run(async () => {
         const service = new OneDriveJournal(saved.config);
         const user = await service.restore(saved.accountId);
@@ -222,23 +222,25 @@ export default function TradingJournal() {
       } else setNotice('记录已保存到本机。当前尚未连接 OneDrive，此记录不会自动出现在其他设备。');
     });
   }
-  async function connect() {
+  async function connect(switchAccount = false) {
     await run(async () => {
-      const service = new OneDriveJournal(config);
-      const user = await service.connect();
-      const key = `trading-journal:cloud:v1:${config.clientId}:${user.homeAccountId}:${service.config.path}`;
-      const saved = readJSON(key, emptyCache) as Cache;
-      const remote = await service.read();
-      localStorage.setItem(settingsKey, JSON.stringify({ config: service.config, accountId: user.homeAccountId }));
-      persist({ ...saved, remote, lastSync: new Date().toISOString() }, key);
-      setCacheKey(key);
-      setEditing(null);
-      setDrive(service);
-      setAccount(user.username || user.name || 'Microsoft 账户');
-      setConfig(service.config);
-      setShowSettings(false);
-      setDraft(blank());
-      setNotice('已加载该账户的云端日记。本机独立日记仍保留在本机，未自动上传。');
+      await syncQueue.current.run(async () => {
+        const service = new OneDriveJournal(config);
+        const user = await service.connect(switchAccount);
+        const key = `trading-journal:cloud:v1:${service.config.clientId}:${user.homeAccountId}:${service.config.path}`;
+        const saved = readJSON(key, emptyCache) as Cache;
+        const remote = await service.read();
+        localStorage.setItem(settingsKey, JSON.stringify({ config: service.config, accountId: user.homeAccountId }));
+        persist({ ...saved, remote, lastSync: new Date().toISOString() }, key);
+        setCacheKey(key);
+        setEditing(null);
+        setDrive(service);
+        setAccount(user.username || user.name || 'Microsoft 账户');
+        setConfig(service.config);
+        setShowSettings(false);
+        setDraft(blank());
+        setNotice('已加载当前路径的云端日记。原路径待同步记录仍保存在原缓存中，不会上传到新路径。');
+      });
     });
   }
   function startNew() {
@@ -344,21 +346,22 @@ export default function TradingJournal() {
               Excel 文件路径
               <input
                 value={config.path}
-                disabled={!!drive || busy}
+                disabled={busy || syncing}
                 onChange={(e) => setConfig({ ...config, path: e.target.value })}
               />
             </label>
             <p className="j-help">
               默认 /文档/BalanceSheet/TradingJournal.xlsx。请使用本页导出的 Excel
-              格式；目录和新文件会在首次保存时创建。连接后进入该账户独立日记，本机独立日记不会自动上传。
+              格式；目录和新文件会在首次保存时创建。与月度复盘共用登录，文件路径独立；连接后可修改路径并应用，无需重新登录。原路径的待同步记录会保留。
             </p>
             <div className="j-button-row">
               <Button className="j-btn" disabled={busy} type="normal" onClick={() => run(() => exportTrades([]))}>
                 下载空白 Excel 模板
               </Button>
-              <Button className="j-btn j-btn-primary" disabled={busy || syncing || !!drive} onClick={connect} type="primary">
-                登录并加载 Excel
+              <Button className="j-btn j-btn-primary" disabled={busy || syncing} onClick={() => connect()} type="primary">
+                {drive ? '应用文件路径' : '连接并加载 Excel'}
               </Button>
+              {drive && <Button className="j-btn" disabled={busy || syncing} onClick={() => connect(true)}>切换账户</Button>}
               {drive && (
                 <Button
                   className="j-btn"
@@ -379,7 +382,7 @@ export default function TradingJournal() {
                     })
                   }
                 >
-                  断开连接
+                  断开共享登录
                 </Button>
               )}
             </div>
