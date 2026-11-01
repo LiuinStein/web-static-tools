@@ -174,7 +174,7 @@ export default function () {
 
                 <FormItem colSpan={4} label="期末结余" required requiredMessage="必填" >
                     <Input placeholder="10000" onChange={(v) => {
-                        setBalance(parseFloat(v))
+                        setBalance(parseFloat(String(v)))
                     }} />
                 </FormItem>
 

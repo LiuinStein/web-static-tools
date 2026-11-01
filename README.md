@@ -6,12 +6,24 @@
 ## 使用
 
 ```bash
-# 安装依赖
+# 推荐 Node.js 24.19.0、npm 11.9.0；使用 nvm 时先运行 nvm use
+# 首次安装依赖（无需 --legacy-peer-deps）
 $ npm install
 
-# 启动服务
+# 按锁文件重现依赖版本（CI / 全新环境推荐）
+$ npm ci
+
+# 启动开发服务，修改后自动刷新
 $ npm start  # visit http://localhost:3333
+
+# TypeScript 类型检查
+$ npm run typecheck
+
+# 编译生产版本，输出到 build/
+$ npm run build
 ```
+
+安装版本由 `package-lock.json` 固定。国际化已迁移至兼容 React 17 的 react-intl 7；未被页面使用的旧图表、拖拽及工具依赖已清理。React、Fusion 组件库和主题保持原版本，避免改变现有交互和视觉样式。Fusion 的 Field / Validate 配套包固定为现用版本，并将主题包的组件依赖对齐到同一版 Next，避免旧组件被提升到顶层后导致样式导入失败。
 
 [More docs](https://ice.work/docs/guide/about).
 

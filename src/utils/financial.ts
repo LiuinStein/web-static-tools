@@ -195,8 +195,7 @@ export function calculateMoneyWeightedReturn(
         dates,
         finalValue,
         maxIterations = 1000,
-        tolerance = 1e-8,
-        daysOfYear = 365
+        tolerance = 1e-8
     } = options;
 
     if (cashFlows.length !== dates.length) {

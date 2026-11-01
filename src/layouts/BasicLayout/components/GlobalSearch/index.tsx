@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Search } from '@alifd/next';
 
 export interface IData {
+  [key: string]: string;
   label: string;
   value: string;
 }
