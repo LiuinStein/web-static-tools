@@ -11,9 +11,10 @@ const groupConfiguration: Array<[string, string, string, string[]]> = [
   ['Assets', '本人', 'HKD', ['Current Account', 'Debt Fund', 'Equity Fund', 'Stock']],
   ['WTH', 'WTH', 'RMB', ['Current Account', 'Debt Fund', 'Time Deposit']],
 ];
-export function productGroups(): ProductGroup[] {
+export function productGroups(book?: MonthlyWorkbook): ProductGroup[] {
   const groups: ProductGroup[] = [];
   for (const [sheet, member, currency, categories] of groupConfiguration) for (const category of categories) groups.push({ key: JSON.stringify([sheet, currency, category]), sheet, member, currency, category });
+  for (const group of book?.customProductGroups() || []) if (!groups.some(g => g.key === group.key)) groups.push(group);
   return groups;
 }
 
@@ -24,7 +25,7 @@ export function createProductEntry(book: MonthlyWorkbook, key: string, values: N
   const candidates = book.products().filter(p => groupKey(p) === key);
   // Row positions are an internal template mapping, not user-facing group choices.
   const anchor = candidates.find(p => p.account === account) || candidates[0];
-  const group = productGroups().find(item => item.key === key);
+  const group = productGroups(book).find(item => item.key === key);
   if (!group) throw new Error('请选择有效的所属分组');
   const cash = isCashAccount(group.category);
   const trades = cash ? rows.filter(t => t.amount !== 0 || t.shares !== 0 || t.price !== 0) : rows;
@@ -34,4 +35,18 @@ export function createProductEntry(book: MonthlyWorkbook, key: string, values: N
   book.updateProduct(created, { ...values, name, account, previous: 0, flow: mode === 'manual' ? values.flow : 0 });
   if (mode === 'transactions' && (!cash || trades.length)) book.saveTransactions(created, trades);
   return book.products().find(p => p.sheet === created.sheet && p.row === created.row)!;
+}
+
+export interface NewAssetGroupValues {
+  member: string; currency: string; category: string; account: string; name: string; balance: number; rate?: number;
+}
+export function createAssetGroup(book: MonthlyWorkbook, values: NewAssetGroupValues): Product {
+  const member = values.member.trim(), currency = values.currency.trim().toUpperCase(), category = normalizeProductCategory(values.category.trim());
+  const account = values.account.trim(), name = values.name.trim() || account;
+  if (!member || !currency || !category || !account || !name || !Number.isFinite(values.balance) || values.balance < 0) throw new Error('请完整填写分组、账户和有效的非负本期余额');
+  if (['Sub Total', 'Category'].includes(category) || ['Sub Total', 'Grand Total', 'Account', 'Exchange Rate:'].includes(account) || name === 'Product') throw new Error('名称与模板表头或合计标记重复，请使用其他名称');
+  if (!/^[A-Z]{3,8}$/.test(currency)) throw new Error('币种请使用 3 至 8 位英文字母代码，例如 EUR');
+  if (!book.currencyCodes().includes(currency) && currency !== 'RMB' && (!Number.isFinite(values.rate) || values.rate! <= 0)) throw new Error('新币种须填写有效的兑人民币汇率');
+  const group = book.ensureAssetGroup({ member, currency, category }, values.rate);
+  return createProductEntry(book, group.key, { name, account, balance: values.balance, flow: values.balance, due: '', note: '' }, 'manual');
 }

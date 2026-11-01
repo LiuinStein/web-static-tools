@@ -244,10 +244,12 @@ test('batch supports signed direct net investment, preserves balance edits and b
 });
 test('product sorting uses raw numbers, orders missing returns last and cycles one field at a time', async () => {
   const book = await fixture(); const a = book.products()[0], b = book.products()[1];
-  const rows = [{ ...a, name: '产品10', balance: 9 }, { ...b, name: '产品2', balance: 1000 }];
+  const rows = [{ ...a, name: '产品10', balance: 9, previous: 1000 }, { ...b, name: '产品2', balance: 1000, previous: 9 }];
   assert.equal(sortedProducts(rows, book, { field: 'name', direction: 'asc' })[0].name, '产品2');
   assert.equal(sortedProducts(rows, book, { field: 'balance', direction: 'asc' })[0].balance, 9);
   assert.equal(sortedProducts(rows, book, { field: 'balance', direction: 'desc' })[0].balance, 1000);
+  assert.equal(sortedProducts(rows, book, { field: 'previous', direction: 'asc' })[0].previous, 9);
+  assert.equal(sortedProducts(rows, book, { field: 'previous', direction: 'desc' }, new Set([productKey(a)]))[0].previous, 1000);
   for (const [field, col] of [['gain','J'],['xirr','K'],['twr','L']]) {
     book.set(a.sheet, `${col}${a.row}`, -0.1); book.set(b.sheet, `${col}${b.row}`, 0.2);
     assert.equal(sortedProducts(rows, book, { field, direction: 'asc' })[0].sheet, a.sheet);
@@ -259,6 +261,8 @@ test('product sorting uses raw numbers, orders missing returns last and cycles o
   const ascending = nextProductSort(null, 'balance'), descending = nextProductSort(ascending, 'balance');
   assert.equal(ascending.direction, 'asc'); assert.equal(descending.direction, 'desc'); assert.equal(nextProductSort(descending, 'balance'), null);
   assert.deepEqual(nextProductSort(descending, 'gain'), { field:'gain', direction:'asc' });
+  const previousAsc = nextProductSort(descending, 'previous'), previousDesc = nextProductSort(previousAsc, 'previous');
+  assert.equal(previousAsc.direction, 'asc'); assert.equal(previousDesc.direction, 'desc'); assert.equal(nextProductSort(previousDesc, 'previous'), null);
 });
 
 const { isCashAccount } = require('../src/pages/MonthlyReview/categories.ts');
@@ -376,4 +380,64 @@ test('reference incremental row updates match a full Excel reload for every form
   const full=await MonthlyWorkbook.open(await next.export());let checked=0;
   for(const sheet of next.sheets)for(const address of sheet.cells.keys())if(next.cell(sheet.name,address)?.formula){assert.deepEqual(next.value(sheet.name,address),full.value(sheet.name,address),`${sheet.name}!${address}`);checked++;}
   assert.ok(checked>1000);assert.equal(b.number('Liabilities','D4'),817.85);
+});
+
+test('asset and liability search accepts Chinese, full pinyin, initials and mixed account names', () => {
+  const { matchesSearch } = require('../src/pages/MonthlyReview/search.ts');
+  for (const query of ['招商', 'zhaoshang', 'ZS', 'zhao shang', 'zhaoshang8469', 'zs8469', '8469']) assert.equal(matchesSearch('招商8469', query), true, query);
+  for (const query of ['朝朝宝', 'zhaozhaobao', 'zzb']) assert.equal(matchesSearch('朝朝宝 招商银行 债券基金 本人 RMB', query), true, query);
+  assert.equal(matchesSearch('美团月付', 'mtyf'), true);
+  assert.equal(matchesSearch('美团月付', 'meituanyuefu'), true);
+  assert.equal(matchesSearch('CMB-8469', 'cmb'), true);
+  assert.equal(matchesSearch('朝朝宝', '基金'), false);
+});
+test('N/A values and original multiline placeholders display as an em dash', () => {
+  const { displayValue } = require('../src/pages/MonthlyReview/display.ts');
+  for (const value of [null, '', 'N/A', '#N/A', ' N/A ', 'N/A\ntoo many transactions to calculate']) assert.equal(displayValue(value), '—');
+  assert.equal(displayValue(0), '0'); assert.equal(displayValue('1st Day Every Month'), '1st Day Every Month');
+});
+
+test('new members, currencies and product types create a required asset and remain editable after export', {skip: !process.env.MONTHLY_TEMPLATE}, async () => {
+  const { createAssetGroup } = require('../src/pages/MonthlyReview/product-entry.ts');
+  let b=await MonthlyWorkbook.open(fs.readFileSync(process.env.MONTHLY_TEMPLATE));
+  const total=b.number('Analyze','O3'), income=b.number('Analyze','O7'), mine=b.number('Assets','D1'), wth=b.number('WTH','D1'), dueThisMonth=b.liquiditySummary()[1];
+  const members=b.members().length;
+  assert.throws(()=>createAssetGroup(b,{member:'父母',currency:'EUR',category:'其他理财',account:'',name:'',balance:100,rate:8}),/完整/);
+  assert.throws(()=>createAssetGroup(b,{member:'父母',currency:'EUR',category:'其他理财',account:'新账户',name:'',balance:100}),/汇率/);
+  assert.equal(b.members().length,members);
+  let p=createAssetGroup(b,{member:'父母',currency:'eur',category:'其他理财',account:'新账户',name:'',balance:100,rate:8});
+  assert.equal(p.name,'新账户'); assert.equal(p.member,'父母'); assert.equal(p.currency,'EUR'); assert.equal(p.previous,0);assert.equal(p.balance,100);assert.equal(p.flow,100);assert.ok(p.block);assert.equal(b.transactions(p.block).length,0);
+  assert.equal(b.number('Assets','D1'),mine);assert.equal(b.number('WTH','D1'),wth);assert.equal(b.number('Analyze','O3'),total+800);assert.equal(b.number('Analyze','O7'),income);
+  assert.equal(b.members().length,members+1);assert.ok(productGroups(b).some(g=>g.sheet===p.sheet&&g.currency==='EUR'&&g.category==='其他理财'));
+  assert.ok(Math.abs(b.liquiditySummary().reduce((a,v)=>a+v,0)-b.number('Analyze','O3'))<1e-7);
+  b.updateProduct(p,{...p,balance:110,flow:100});assert.ok(Math.abs(b.number('Analyze','O7')-income-80)<1e-7);
+  const exported=await b.export(),zip=await JSZip.loadAsync(exported);const manifest=await zip.file('xl/workbook.xml').async('string'),rels=await zip.file('xl/_rels/workbook.xml.rels').async('string'),types=await zip.file('[Content_Types].xml').async('string');
+  assert.match(manifest,/_MR_Config[^>]*state="hidden"/);assert.match(manifest,/Assets-M1/);assert.match(rels,/rIdMonthly/);assert.ok(types.includes(b.sheet(p.sheet).path));
+  b=await MonthlyWorkbook.open(exported);p=b.products().find(x=>x.name==='新账户');assert.equal(p.balance,110);assert.equal(p.flow,100);assert.equal(p.member,'父母');assert.equal(b.exchangeRate('EUR'),8);
+  b.saveTransactions(p,[{date:'2026-08-01',amount:100,shares:100,price:1,kind:'buy'}]);p=b.products().find(x=>x.name==='新账户');assert.equal(b.transactions(p.block).length,1);assert.equal(typeof b.value(p.sheet,`K${p.row}`),'number');
+  b.updateProduct(p,{...p,due:'2026-10-20',balance:110,flow:100}); assert.ok(Math.abs(b.liquiditySummary()[1]-dueThisMonth-880)<1e-7);
+  const copy=b.clone();let same=createAssetGroup(copy,{member:'父母',currency:'EUR',category:'其他理财',account:'第二账户',name:'第二产品',balance:10});assert.equal(copy.members().length,members+1);assert.equal(b.products().some(x=>x.name==='第二产品'),false);assert.equal(copy.products().filter(x=>x.member==='父母').length,2);assert.ok(Math.abs(copy.liquiditySummary().reduce((a,v)=>a+v,0)-copy.number('Analyze','O3'))<1e-7);
+  copy.deleteProduct(same);assert.equal(copy.products().filter(x=>x.member==='父母').length,1);
+  const previous=copy.number('Analyze','O3');copy.rollover('2026-11-01');p=copy.products().find(x=>x.name==='新账户');assert.equal(p.previous,110);assert.equal(copy.number(p.sheet,'H1'),880);assert.equal(copy.number('Analyze','O2'),previous);assert.equal(copy.number('Assets',copy.rateAddress('EUR',true)),8);
+  copy.set('Assets',copy.rateAddress('EUR'),9);assert.equal(copy.number(p.sheet,'D1'),990);assert.equal(copy.number(p.sheet,'P1'),110);
+  copy.deleteProduct(p);assert.equal(copy.products().some(x=>x.member==='父母'),false);assert.ok(productGroups(copy).some(g=>g.member==='父母'&&g.currency==='EUR'));await MonthlyWorkbook.open(await copy.export());
+});
+test('new currencies for existing members and new standard types contribute to the correct family totals', {skip: !process.env.MONTHLY_TEMPLATE}, async () => {
+  const {createAssetGroup}=require('../src/pages/MonthlyReview/product-entry.ts');const b=await MonthlyWorkbook.open(fs.readFileSync(process.env.MONTHLY_TEMPLATE));
+  const total=b.number('Analyze','O3'),usd=b.number('Analyze','P13'),wth=b.number('WTH','D1'),rate=b.exchangeRate('USD');
+  const p=createAssetGroup(b,{member:'WTH',currency:'USD',category:'Debt Fund',account:'新美元账户',name:'WTH美元理财',balance:100});
+  assert.equal(p.previous,0);assert.ok(Math.abs(b.number('Analyze','O3')-total-100*rate)<1e-7);assert.equal(b.number('Analyze','P13'),usd+100);assert.ok(Math.abs(b.number('WTH','D1')-wth-100*rate)<1e-7);
+  const old=b.number('Analyze','O3');createAssetGroup(b,{member:'本人',currency:'JPY',category:'Debt Fund',account:'日元账户',name:'日元资产',balance:1000,rate:0.05});assert.ok(Math.abs(b.number('Analyze','O3')-old-50)<1e-7);
+  const before=b.number('Analyze','O3');createAssetGroup(b,{member:'WTH',currency:'RMB',category:'Equity Fund',account:'新基金账户',name:'权益资产',balance:99});assert.equal(b.number('Analyze','O3'),before+99);
+  const loaded=await MonthlyWorkbook.open(await b.export());assert.equal(loaded.products().length,b.products().length);assert.ok(Math.abs(loaded.liquiditySummary().reduce((a,v)=>a+v,0)-loaded.number('Analyze','O3'))<1e-7);
+});
+
+test('extended workbook parts can be read by ExcelJS with hidden configuration, members and live formulas', async () => {
+  const {createAssetGroup}=require('../src/pages/MonthlyReview/product-entry.ts');const b=await fixture();
+  for(const s of ['XIRR','XIRR-WTH']) {b.set(s,'A1','Assets');b.set(s,'B1','in RMB');b.set(s,'C2','Product');}
+  const p=createAssetGroup(b,{member:'家庭成员',currency:'EUR',category:'债券',account:'欧元账户',name:'',balance:10,rate:8});
+  const data=await b.export(), native=new ExcelJS.Workbook();await native.xlsx.load(data);
+  assert.equal(native.getWorksheet('_MR_Config').state,'hidden');assert.equal(native.getWorksheet(p.sheet).getCell(`E${p.row}`).value,10);
+  assert.ok(native.getWorksheet(p.sheet).getCell('D1').value.formula);assert.equal(native.getWorksheet(p.block.sheet).getCell(`E${p.block.end}`).value.result,10);
+  const clone=b.clone();createAssetGroup(clone,{member:'新成员',currency:'RMB',category:'债券',account:'新账户',name:'新资产',balance:1});assert.equal(b.members().some(m=>m.member==='新成员'),false);assert.equal(clone.members().some(m=>m.member==='新成员'),true);
 });

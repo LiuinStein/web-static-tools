@@ -43,7 +43,7 @@
   }
 }
 
-.mr-product-flow { border-top: 1px solid #e6ebf3; padding-top: 20px; margin-top: 20px; }
+.mr-product-flow { min-width: 0; padding: 0; border: 0; border-top: 1px solid #e6ebf3; padding-top: 20px; margin-top: 20px; }
 .mr-product-flow h3 { margin: 0 0 14px; font-size: 15px; color: #35455e; }
 .mr-flow-options { display: flex; gap: 22px; flex-wrap: wrap; margin-bottom: 16px; }
 .mr-flow-options label { display: flex; align-items: center; gap: 7px; font-size: 13px; color: #40516a; cursor: pointer; }
@@ -79,3 +79,6 @@
 .mr-assets-table input[readonly], .mr-dialog input[readonly] { background: #f5f7fa; color: #7a879a; cursor: default; }
 .mr-liabilities-table input[data-liability-balance] { width: 140px; min-width: 120px; padding: 8px 10px; font-variant-numeric: tabular-nums; }
 .mr-liability-total { margin-left: auto; font-size: 12px; color: #6f8199; }
+
+.mr-product-flow[disabled] { opacity: .55; }
+.mr-product-flow[disabled] input, .mr-product-flow[disabled] label { cursor: default; }

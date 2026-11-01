@@ -3,13 +3,16 @@ import { Dialog } from '@alifd/next';
 import { Prompt } from 'react-router-dom';
 import Decimal from 'decimal.js';
 import AssetsTable from './AssetsTable';
+import AssetGroupDialog from './AssetGroupDialog';
 import LiabilitiesTable from './LiabilitiesTable';
 import { isCashAccount } from './categories';
+import { isUnavailable } from './display';
+import { matchesSearch } from './search';
 import { MonthlyBatch, productKey, balanceNumber } from './batch';
 import PageHeader from '@/components/PageHeader';
 import { monthlyOneDriveConfig } from './config';
 import { MonthlyWorkbook, Product, Transaction, Liability } from './workbook';
-import { createProductEntry, productGroups } from './product-entry';
+import { createAssetGroup, createProductEntry, productGroups } from './product-entry';
 import { cashFlowSummary } from './transactions';
 import TransactionsTable, { blankTransaction } from './TransactionsTable';
 import { Scalar, isoDate, serialDate } from './formula';
@@ -19,7 +22,7 @@ import './style.css';
 
 const moneyFormat = new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const money = (n: Scalar) => typeof n === 'number' ? moneyFormat.format(n) : '—';
-const pct = (n: Scalar) => typeof n === 'number' ? `${(n * 100).toFixed(2)}%` : n ? String(n).replace('Check inputs', '待核实').replace('Check date', '日期待核实').replace('Sale date?', '缺少卖出日期').replace('No transactions', '尚未登记交易') : '—';
+const pct = (n: Scalar) => typeof n === 'number' ? `${(n * 100).toFixed(2)}%` : !isUnavailable(n) ? String(n).replace('Check inputs', '待核实').replace('Check date', '日期待核实').replace('Sale date?', '缺少卖出日期').replace('No transactions', '尚未登记交易') : '—';
 const categoryNames: Record<string, string> = { 'Current Account': '活期账户', 'Debt Fund': '债券基金 / 理财', 'Time Deposit': '定期存款', 'Equity Fund': '权益基金', Stock: '股票' };
 const readConfig = () => {
   try {
@@ -58,7 +61,7 @@ export default function MonthlyReview() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [modal, setModal] = useState<null | 'product' | 'transactions' | 'newMonth' | 'liability' | 'cancelBatch'>(null);
+  const [modal, setModal] = useState<null | 'product' | 'transactions' | 'newMonth' | 'liability' | 'cancelBatch' | 'group'>(null);
   const [selectedLiability, setSelectedLiability] = useState<Liability | null>(null);
   const [liabilityForm, setLiabilityForm] = useState({ balance: '', repayment: '' });
   const [selected, setSelected] = useState<Product | null>(null);
@@ -69,6 +72,7 @@ export default function MonthlyReview() {
   const [initialTransactions, setInitialTransactions] = useState<Transaction[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [newDate, setNewDate] = useState('');
+  const [extraRates, setExtraRates] = useState<Record<string, string>>({});
   const [finance, setFinance] = useState({ date: '', usd: '', hkd: '', salary: '', wthSalary: '' });
   const input = useRef<HTMLInputElement>(null);
   const lock = useRef(false);
@@ -89,8 +93,9 @@ export default function MonthlyReview() {
   }, []);
   useEffect(() => {
     if (!book) return;
+    setExtraRates(Object.fromEntries(book.currencyCodes().filter(c => !['RMB', 'USD', 'HKD'].includes(c)).map(c => [c, String(book.exchangeRate(c))])));
     setFinance({ date: isoDate(book.value('Assets', 'L1')), usd: String(book.exchangeRate('USD') || ''), hkd: String(book.exchangeRate('HKD') || ''), salary: String(book.value('Analyze', 'C5') || 0), wthSalary: String(book.value('Analyze', 'I5') || 0) });
-  }, [savedBook, Boolean(batch)]);
+  }, [savedBook, Boolean(batch), book?.currencyCodes().join('|')]);
   useEffect(() => {
     if (!batch?.dirty) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
@@ -168,7 +173,10 @@ export default function MonthlyReview() {
       setModal(null);
     });
   }
-  const groupOptions = useMemo(() => productGroups(), []);
+  const groupOptions = useMemo(() => productGroups(book || undefined), [book]);
+  const memberOptions = useMemo(() => book?.members().map(m => m.member) || ['本人', 'WTH'], [book]);
+  const currencyOptions = useMemo(() => book?.currencyCodes() || ['RMB', 'USD', 'HKD'], [book]);
+  const liquidity = useMemo(() => book?.liquiditySummary() || [], [book]);
   const automaticFlow = isCashAccount(selected?.category || groupOptions.find(g => g.key === anchorKey)?.category || '');
   const formAutomaticFlow = [productForm.balance, ...(selected ? [productForm.previous] : [])].every(v => v.trim() !== '' && Number.isFinite(Number(v))) ? new Decimal(productForm.balance).minus(selected ? productForm.previous : 0).toNumber() : NaN;
   const accounts = useMemo(() => [...new Set(products.map(p => p.account))].sort((a, b) => a.localeCompare(b, 'zh-CN')), [products]);
@@ -176,12 +184,14 @@ export default function MonthlyReview() {
   useEffect(() => {
     if (book && categoryFilter && !products.some(p => p.category === categoryFilter)) setCategoryFilter('');
     if (book && accountFilter && !products.some(p => p.account === accountFilter)) setAccountFilter('');
-  }, [book, products, accountFilter, categoryFilter]);
-  const filtered = products.filter(p => (member === '全部' || p.member === member) && (currency === '全部' || p.currency === currency) && (!accountFilter || p.account === accountFilter) && (!categoryFilter || p.category === categoryFilter) && `${p.name} ${p.account} ${p.category} ${p.note}`.toLowerCase().includes(query.toLowerCase()));
+    if (book && member !== '全部' && !memberOptions.includes(member)) setMember('全部');
+    if (book && currency !== '全部' && !currencyOptions.includes(currency)) setCurrency('全部');
+  }, [book, products, accountFilter, categoryFilter, member, currency, memberOptions, currencyOptions]);
+  const filtered = products.filter(p => (member === '全部' || p.member === member) && (currency === '全部' || p.currency === currency) && (!accountFilter || p.account === accountFilter) && (!categoryFilter || p.category === categoryFilter) && matchesSearch(`${p.name} ${p.account} ${categoryNames[p.category] || p.category} ${p.member} ${p.currency} ${p.note}`, query));
   const visibleProducts = batch && onlyUnchecked ? filtered.filter(p => !batch.reviewed.has(productKey(p))) : filtered;
   const val = (s: string, a: string) => book?.value(s, a) ?? null;
   const groups = useMemo(() => products.reduce<Record<string, number>>((out, p) => { const rate = book?.exchangeRate(p.currency) || 0; out[p.category] = (out[p.category] || 0) + p.balance * rate; return out; }, {}), [book, products]);
-  const issues = useMemo(() => products.filter(p => ['K', 'L', 'M'].some(c => { const v = book?.value(p.sheet, `${c}${p.row}`); return typeof v === 'string' && v !== 'N/A' && v !== ''; })), [book, products]);
+  const issues = useMemo(() => products.filter(p => ['K', 'L', 'M'].some(c => { const v = book?.value(p.sheet, `${c}${p.row}`); return typeof v === 'string' && !isUnavailable(v); })), [book, products]);
   const savedStatus = draft?.published ? `已发布 · ${new Date(draft.published).toLocaleString('zh-CN')}` : '草稿仅保存在当前浏览器';
   function editProduct(p: Product) {
     const current = batch?.commitInputs();
@@ -192,7 +202,7 @@ export default function MonthlyReview() {
     setModal('product');
   }
   function newProduct() {
-    const group = groupOptions.find(g => (member === '全部' || g.member === member) && (currency === '全部' || g.currency === currency) && (!categoryFilter || g.category === categoryFilter)) || groupOptions[0];
+    const group = groupOptions.find(g => g.sheet === 'Assets' && g.currency === 'RMB' && g.category === 'Debt Fund') || groupOptions[0];
     const accountName = accountFilter || products.find(p => p.sheet === group?.sheet && p.currency === group?.currency && p.category === group?.category)?.account || accounts[0] || '';
     setSelected(null); setAnchorKey(group?.key || ''); setAccountChoice(accountName || '__new__'); setError('');
     setProductForm({ ...blankProduct, account: accountName }); setEntryMode('manual');
@@ -260,17 +270,21 @@ export default function MonthlyReview() {
         <div className="mr-metrics">{[['家庭总资产', val('Analyze', 'O3')], ['家庭负债', val('Analyze', 'P3')], ['家庭净资产', val('Analyze', 'Q3')], ['较上次净资产变动', val('Analyze', 'Q4')]].map(([label, value]) => <article key={String(label)}><span>{label}</span><strong>¥ {money(value)}</strong><small>折合人民币</small></article>)}</div>
         <div className="mr-overview"><section className="mr-panel"><h2>资产配置</h2><p>按当前汇率折合人民币</p>{Object.entries(groups).map(([name, amount], i) => <div className="mr-allocation" key={name}><div><span><i style={{ background: ['#3577eb', '#6a9aef', '#42b5aa', '#dfac4e', '#9274cf', '#db8098'][i % 6] }} />{categoryNames[name] || name}</span><strong>¥ {money(amount)}</strong></div><div className="mr-track"><span style={{ width: `${Math.max(0, amount / (Number(val('Analyze', 'O3')) || 1) * 100)}%`, background: ['#3577eb', '#6a9aef', '#42b5aa', '#dfac4e', '#9274cf', '#db8098'][i % 6] }} /></div></div>)}</section>
           <section className="mr-panel"><h2>本期收支与收益</h2><div className="mr-summary-row"><span>工资收入</span><strong>¥ {money(val('Analyze', 'O5'))}</strong></div><div className="mr-summary-row"><span>估算支出</span><strong>¥ {money(val('Analyze', 'O6'))}</strong></div><div className="mr-summary-row"><span>估算投资收益（含汇率影响）</span><strong>¥ {money(val('Analyze', 'O7'))}</strong></div><div className="mr-summary-row"><span>估算期间收益率</span><strong>{pct(val('Analyze', 'O8'))}</strong></div><div className="mr-summary-row"><span>估算年化收益率</span><strong>{pct(val('Analyze', 'Q8'))}</strong></div><p className="mr-footnote">沿用模板计算口径：期间收益以期末余额为分母，属于估算。产品平均收益率不等同于组合收益率。</p></section></div>
-        <section className="mr-panel"><h2>流动性概览</h2><div className="mr-liquidity">{[['受限资金', '32'], ['本月底前到期', '33'], ['随后三个月内到期', '34'], ['更晚到期', '35'], ['即时 / 未登记期限', '36']].map(([label, row]) => <div key={row}><span>{label}</span><strong>¥ {money(Number(val('Analyze', `O${row}`)) + Number(val('Analyze', `P${row}`)) * book.exchangeRate('USD') + Number(val('Analyze', `Q${row}`)) * book.exchangeRate('HKD'))}</strong></div>)}</div><p className="mr-footnote">按模板已登记到期日分类；即时余额不代表已核实实际赎回规则。</p></section>
+        <section className="mr-panel"><h2>流动性概览</h2><div className="mr-liquidity">{[['受限资金', '32'], ['本月底前到期', '33'], ['随后三个月内到期', '34'], ['更晚到期', '35'], ['即时 / 未登记期限', '36']].map(([label, row], index) => <div key={row}><span>{label}</span><strong>¥ {money(liquidity[index])}</strong></div>)}</div><p className="mr-footnote">按模板已登记到期日分类；即时余额不代表已核实实际赎回规则。</p></section>
       </>}
-      {tab === '资产' && <section className="mr-panel"><div className="mr-section-heading"><div><h2>资产</h2><p>更新余额，管理产品与现金流。金额均以产品原币显示。</p></div><div className="mr-toolbar-group">{!batch && <button disabled={busy || !products.length} onClick={() => startBatch()}>批量记账</button>}<button className="primary" disabled={busy} onClick={newProduct}>＋ 新增产品</button></div></div><div className="mr-filters"><input aria-label="搜索产品" placeholder="搜索产品、账户或备注" value={query} onChange={e => setQuery(e.target.value)} /><select aria-label="筛选成员" value={member} onChange={e => setMember(e.target.value)}><option value="全部">全部成员</option>{['本人', 'WTH'].map(v => <option key={v} value={v}>{v}</option>)}</select><select aria-label="筛选币种" value={currency} onChange={e => setCurrency(e.target.value)}><option value="全部">全部币种</option>{['RMB', 'USD', 'HKD'].map(v => <option key={v} value={v}>{v}</option>)}</select><select aria-label="筛选账户" value={accountFilter} onChange={e => setAccountFilter(e.target.value)}><option value="">全部账户</option>{accounts.map(v => <option key={v} value={v}>{v}</option>)}</select><select aria-label="筛选产品类型" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}><option value="">全部产品类型</option>{categories.map(v => <option key={v} value={v}>{categoryNames[v] || v}</option>)}</select></div>{batch && <div className="mr-batch-help"><p>金额输入在失去焦点后重算。直接填写本期余额，按 Tab / 回车核对并跳至下一行，Esc 退出连续录入；可从 Excel 粘贴一列余额，按当前可见顺序从所选行开始填入。可点击产品名称、余额或收益表头排序，录入时行顺序保持不变。活期账户净投入自动计算且不可编辑；其他产品净投入可直接填写，投入为正、回款为负，保存买卖记录后会按流水重算。上期余额只读，其他信息仍可通过「编辑」修改。</p><div className="mr-toolbar-group"><label><input type="checkbox" checked={onlyUnchecked} onChange={e => setOnlyUnchecked(e.target.checked)} />仅看未核对</label><button disabled={busy || !visibleProducts.length} onClick={() => setBatch(batch.check(visibleProducts.map(productKey), true))}>将当前可见项标为已核对</button><button disabled={busy || !batch.reviewed.size} onClick={() => setBatch(batch.check(products.map(productKey), false))}>清除核对标记</button></div></div>}
+      {tab === '资产' && <section className="mr-panel"><div className="mr-section-heading"><div><h2>资产</h2><p>更新余额，管理产品与现金流。金额均以产品原币显示。</p></div><div className="mr-toolbar-group">{!batch && <button disabled={busy || !products.length} onClick={() => startBatch()}>批量记账</button>}<button disabled={busy} onClick={() => { setError(''); setModal('group'); }}>＋ 新增分组</button><button className="primary" disabled={busy} onClick={newProduct}>＋ 新增产品</button></div></div><div className="mr-filters"><input aria-label="搜索产品" placeholder="搜索产品、账户或备注" value={query} onChange={e => setQuery(e.target.value)} /><select aria-label="筛选成员" value={member} onChange={e => setMember(e.target.value)}><option value="全部">全部成员</option>{memberOptions.map(v => <option key={v} value={v}>{v}</option>)}</select><select aria-label="筛选币种" value={currency} onChange={e => setCurrency(e.target.value)}><option value="全部">全部币种</option>{currencyOptions.map(v => <option key={v} value={v}>{v}</option>)}</select><select aria-label="筛选账户" value={accountFilter} onChange={e => setAccountFilter(e.target.value)}><option value="">全部账户</option>{accounts.map(v => <option key={v} value={v}>{v}</option>)}</select><select aria-label="筛选产品类型" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}><option value="">全部产品类型</option>{categories.map(v => <option key={v} value={v}>{categoryNames[v] || v}</option>)}</select></div>{batch && <div className="mr-batch-help"><p>金额输入在失去焦点后重算。直接填写本期余额，按 Tab / 回车核对并跳至下一行，Esc 退出连续录入；可从 Excel 粘贴一列余额，按当前可见顺序从所选行开始填入。可点击产品名称、余额或收益表头排序，录入时行顺序保持不变。活期账户净投入自动计算且不可编辑；其他产品净投入可直接填写，投入为正、回款为负，保存买卖记录后会按流水重算。上期余额只读，其他信息仍可通过「编辑」修改。</p><div className="mr-toolbar-group"><label><input type="checkbox" checked={onlyUnchecked} onChange={e => setOnlyUnchecked(e.target.checked)} />仅看未核对</label><button disabled={busy || !visibleProducts.length} onClick={() => setBatch(batch.check(visibleProducts.map(productKey), true))}>将当前可见项标为已核对</button><button disabled={busy || !batch.reviewed.size} onClick={() => setBatch(batch.check(products.map(productKey), false))}>清除核对标记</button></div></div>}
         <AssetsTable book={book} products={visibleProducts} batch={batch} busy={busy} categoryNames={categoryNames} money={money} pct={pct} onBatch={next => { setBatch(next); setError(''); setNotice(''); }} onError={setError} onEdit={editProduct} onTransactions={p => { setSelected(p); setTransactions(p.block ? book.transactions(p.block) : []); setError(''); setModal('transactions'); }} onDelete={p => { if (window.confirm(`删除“${p.name}”及其关联交易？这会更新本期汇总，历史月份不受影响。清仓请记录卖出。`)) run(() => mutate(next => next.deleteProduct(p))); }} /></section>}
       {tab === '负债' && <LiabilitiesTable book={book} batch={batch} busy={busy} money={money} onStart={() => startBatch(book, '负债')} onBatch={next => { setBatch(next); setError(''); setNotice(''); }} onError={setError} onEdit={editLiability} onZero={row => {
         if (batch) { setBatch(batch.balances([[productKey(row), '0']])); setError(''); setNotice(''); }
         else run(() => mutate(next => next.updateLiability(row, { balance: 0, repayment: String(row.repayment ?? '') })));
       }} />}
-      {tab === '记账设置' && <section className="mr-panel"><h2>日期、汇率与收入</h2><p>汇率表示 1 单位外币折合的人民币。工资为本次记账区间的累计收入。</p><div className="mr-grid">{field('本次记账日期', finance.date, v => setFinance({ ...finance, date: v }), 'date')}{field('上次记账日期', previousDate, () => {}, 'date', true)}<p className="mr-date-gap" aria-live="polite">{elapsedDays === null ? '请选择有效的本次记账日期以查看间隔天数。' : elapsedDays < 0 ? '本次记账日期早于上次记账日期，请调整。' : `本次记账日期距上次记账日期已过去 ${elapsedDays} 天。`}</p>{field('USD → RMB', finance.usd, v => setFinance({ ...finance, usd: v }), 'number')}{field('HKD → RMB', finance.hkd, v => setFinance({ ...finance, hkd: v }), 'number')}{field('本人工资收入', finance.salary, v => setFinance({ ...finance, salary: v }), 'number')}{field('WTH 工资收入', finance.wthSalary, v => setFinance({ ...finance, wthSalary: v }), 'number')}</div><button className="primary" disabled={busy} onClick={() => run(() => mutate(next => { const date = serialDate(finance.date); if (date <= next.number('Assets', 'N1')) throw new Error('记账日期须晚于上次记账日期'); if (products.some(p => p.block && next.transactions(p.block).some(t => t.date && serialDate(t.date) > date))) throw new Error('记账日期不能早于已有交易日期'); if (![finance.usd, finance.hkd].every(v => Number.isFinite(Number(v)) && Number(v) > 0) || ![finance.salary, finance.wthSalary].every(v => v !== '' && Number.isFinite(Number(v)))) throw new Error('汇率或收入无效'); next.set('Assets', 'L1', date); next.set('Assets', next.rateAddress('USD'), Number(finance.usd)); next.set('Assets', next.rateAddress('HKD'), Number(finance.hkd)); next.set('Analyze', 'C5', Number(finance.salary)); next.set('Analyze', 'I5', Number(finance.wthSalary)); }))}>保存并重新计算</button></section>}
+      {tab === '记账设置' && <section className="mr-panel"><h2>日期、汇率与收入</h2><p>汇率表示 1 单位外币折合的人民币。工资为本次记账区间的累计收入。</p><div className="mr-grid">{field('本次记账日期', finance.date, v => setFinance({ ...finance, date: v }), 'date')}{field('上次记账日期', previousDate, () => {}, 'date', true)}<p className="mr-date-gap" aria-live="polite">{elapsedDays === null ? '请选择有效的本次记账日期以查看间隔天数。' : elapsedDays < 0 ? '本次记账日期早于上次记账日期，请调整。' : `本次记账日期距上次记账日期已过去 ${elapsedDays} 天。`}</p>{field('USD → RMB', finance.usd, v => setFinance({ ...finance, usd: v }), 'number')}{field('HKD → RMB', finance.hkd, v => setFinance({ ...finance, hkd: v }), 'number')}{Object.entries(extraRates).map(([code, rate]) => <React.Fragment key={code}>{field(`${code} → RMB`, rate, value => setExtraRates({ ...extraRates, [code]: value }), 'number')}</React.Fragment>)}{field('本人工资收入', finance.salary, v => setFinance({ ...finance, salary: v }), 'number')}{field('WTH 工资收入', finance.wthSalary, v => setFinance({ ...finance, wthSalary: v }), 'number')}</div><button className="primary" disabled={busy} onClick={() => run(() => mutate(next => { const date = serialDate(finance.date); if (date <= next.number('Assets', 'N1')) throw new Error('记账日期须晚于上次记账日期'); if (products.some(p => p.block && next.transactions(p.block).some(t => t.date && serialDate(t.date) > date))) throw new Error('记账日期不能早于已有交易日期'); if (![finance.usd, finance.hkd, ...Object.values(extraRates)].every(v => Number.isFinite(Number(v)) && Number(v) > 0) || ![finance.salary, finance.wthSalary].every(v => v !== '' && Number.isFinite(Number(v)))) throw new Error('汇率或收入无效'); next.set('Assets', 'L1', date); next.set('Assets', next.rateAddress('USD'), Number(finance.usd)); next.set('Assets', next.rateAddress('HKD'), Number(finance.hkd)); for (const [code, rate] of Object.entries(extraRates)) next.set('Assets', next.rateAddress(code), Number(rate)); next.set('Analyze', 'C5', Number(finance.salary)); next.set('Analyze', 'I5', Number(finance.wthSalary)); }))}>保存并重新计算</button></section>}
       {tab === '待核实事项' && <section className="mr-panel"><h2>数据检查</h2><p>保留原始数据与提示，缺失信息不自动补造。修正产品或交易后会重新计算。</p>{issues.map(p => <div className="mr-issue" key={`${p.sheet}:${p.row}`}><strong>{p.name} · {p.account}</strong><span>XIRR：{pct(val(p.sheet, `K${p.row}`))} / TWR：{pct(val(p.sheet, `L${p.row}`))}</span><button onClick={() => { setSelected(p); setTransactions(p.block ? book.transactions(p.block) : []); setError(''); setModal('transactions'); }}>检查交易</button></div>)}{Number(val('Liabilities', 'F1')) !== Number(val('Liabilities', 'H12')) && <div className="mr-issue">上期负债总额 {money(val('Liabilities', 'F1'))} 与上期明细合计 {money(val('Liabilities', 'H12'))} 不一致。历史快照保持原值，请核对来源。</div>}<details><summary>查看模板原有说明</summary>{[...book.sheet('Analyze').cells.keys()].filter(a => /^B\d+$/.test(a) && +a.slice(1) >= 40).map(a => <p key={a}>{val('Analyze', a)}</p>)}</details><p className="mr-footnote">#NUM! 表示现金流或日期无法求得收益率；#DIV/0! 表示缺少有效份额或计算分母为零。</p></section>}
     </>}
+    <AssetGroupDialog visible={modal === 'group'} busy={busy} book={book} error={error} categoryNames={categoryNames} onClose={() => setModal(null)} onSave={values => run(async () => {
+      await mutate(next => { createAssetGroup(next, values); });
+      setMember(values.member.trim()); setCurrency(values.currency.trim().toUpperCase()); setAccountFilter(values.account.trim()); setCategoryFilter(''); setQuery(''); setOnlyUnchecked(false); setModal(null);
+    })} />
     <Dialog visible={modal === 'product'} title={selected ? '编辑产品' : '新增产品'} footer={false} onClose={() => setModal(null)} className={`mr-dialog ${selected ? '' : 'mr-wide-dialog mr-product-dialog'}`}>
       {error && <div className="mr-message error" role="alert">{error}</div>}
       <form onSubmit={saveProduct}>
@@ -285,22 +299,22 @@ export default function MonthlyReview() {
           {field('到期日（可留空）', productForm.due, v => setProductForm({ ...productForm, due: v }), 'date')}
           {field('备注', productForm.note, v => setProductForm({ ...productForm, note: v }))}
         </div>
-        {!selected && !automaticFlow && <section className="mr-product-flow">
+        {!selected && <fieldset disabled={automaticFlow || busy} aria-disabled={automaticFlow} className="mr-product-flow">
           <h3>本期交易与净投入</h3>
           <div className="mr-flow-options" role="radiogroup" aria-label="净投入录入方式">
-            <label><input type="radio" name="product-flow-mode" checked={entryMode === 'manual'} disabled={busy} onChange={() => { setProductForm({ ...productForm, flow: String(initialSummary.net) }); setEntryMode('manual'); }} />直接填写净投入</label>
-            <label><input type="radio" name="product-flow-mode" checked={entryMode === 'transactions'} disabled={busy} onChange={() => setEntryMode('transactions')} />通过买卖记录计算</label>
+            <label><input type="radio" name="product-flow-mode" checked={automaticFlow || entryMode === 'manual'} disabled={busy} onChange={() => { setProductForm({ ...productForm, flow: String(initialSummary.net) }); setEntryMode('manual'); }} />直接填写净投入</label>
+            <label><input type="radio" name="product-flow-mode" checked={!automaticFlow && entryMode === 'transactions'} disabled={busy} onChange={() => setEntryMode('transactions')} />通过买卖记录计算</label>
           </div>
-          {entryMode === 'transactions' ? <>
+          {entryMode === 'transactions' && !automaticFlow ? <>
             <p>按日期顺序登记上次记账日期 {previousDate} 之后、至 {accountingDate}（含当日）的交易，支持跨月、多次买入卖出及分红。金额填实际收付金额，份额填正数。</p>
             <TransactionsTable rows={initialTransactions} onChange={setInitialTransactions} date={accountingDate} disabled={busy} labelPrefix="新增交易" />
             <div className="mr-entry-summary"><div><span>买入合计</span><strong>{money(initialSummary.buys)}</strong></div><div><span>卖出回款</span><strong>{money(initialSummary.sales)}</strong></div><div><span>现金分红</span><strong>{money(initialSummary.dividends)}</strong></div><div><span>本期净投入</span><strong>{money(initialSummary.net)}</strong></div></div>
             <p className="mr-footnote">净投入 = 买入 − 卖出回款 − 现金分红。本期余额请填写记账日实际余额；全部卖出时会自动归零。分红需填写除息后净值。</p>
           </> : <>
-            {field('期间净投入（投入为正，回款为负）', productForm.flow, v => setProductForm({ ...productForm, flow: v }), 'number')}
-            <p className="mr-footnote">直接填写模式仅保存净投入，不保存逐笔交易。以后补齐交易日期与明细后，才能计算 XIRR、TWR。</p>
+            {field('期间净投入（投入为正，回款为负）', automaticFlow ? Number.isFinite(formAutomaticFlow) ? String(formAutomaticFlow) : '' : productForm.flow, v => setProductForm({ ...productForm, flow: v }), 'number')}
+            <p className="mr-footnote">{automaticFlow ? '活期账户净投入自动计算，此处不可修改。' : '直接填写模式仅保存净投入，不保存逐笔交易。以后补齐交易日期与明细后，才能计算 XIRR、TWR。'}</p>
           </>}
-        </section>}
+        </fieldset>}
         <p className="mr-footnote">{automaticFlow ? '活期账户净投入由本期余额减上期余额自动计算，买卖记录不会改写此规则。' : selected ? '买卖流水保存后，期间净投入按交易日期重新汇总。' : '新增产品不承接上期余额；新账户在保存产品后自动加入账户列表。'}</p>
         <div className="mr-actions"><button type="button" disabled={busy} onClick={() => setModal(null)}>取消</button><button className="primary" disabled={busy}>{batch ? '应用到批量记账' : '保存产品'}</button></div>
       </form>

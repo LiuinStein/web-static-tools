@@ -3,8 +3,12 @@ import { isCashAccount, normalizeProductCategory } from './categories';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { FormulaEngine, Scalar, letters, column, serialDate, isoDate } from './formula';
 import { cashFlowSummary, validateTransactions } from './transactions';
+import type { ProductGroup } from './product-entry';
 
 const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+const REL_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
+const DOCUMENT_REL_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const CONFIG_SHEET = '_MR_Config';
 const children = (node: any, name: string): any[] => Array.from(node.childNodes || []).filter((x: any) => x.localName === name);
 const first = (node: any, name: string): any => children(node, name)[0];
 const descendants = (node: any, name: string): any[] => Array.from(node.getElementsByTagNameNS('*', name));
@@ -77,6 +81,8 @@ export class MonthlyWorkbook {
       book.sheets.push({ name: s.getAttribute('name'), path, doc, cells: new Map() });
     }
     book.extras.set('xl/workbook.xml', wb);
+    book.extras.set('xl/_rels/workbook.xml.rels', rels);
+    book.extras.set('[Content_Types].xml', parse(await read('[Content_Types].xml')));
     for (const path of Object.keys(zip.files).filter(p => /charts\/.*\.xml$/.test(p))) book.extras.set(path, parse(await read(path)));
     book.reindex(); book.applyCashAccountRules(); book.validate(); return book;
   }
@@ -102,7 +108,7 @@ export class MonthlyWorkbook {
   }
   value(sheet: string, address: string): Scalar { return this.engine.get(sheet, address); }
   number(sheet: string, address: string): number { const v = this.value(sheet, address); return typeof v === 'number' ? v : 0; }
-  rateAddress(currency: 'USD' | 'HKD', previous = false): string {
+  rateAddress(currency: string, previous = false): string {
     for (const address of this.sheet('Assets').cells.keys()) {
       if (!/^A\d+$/.test(address) || this.value('Assets', address) !== 'Assets') continue;
       const row = address.slice(1);
@@ -112,7 +118,188 @@ export class MonthlyWorkbook {
   }
   exchangeRate(currency: string): number {
     if (currency === 'RMB') return 1;
-    try { return this.number('Assets', this.rateAddress(currency as 'USD' | 'HKD')); } catch { return 0; }
+    try { return this.number('Assets', this.rateAddress(currency)); } catch { return 0; }
+  }
+  customProductGroups(): ProductGroup[] {
+    const sheet = this.sheets.find(s => s.name === CONFIG_SHEET);
+    if (!sheet) return [];
+    if (this.value(CONFIG_SHEET, 'A1') !== 'Monthly review configuration v1') throw new Error('账本中存在同名配置表，请先重命名 _MR_Config 工作表');
+    return [...sheet.cells.keys()].filter(a => /^A\d+$/.test(a) && +a.slice(1) >= 3).map(a => {
+      const row = a.slice(1), member = String(this.value(CONFIG_SHEET, a) || ''), assetSheet = String(this.value(CONFIG_SHEET, `B${row}`) || '');
+      const currency = String(this.value(CONFIG_SHEET, `D${row}`) || ''), category = String(this.value(CONFIG_SHEET, `E${row}`) || '');
+      return { key: JSON.stringify([assetSheet, currency, category]), member, sheet: assetSheet, currency, category };
+    }).filter(g => g.member && g.sheet && g.currency && g.category);
+  }
+  members(): Array<{ member: string; sheet: string; xirr: string }> {
+    const members = [{ member: '本人', sheet: 'Assets', xirr: 'XIRR' }, { member: 'WTH', sheet: 'WTH', xirr: 'XIRR-WTH' }];
+    for (const group of this.customProductGroups()) if (!members.some(m => m.sheet === group.sheet)) {
+      const config = this.sheet(CONFIG_SHEET);
+      const row = [...config.cells.keys()].find(a => /^B\d+$/.test(a) && this.value(CONFIG_SHEET, a) === group.sheet)!.slice(1);
+      members.push({ member: group.member, sheet: group.sheet, xirr: String(this.value(CONFIG_SHEET, `C${row}`)) });
+    }
+    return members;
+  }
+  private xirrSheet(sheet: string): string {
+    const member = this.members().find(m => m.sheet === sheet);
+    if (!member) throw new Error('找不到成员对应的交易工作表');
+    return member.xirr;
+  }
+  private currencySections(sheet: string): Array<{ currency: string; header: number; total: number }> {
+    const rows = [...this.sheet(sheet).cells.keys()].filter(a => /^A\d+$/.test(a)).map(a => +a.slice(1)).sort((a, b) => a - b);
+    const sections: Array<{ currency: string; header: number; total: number }> = [];
+    for (const row of rows) {
+      if (this.value(sheet, `A${row}`) === 'Assets') sections.push({ currency: String(this.value(sheet, `B${row}`)).replace(/^in /, ''), header: row, total: 0 });
+      if (this.value(sheet, `A${row}`) === 'Grand Total' && sections.length) sections[sections.length - 1].total = row;
+    }
+    return sections;
+  }
+  currencyCodes(): string[] { return this.currencySections('Assets').map(s => s.currency); }
+  private lastContentRow(sheet: string): number {
+    return Math.max(2, ...[...this.sheet(sheet).cells.keys()].filter(a => { const cell = this.cell(sheet, a); return cell?.value !== null || cell?.formula; }).map(a => +a.replace(/[A-Z]+/, '')));
+  }
+  private addSheet(name: string, template?: string, hidden = false) {
+    if (this.sheets.some(s => s.name === name)) throw new Error(`工作表 ${name} 已存在`);
+    const wb = this.extras.get('xl/workbook.xml'), rels = this.extras.get('xl/_rels/workbook.xml.rels'), types = this.extras.get('[Content_Types].xml');
+    const id = Math.max(0, ...descendants(wb, 'sheet').map(s => Number(s.getAttribute('sheetId')))) + 1;
+    let part = id; while (this.zip.file(`xl/worksheets/sheet${part}.xml`) || this.sheets.some(s => s.path === `xl/worksheets/sheet${part}.xml`)) part++;
+    let relId = `rIdMonthly${part}`; while (descendants(rels, 'Relationship').some(r => r.getAttribute('Id') === relId)) relId += 'x';
+    const entry = this.element(wb, 'sheet'); entry.setAttribute('name', name); entry.setAttribute('sheetId', String(id)); entry.setAttributeNS(DOCUMENT_REL_NS, 'r:id', relId); if (hidden) entry.setAttribute('state', 'hidden');
+    descendants(wb, 'sheets')[0].appendChild(entry);
+    const rel = rels.createElementNS(REL_NS, 'Relationship'); rel.setAttribute('Id', relId); rel.setAttribute('Type', `${DOCUMENT_REL_NS}/worksheet`); rel.setAttribute('Target', `worksheets/sheet${part}.xml`); rels.documentElement.appendChild(rel);
+    const type = types.createElementNS('http://schemas.openxmlformats.org/package/2006/content-types', 'Override'); type.setAttribute('PartName', `/xl/worksheets/sheet${part}.xml`); type.setAttribute('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml'); types.documentElement.appendChild(type);
+    const doc = parse(`<worksheet xmlns="${NS}"><sheetData/></worksheet>`);
+    if (template) for (const tag of ['sheetViews', 'sheetFormatPr', 'cols']) {
+      const original = descendants(this.sheet(template).doc, tag)[0]; if (!original) continue;
+      const node = doc.importNode(original, true);
+      for (const view of descendants(node, 'sheetView')) { view.removeAttribute('tabSelected'); view.removeAttribute('topLeftCell'); }
+      for (const child of [...descendants(node, 'selection'), ...descendants(node, 'pane')]) child.parentNode.removeChild(child);
+      doc.documentElement.insertBefore(node, descendants(doc, 'sheetData')[0]);
+    }
+    this.sheets.push({ name, path: `xl/worksheets/sheet${part}.xml`, doc, cells: new Map() });
+  }
+  private copyRowFrom(source: string, sourceRow: number, target: string, targetRow: number, width: number, values = false) {
+    for (let col = 1; col <= width; col++) {
+      const from = `${letters(col)}${sourceRow}`, to = `${letters(col)}${targetRow}`, node = this.sheet(source).cells.get(from), cell = this.node(target, to);
+      if (node?.hasAttribute('s')) cell.setAttribute('s', node.getAttribute('s'));
+      if (values) this.set(target, to, this.value(source, from));
+    }
+  }
+  ensureAssetGroup(values: { member: string; currency: string; category: string }, rate?: number): ProductGroup {
+    let member = this.members().find(m => m.member === values.member);
+    const isNewMember = !member;
+    if (!member) {
+      let suffix = 1; while (this.sheets.some(s => s.name === `Assets-M${suffix}` || s.name === `XIRR-M${suffix}`)) suffix++;
+      member = { member: values.member, sheet: `Assets-M${suffix}`, xirr: `XIRR-M${suffix}` };
+      this.addSheet(member.sheet, 'WTH'); this.addSheet(member.xirr, 'XIRR-WTH');
+      this.copyRowFrom('WTH', 1, member.sheet, 1, 14, true); this.copyRowFrom('WTH', 2, member.sheet, 2, 14, true);
+      this.set(member.sheet, 'H1', 0); this.formula(member.sheet, 'D1', 'E3'); this.formula(member.sheet, 'E1', 'E3'); this.formula(member.sheet, 'F1', 'IF(D1=0,0,E1/D1)'); this.formula(member.sheet, 'J1', 'D1-H1'); this.formula(member.sheet, 'L1', 'Assets!L1');
+      this.set(member.sheet, 'M1', 'Last Accounting Time'); this.formula(member.sheet, 'N1', 'Assets!N1');
+      this.set(member.sheet, 'O1', 'Est. investment income'); this.formula(member.sheet, 'P1', 'J3');
+      this.set(member.sheet, 'O2', 'Member'); this.set(member.sheet, 'P2', values.member);
+      this.copyRowFrom('WTH', this.currencySections('WTH')[0].total, member.sheet, 3, 14);
+      this.set(member.sheet, 'A3', 'Grand Total'); for (const col of ['E', 'I', 'J']) this.formula(member.sheet, `${col}3`, '0'); this.set(member.sheet, 'H3', 0); this.set(member.sheet, 'F3', 1);
+      this.copyRowFrom('XIRR-WTH', 1, member.xirr, 1, 9, true); this.copyRowFrom('XIRR-WTH', 2, member.xirr, 2, 9, true);
+    }
+    const group: ProductGroup = { ...values, sheet: member.sheet, key: JSON.stringify([member.sheet, values.currency, values.category]) };
+    if (!this.customProductGroups().some(g => g.key === group.key)) {
+      if (!this.sheets.some(s => s.name === CONFIG_SHEET)) {
+        this.addSheet(CONFIG_SHEET, undefined, true); this.set(CONFIG_SHEET, 'A1', 'Monthly review configuration v1');
+        ['Member', 'Asset sheet', 'XIRR sheet', 'Currency', 'Product type'].forEach((value, i) => this.set(CONFIG_SHEET, `${letters(i + 1)}2`, value));
+      }
+      const row = this.lastContentRow(CONFIG_SHEET) + 1;
+      [values.member, member.sheet, member.xirr, values.currency, values.category].forEach((value, i) => this.set(CONFIG_SHEET, `${letters(i + 1)}${row}`, value));
+    }
+    this.ensureCurrency('Assets', values.currency, rate);
+    this.ensureCurrency(member.sheet, values.currency, rate);
+    if (isNewMember) {
+      for (const [address, addition] of [['O2', `${quote(member.sheet)}!H1`], ['O3', `${quote(member.sheet)}!D1`], ['B1', `${quote(member.sheet)}!D1`], ['O7', `${quote(member.sheet)}!P1`], ['O6', `${quote(member.sheet)}!P1-(${quote(member.sheet)}!D1-${quote(member.sheet)}!H1)`]]) this.appendFormula('Analyze', address, addition);
+    }
+    return group;
+  }
+  private appendFormula(sheet: string, address: string, addition: string) {
+    const original = this.cell(sheet, address)?.formula || String(this.number(sheet, address));
+    this.formula(sheet, address, `(${original})+(${addition})`);
+  }
+  private ensureCurrency(sheet: string, currency: string, rate?: number) {
+    if (this.currencySections(sheet).some(s => s.currency === currency)) return;
+    const header = this.lastContentRow(sheet) + 2, total = header + 2;
+    const referenceHeader = this.currencySections('Assets').find(s => s.currency === 'USD')?.header ?? 1;
+    this.copyRowFrom('Assets', referenceHeader, sheet, header, 14); this.copyRowFrom('WTH', 2, sheet, header + 1, 14, true);
+    for (const [col, value] of [['A', 'Assets'], ['B', `in ${currency}`], ['C', 'Exchange Rate:'], ['G', 'Last Month Ex-Rate:'], ['I', 'Ex-Rate Float:']] as Array<[string, Scalar]>) this.set(sheet, `${col}${header}`, value);
+    if (sheet === 'Assets') { if (!rate || !Number.isFinite(rate) || rate <= 0) throw new Error('请填写有效的新币种兑人民币汇率'); this.set(sheet, `D${header}`, rate); this.set(sheet, `H${header}`, rate); }
+    else { this.formula(sheet, `D${header}`, `Assets!${this.rateAddress(currency)}`); this.formula(sheet, `H${header}`, `Assets!${this.rateAddress(currency, true)}`); }
+    this.formula(sheet, `E${header}`, `E${total}*D${header}`); this.formula(sheet, `F${header}`, `IF(D1=0,0,E${header}/D1)`); this.formula(sheet, `J${header}`, `D${header}/H${header}-1`);
+    this.copyRowFrom('WTH', this.currencySections('WTH')[0].total, sheet, total, 14);
+    this.set(sheet, `A${total}`, 'Grand Total'); for (const col of ['E', 'I', 'J']) this.formula(sheet, `${col}${total}`, '0'); this.set(sheet, `H${total}`, 0); this.set(sheet, `F${total}`, 1);
+    this.appendFormula(sheet, 'D1', `E${header}`);
+    const gain = `J${total}*D${header}+H${total}*(D${header}-H${header})`;
+    if (sheet === 'Assets' || sheet === 'WTH') this.appendFormula('Analyze', sheet === 'Assets' ? 'C7' : 'I7', `${quote(sheet)}!J${total}*${quote(sheet)}!D${header}+${quote(sheet)}!H${total}*(${quote(sheet)}!D${header}-${quote(sheet)}!H${header})`);
+    else this.appendFormula(sheet, 'P1', gain);
+    const xirr = this.xirrSheet(sheet), start = this.lastContentRow(xirr) + 2;
+    this.copyRowFrom('XIRR-WTH', 1, xirr, start, 9, true); this.set(xirr, `B${start}`, `in ${currency}`); this.copyRowFrom('XIRR-WTH', 2, xirr, start + 1, 9, true);
+    if (sheet === 'Assets') this.analyzeCurrencyColumn(currency);
+  }
+  private analyzeCurrencyColumn(currency: string): string {
+    const standard: Record<string, string> = { RMB: 'O', USD: 'P', HKD: 'Q' };
+    if (standard[currency]) return standard[currency];
+    for (const a of this.sheet('Analyze').cells.keys()) if (/^[A-Z]+11$/.test(a) && column(a.replace(/\d+/, '')) >= 19 && this.value('Analyze', a) === currency) return a.replace(/\d+/, '');
+    let col = 19; while (this.value('Analyze', `${letters(col)}11`)) col++;
+    const target = letters(col);
+    for (const row of [10, 11, ...this.analyzeCategoryRows(), 31, ...this.liquidityRows()]) {
+      const source = this.sheet('Analyze').cells.get(`Q${row}`), node = this.node('Analyze', `${target}${row}`);
+      if (source?.hasAttribute('s')) node.setAttribute('s', source.getAttribute('s'));
+      this.set('Analyze', `${target}${row}`, 0);
+    }
+    this.set('Analyze', `${target}11`, currency);
+    const liquidity = this.liquidityRows(); this.set('Analyze', `${target}${liquidity[0] - 1}`, currency);
+    const categories = this.analyzeCategoryRows(); this.formula('Analyze', `${target}10`, `SUM(${target}${categories[0] || 12}:${target}${categories.slice(-1)[0] || 16})`);
+    return target;
+  }
+  private analyzeCategoryRows(): number[] {
+    const rows: number[] = [];
+    for (let row = 12; row < 1000 && this.value('Analyze', `N${row}`); row++) rows.push(row);
+    return rows;
+  }
+  private analyzeCategoryRow(category: string): number {
+    const rows = this.analyzeCategoryRows();
+    const existing = rows.find(r => normalizeProductCategory(String(this.value('Analyze', `N${r}`)).trim()) === category);
+    if (existing !== undefined) return existing;
+    const at = rows.slice(-1)[0] ? rows.slice(-1)[0] + 1 : 17;
+    this.shiftRows('Analyze', at, 1); this.copyStyle('Analyze', at - 1, at, Math.max(17, ...this.currencyCodes().map(c => column(this.analyzeCurrencyColumn(c)))));
+    for (const col of ['B', 'H', 'N']) this.set('Analyze', `${col}${at}`, category);
+    for (const col of ['C', 'D', 'E', 'I', 'J', 'K']) this.set('Analyze', `${col}${at}`, 0);
+    for (const [col, a, b] of [['O', 'C', 'I'], ['P', 'D', 'J'], ['Q', 'E', 'K']]) this.formula('Analyze', `${col}${at}`, `${a}${at}+${b}${at}`);
+    for (const currency of this.currencyCodes()) {
+      const col = this.analyzeCurrencyColumn(currency); if (column(col) > 17) this.set('Analyze', `${col}${at}`, 0);
+      this.formula('Analyze', `${col}10`, `SUM(${col}12:${col}${at})`);
+    }
+    return at;
+  }
+  liquidityRows(): number[] {
+    const marker = [...this.sheet('Analyze').cells.keys()].find(a => /^M\d+$/.test(a) && this.value('Analyze', a) === 'Liquidity');
+    const start = marker ? +marker.slice(1) + 2 : 32;
+    return Array.from({ length: 5 }, (_, i) => start + i);
+  }
+  liquiditySummary(): number[] {
+    return this.liquidityRows().map(row => this.currencyCodes().reduce((total, currency) => total + this.number('Analyze', `${this.analyzeCurrencyColumn(currency)}${row}`) * this.exchangeRate(currency), 0));
+  }
+  private includeProductGroupInAnalyze(group: { sheet: string; currency: string; category: string }, productRow: number, categoryTotal: number) {
+    const row = this.analyzeCategoryRow(group.category), familyCol = this.analyzeCurrencyColumn(group.currency);
+    const baseIndex = ['RMB', 'USD', 'HKD'].indexOf(group.currency);
+    const col = baseIndex < 0 ? familyCol : group.sheet === 'Assets' ? ['C', 'D', 'E'][baseIndex] : group.sheet === 'WTH' ? ['I', 'J', 'K'][baseIndex] : familyCol;
+    this.appendFormula('Analyze', `${col}${row}`, `${quote(group.sheet)}!E${categoryTotal}`);
+    const liquidity = this.liquidityRows(), sheet = quote(group.sheet), balances = `${sheet}!E${productRow}:E${productRow}`, dates = `${sheet}!G${productRow}:G${productRow}`;
+    const limits = [`Assets!$L$1`, `N${liquidity[1]}`, `N${liquidity[2]}`];
+    const additions = [
+      `SUMIFS(${balances},${dates},\">\"&${limits[0]},${dates},\"<=\"&${limits[1]})`,
+      `SUMIFS(${balances},${dates},\">\"&${limits[1]},${dates},\"<=\"&${limits[2]})`,
+      `SUMIF(${dates},\">\"&${limits[2]},${balances})`,
+    ];
+    additions.forEach((formula, i) => this.appendFormula('Analyze', `${col}${liquidity[i + 1]}`, formula));
+    if (col !== familyCol) {
+      const section = this.currencySections(group.sheet).find(s => s.currency === group.currency)!;
+      this.formula('Analyze', `${col}${liquidity[4]}`, `${sheet}!E${section.header === 1 ? 1 : section.total}-SUM(${col}${liquidity[0]}:${col}${liquidity[3]})`);
+    } else this.appendFormula('Analyze', `${col}${liquidity[4]}`, `SUM(${balances})-(${additions.join('+')})`);
   }
   private element(doc: any, name: string, text?: string) { const node = doc.createElementNS(NS, name); if (text !== undefined) node.appendChild(doc.createTextNode(text)); return node; }
   node(sheet: string, address: string): any {
@@ -132,7 +319,8 @@ export class MonthlyWorkbook {
   formula(s: string, a: string, f: string) { this.set(s, a, null, f); }
   products(): Product[] {
     const out: Product[] = [];
-    for (const s of this.sheets.filter(x => ['Assets', 'WTH'].includes(x.name))) {
+    const members = this.members();
+    for (const s of this.sheets.filter(x => members.some(m => m.sheet === x.name))) {
       let currency = 'RMB', category = '', account = '';
       const rows = [...new Set([...s.cells.keys()].map(a => +a.replace(/[A-Z]+/, '')))].sort((a, b) => a - b);
       for (const row of rows) {
@@ -142,7 +330,7 @@ export class MonthlyWorkbook {
         if (b && b !== 'Sub Total' && b !== 'Category') category = String(b).trim();
         if (c && c !== 'Sub Total' && c !== 'Account' && c !== 'Grand Total' && c !== 'Exchange Rate:') account = String(c);
         if (typeof name !== 'string' || !name || name === 'Product' || row < 3 || !category || /Exchange Rate/.test(String(c))) continue;
-        const product: Product = { sheet: s.name, row, name, account, category: normalizeProductCategory(category), sourceCategory: category, currency, member: s.name === 'Assets' ? '本人' : 'WTH', balance: this.number(s.name, `E${row}`), previous: this.number(s.name, `H${row}`), flow: val('I'), due: isoDate(val('G')), note: String(val('N') || '') };
+        const product: Product = { sheet: s.name, row, name, account, category: normalizeProductCategory(category), sourceCategory: category, currency, member: members.find(m => m.sheet === s.name)!.member, balance: this.number(s.name, `E${row}`), previous: this.number(s.name, `H${row}`), flow: val('I'), due: isoDate(val('G')), note: String(val('N') || '') };
         product.block = this.blockFor(product); out.push(product);
       }
     }
@@ -176,7 +364,7 @@ export class MonthlyWorkbook {
     return out;
   }
   blockFor(p: Product): Block | undefined {
-    const sheet = p.sheet === 'Assets' ? 'XIRR' : 'XIRR-WTH';
+    const sheet = this.xirrSheet(p.sheet);
     const direct = this.cell(p.sheet, `K${p.row}`)?.formula?.match(/^(?:'([^']+)'|([\w-]+))!E(\d+)$/);
     if (direct) return this.blocks(sheet).find(b => b.summary === +direct[3]);
     const formula = this.cell(p.sheet, `K${p.row}`)?.formula || '';
@@ -247,6 +435,7 @@ export class MonthlyWorkbook {
     }
     const product = this.products().find(p => p.sheet === group.sheet && p.row === at)!;
     this.cashAccountFlow(product); this.createEmptyBlock(product);
+    this.includeProductGroupInAnalyze(group, at, categoryTotal);
     return this.products().find(p => p.sheet === group.sheet && p.row === at)!;
   }
   addProduct(anchor: Product, name: string, account: string): Product {
@@ -275,7 +464,7 @@ export class MonthlyWorkbook {
     return this.products().find(p => p.sheet === anchor.sheet && p.row === at)!;
   }
   private createEmptyBlock(p: Product, reference?: Product) {
-    const xs = p.sheet === 'Assets' ? 'XIRR' : 'XIRR-WTH';
+    const xs = this.xirrSheet(p.sheet);
     const anchor = reference?.block && !reference.block.shared ? reference : this.products().find(x => x.sheet === p.sheet && x.row !== p.row && x.currency === p.currency && x.category === p.category && x.account === p.account && x.block && !x.block.shared);
     let start: number;
     if (anchor?.block) start = anchor.block.start;
@@ -293,7 +482,7 @@ export class MonthlyWorkbook {
     for (let r = start; r <= summary; r++) this.copyStyle(xs, 3, r, 9);
     this.set(xs, `B${start}`, p.account); this.set(xs, `C${start}`, p.name);
     for (const c of ['E', 'F', 'G', 'H', 'I']) this.set(xs, `${c}${start}`, 0);
-    this.formula(xs, `D${end}`, 'Assets!$L$1'); this.formula(xs, `E${end}`, `${p.sheet}!E${p.row}`); this.formula(xs, `F${end}`, `F${start}`);
+    this.formula(xs, `D${end}`, 'Assets!$L$1'); this.formula(xs, `E${end}`, `${quote(p.sheet)}!E${p.row}`); this.formula(xs, `F${end}`, `F${start}`);
     this.set(xs, `C${summary}`, 'XIRR:'); this.set(xs, `E${summary}`, 'No transactions'); this.set(xs, `F${summary}`, 'annualized TWR:'); this.set(xs, `G${summary}`, 'No transactions'); this.set(xs, `H${summary}`, 'Principle:'); this.set(xs, `I${summary}`, 0);
     for (const [col, source] of [['K', `E${summary}`], ['L', `G${summary}`]]) this.formula(p.sheet, `${col}${p.row}`, `${quote(xs)}!${source}`);
     if (oldSummary) for (const [a, node] of this.sheet(xs).cells) {
@@ -327,7 +516,7 @@ export class MonthlyWorkbook {
   deleteProduct(p: Product) {
     if (p.block?.shared) p = this.splitShared(p);
     const block = p.block;
-    const combined = this.blocks(p.sheet === 'Assets' ? 'XIRR' : 'XIRR-WTH').some(b => (this.cell(b.sheet, `E${b.end}`)?.formula || '').includes(`${p.sheet}!E${p.row}`));
+    const combined = this.blocks(this.xirrSheet(p.sheet)).some(b => (this.cell(b.sheet, `E${b.end}`)?.formula || '').match(new RegExp(`(?:${p.sheet}|${quote(p.sheet)})!E${p.row}(?![0-9])`)));
     if (combined && !block) throw new Error('此产品使用跨账户合并流水，请先在 Excel 中拆分关联区块后再删除');
     const next = this.products().find(x => x.sheet === p.sheet && x.row > p.row);
     if (next) { this.set(next.sheet, `B${next.row}`, next.sourceCategory || next.category); this.set(next.sheet, `C${next.row}`, next.account); }
@@ -338,7 +527,7 @@ export class MonthlyWorkbook {
     const endDate = this.number('Assets', 'L1');
     const remaining = validateTransactions(transactions, endDate);
     if (p.block?.shared) p = this.splitShared(p);
-    const xs = p.sheet === 'Assets' ? 'XIRR' : 'XIRR-WTH'; let b = p.block;
+    const xs = this.xirrSheet(p.sheet); let b = p.block;
     if (!b && this.cell(p.sheet, `K${p.row}`)?.formula) throw new Error('该产品使用跨账户收益公式，需先在 Excel 拆分流水后编辑');
     if (!b) { this.createEmptyBlock(p); b = this.blockFor(p); }
     let start: number;
@@ -358,7 +547,7 @@ export class MonthlyWorkbook {
       if (i === 0) { this.set(xs, `H${r}`, 0); this.set(xs, `I${r}`, 0); }
       else { this.formula(xs, `H${r}`, t.kind === 'dividend' ? `(G${r}-E${r}/SUM(F${start}:F${prev}))/G${prev}-1` : `G${r}/G${prev}-1`); this.formula(xs, `I${r}`, `IF(D${r}=D${prev},I${prev},POWER(1+H${r},365/(D${r}-D${prev}))-1)`); }
     });
-    this.formula(xs, `D${end}`, 'Assets!$L$1'); this.formula(xs, `E${end}`, `${p.sheet}!E${p.row}`); this.formula(xs, `F${end}`, `SUM(F${start}:F${end - 1})`);
+    this.formula(xs, `D${end}`, 'Assets!$L$1'); this.formula(xs, `E${end}`, `${quote(p.sheet)}!E${p.row}`); this.formula(xs, `F${end}`, `SUM(F${start}:F${end - 1})`);
     this.formula(xs, `G${end}`, `IF(F${end}=0,G${end - 1},E${end}/F${end})`); this.formula(xs, `H${end}`, `IF(F${end}=0,0,G${end}/G${end - 1}-1)`);
     this.formula(xs, `I${end}`, `IF(F${end}=0,I${end - 1},IF(D${end}=D${end - 1},I${end - 1},POWER(1+H${end},365/(D${end}-D${end - 1}))-1))`);
     this.set(xs, `C${summary}`, 'XIRR:'); this.formula(xs, `E${summary}`, `XIRR(_xlfn.VSTACK(-E${start}:E${end - 1},E${end}),D${start}:D${end})`);
@@ -374,15 +563,15 @@ export class MonthlyWorkbook {
   rollover(date: string) {
     const current = this.number('Assets', 'L1'), next = serialDate(date); if (next <= current) throw new Error('新记账日期必须晚于上次');
     const values: Array<[string, string, Scalar]> = [];
-    for (const s of ['Assets', 'WTH']) {
+    for (const { sheet: s } of this.members()) {
       values.push([s, 'H1', this.value(s, 'D1')]);
       for (const a of this.sheet(s).cells.keys()) if (/^H\d+$/.test(a) && a !== 'H1' && !this.cell(s, a)?.formula && typeof this.cell(s, a)?.value === 'number') values.push([s, a, this.value(s, a.replace('H', 'E'))]);
     }
     const liabilities = this.value('Liabilities', 'D1');
     for (const a of this.sheet('Liabilities').cells.keys()) if (/^H\d+$/.test(a) && !this.cell('Liabilities', a)?.formula && typeof this.cell('Liabilities', a)?.value === 'number') values.push(['Liabilities', a, this.value('Liabilities', a.replace('H', 'D'))]);
     for (const [s, a, v] of values) this.set(s, a, v);
-    for (const s of ['Assets', 'WTH']) for (const a of this.sheet(s).cells.keys()) if (/^I\d+$/.test(a) && !this.cell(s, a)?.formula && typeof this.cell(s, a)?.value === 'number') this.set(s, a, 0);
-    for (const currency of ['USD', 'HKD'] as const) this.set('Assets', this.rateAddress(currency, true), this.value('Assets', this.rateAddress(currency)));
+    for (const { sheet: s } of this.members()) for (const a of this.sheet(s).cells.keys()) if (/^I\d+$/.test(a) && !this.cell(s, a)?.formula && typeof this.cell(s, a)?.value === 'number') this.set(s, a, 0);
+    for (const currency of this.currencyCodes().filter(c => c !== 'RMB')) this.set('Assets', this.rateAddress(currency, true), this.value('Assets', this.rateAddress(currency)));
     this.set('Liabilities', 'F1', liabilities); this.set('Assets', 'N1', current); this.set('Assets', 'L1', next); this.set('Analyze', 'C5', 0); this.set('Analyze', 'I5', 0);
   }
   private cashAccountFlow(p: Product) {
@@ -398,6 +587,11 @@ export class MonthlyWorkbook {
     const serializer = new XMLSerializer();
     for (const s of this.sheets) {
       const doc = parse(serializer.serializeToString(s.doc));
+      let dimension = descendants(doc, 'dimension')[0];
+      if (!dimension) { dimension = this.element(doc, 'dimension'); const views = descendants(doc, 'sheetViews')[0] || descendants(doc, 'sheetFormatPr')[0] || descendants(doc, 'cols')[0] || descendants(doc, 'sheetData')[0]; doc.documentElement.insertBefore(dimension, views); }
+      const addresses = [...s.cells.keys()];
+      const lastRow = Math.max(1, ...addresses.map(a => +a.replace(/[A-Z]+/, ''))), lastColumn = Math.max(1, ...addresses.map(a => column(a.replace(/\d+/, ''))));
+      dimension.setAttribute('ref', `A1:${letters(lastColumn)}${lastRow}`);
       for (const c of descendants(doc, 'c')) if (first(c, 'f')) {
         const value = this.value(s.name, c.getAttribute('r')); const v = first(c, 'v'); if (v) c.removeChild(v);
         c.removeAttribute('t');
