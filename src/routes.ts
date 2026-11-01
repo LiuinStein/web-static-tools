@@ -1,6 +1,7 @@
 import { IRouterConfig, lazy } from 'ice';
 import BasicLayout from '@/layouts/BasicLayout';
 
+const Home = lazy(() => import('@/pages/Home'));
 const CommonTools = lazy(() => import('@/pages/CommonTools'));
 const MonetaryTools = lazy(() => import('@/pages/MonetaryTools'));
 const BondTools = lazy(() => import('@/pages/BondTools'));
@@ -16,6 +17,11 @@ const routerConfig: IRouterConfig[] = [
     path: '/',
     component: BasicLayout,
     children: [
+      {
+        path: "/",
+        exact: true,
+        component: Home,
+      },
       {
         path: '/monthly-review',
         component: MonthlyReview,
