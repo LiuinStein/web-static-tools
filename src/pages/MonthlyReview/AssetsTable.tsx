@@ -5,6 +5,8 @@ import { isCashAccount } from './categories';
 import { MonthlyBatch, productKey, balancePaste } from './batch';
 import { ProductSort, ProductSortField, nextProductSort, sortedProducts } from './sorting';
 
+const selectAmount = (event: React.SyntheticEvent<HTMLInputElement>) => event.currentTarget.select();
+
 interface Props {
   book: MonthlyWorkbook; products: Product[]; batch: MonthlyBatch | null; busy: boolean;
   categoryNames: Record<string, string>; money: (n: Scalar) => string; pct: (n: Scalar) => string;
@@ -59,8 +61,8 @@ export default function AssetsTable({ book, products, batch, busy, categoryNames
       {batch && <td>{money(p.previous)}</td>}
       <td>{money(value(p, 'J'))}</td><td title={String(value(p, 'K') || '')}>{pct(value(p, 'K'))}</td><td>{pct(value(p, 'L'))}</td>
       <td><div className="mr-row-actions"><button disabled={busy} onClick={() => onEdit(p)}>编辑</button><button disabled={busy} onClick={() => onTransactions(p)}>买卖记录</button><button className="danger" disabled={busy} onClick={() => onDelete(p)}>删除</button></div></td>
-      <td>{batch ? <><input data-flow-input={key} tabIndex={-1} aria-label={`${p.name} 净投入`} aria-invalid={badFlow} aria-describedby={badFlow ? `flow-error-${key}` : undefined} type="text" inputMode="decimal" autoComplete="off" readOnly={isCashAccount(p.category)} title={isCashAccount(p.category) ? '活期账户净投入 = 本期余额 − 上期余额，自动计算' : '投入为正，回款为负；保存买卖记录后会按流水重新汇总'} value={batch.flows.get(key) ?? (typeof p.flow === 'number' ? String(p.flow) : '')} placeholder={typeof p.flow === 'string' ? p.flow : '0'} disabled={busy} onChange={e => { if (!isCashAccount(p.category)) onBatch(batch.cashFlows([[key, e.target.value]])); }} onKeyDown={e => move(e, key)} />{badFlow && <small id={`flow-error-${key}`} className="mr-input-error">请输入有效的净投入金额</small>}</> : money(p.flow)}</td>
-      <td>{batch ? <><input data-balance-input={key} aria-label={`${p.name} 本期余额`} aria-invalid={bad} aria-describedby={bad ? `balance-error-${key}` : undefined} type="text" inputMode="decimal" autoComplete="off" value={batch.inputs.get(key) ?? String(p.balance)} disabled={busy} onChange={e => onBatch(batch.balances([[key, e.target.value]]))} onKeyDown={e => move(e, key)} onPaste={e => {
+      <td>{batch ? <><input onFocus={selectAmount} onClick={selectAmount} data-flow-input={key} tabIndex={-1} aria-label={`${p.name} 净投入`} aria-invalid={badFlow} aria-describedby={badFlow ? `flow-error-${key}` : undefined} type="text" inputMode="decimal" autoComplete="off" readOnly={isCashAccount(p.category)} title={isCashAccount(p.category) ? '活期账户净投入 = 本期余额 − 上期余额，自动计算' : '投入为正，回款为负；保存买卖记录后会按流水重新汇总'} value={batch.flows.get(key) ?? (typeof p.flow === 'number' ? String(p.flow) : '')} placeholder={typeof p.flow === 'string' ? p.flow : '0'} disabled={busy} onChange={e => { if (!isCashAccount(p.category)) onBatch(batch.cashFlows([[key, e.target.value]])); }} onKeyDown={e => move(e, key)} />{badFlow && <small id={`flow-error-${key}`} className="mr-input-error">请输入有效的净投入金额</small>}</> : money(p.flow)}</td>
+      <td>{batch ? <><input onFocus={selectAmount} onClick={selectAmount} data-balance-input={key} aria-label={`${p.name} 本期余额`} aria-invalid={bad} aria-describedby={bad ? `balance-error-${key}` : undefined} type="text" inputMode="decimal" autoComplete="off" value={batch.inputs.get(key) ?? String(p.balance)} disabled={busy} onChange={e => onBatch(batch.balances([[key, e.target.value]]))} onKeyDown={e => move(e, key)} onPaste={e => {
         const text = e.clipboardData.getData('text');
         if (!/[\r\n\t]/.test(text)) return;
         e.preventDefault();

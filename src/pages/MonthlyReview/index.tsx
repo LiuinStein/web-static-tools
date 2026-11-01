@@ -57,7 +57,7 @@ export default function MonthlyReview() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [modal, setModal] = useState<null | 'product' | 'transactions' | 'newMonth' | 'liability'>(null);
+  const [modal, setModal] = useState<null | 'product' | 'transactions' | 'newMonth' | 'liability' | 'cancelBatch'>(null);
   const [selectedLiability, setSelectedLiability] = useState<Liability | null>(null);
   const [liabilityForm, setLiabilityForm] = useState({ balance: '', repayment: '' });
   const [selected, setSelected] = useState<Product | null>(null);
@@ -96,6 +96,15 @@ export default function MonthlyReview() {
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [batch?.dirty]);
+  useEffect(() => {
+    if (modal !== 'cancelBatch') return;
+    const closeConfirmation = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault(); event.stopPropagation(); setModal(null);
+    };
+    window.addEventListener('keydown', closeConfirmation, true);
+    return () => window.removeEventListener('keydown', closeConfirmation, true);
+  }, [modal]);
   async function run(action: () => Promise<void>) {
     if (lock.current) return; lock.current = true; setBusy(true); setError(''); setNotice('');
     try { await action(); } catch (e) { if (mounted.current) setError(e.message || '操作失败，请重试'); } finally { lock.current = false; if (mounted.current) setBusy(false); }
@@ -131,9 +140,12 @@ export default function MonthlyReview() {
     setBook(batch.book); setDraft(saved); setDrafts(await listDrafts()); setBatch(null); setOnlyUnchecked(false);
     setNotice('批量记账已保存到本机草稿，可下载 Excel 检查或发布到 OneDrive。');
   }
-  function cancelBatch() {
-    if (batch?.dirty && !window.confirm('取消本次批量记账的全部修改？已保存的本机草稿不受影响。')) return;
+  function discardBatch() {
     setBatch(null); setOnlyUnchecked(false); setModal(null); setError(''); setNotice('已退出批量记账。');
+  }
+  function cancelBatch() {
+    if (batch?.dirty) setModal('cancelBatch');
+    else discardBatch();
   }
   const products = book?.products() || [];
   const liabilities = book?.liabilities() || [];
@@ -307,6 +319,10 @@ export default function MonthlyReview() {
         <p className="mr-footnote">上期余额 {money(selectedLiability?.previous ?? null)} 元（只读）。还款日支持每月还款日或具体日期等文字，可留空。</p>
         <div className="mr-actions"><button type="button" disabled={busy} onClick={() => setModal(null)}>取消</button><button className="primary" disabled={busy}>{batch ? '应用到批量记账' : '保存负债'}</button></div>
       </form>
+    </Dialog>
+    <Dialog visible={modal === 'cancelBatch'} title="取消批量记账" footer={false} onClose={() => setModal(null)} className="mr-dialog">
+      <p>确定取消本次批量记账的全部修改？已保存的本机草稿不受影响。</p>
+      <div className="mr-actions"><button type="button" disabled={busy} onClick={() => setModal(null)}>继续记账</button><button type="button" className="primary" disabled={busy} onClick={discardBatch}>确定取消</button></div>
     </Dialog>
     <Dialog visible={modal === 'newMonth'} title="新建月份" footer={false} onClose={() => setModal(null)} className="mr-dialog">{error && <div className="mr-message error" role="alert">{error}</div>}{field('新记账日期', newDate, setNewDate, 'date')}<p>复制当前账本，承接上期余额、保留历史流水，清零当期收入与净投入。已有月份文件不会被覆盖。</p><div className="mr-actions"><button disabled={busy} onClick={() => setModal(null)}>取消</button><button className="primary" disabled={busy} onClick={() => run(async () => { if (!draft) return; const name = `${newDate.slice(0, 7)}.xlsx`; if (drafts.some(d => d.name === name && d.scope === draft.scope)) throw new Error('本机已存在此月份，请从账本列表打开'); const next = await MonthlyWorkbook.open(draft.data); next.rollover(newDate); await activate(await next.export(), name, { scope: draft.scope, sourceLabel: draft.sourceLabel }); startBatch(next); setNotice('新月份已创建，可直接逐行更新余额并补充本期流水。'); })}>创建本机账本</button></div></Dialog>
   </div>;
