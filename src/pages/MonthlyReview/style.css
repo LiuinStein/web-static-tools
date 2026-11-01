@@ -77,3 +77,5 @@
 .mr-sort-button span { font-size: 12px; color: #9aa8bb; }
 .mr-assets-table th[aria-sort=ascending], .mr-assets-table th[aria-sort=descending], .mr-assets-table th[aria-sort=ascending] span, .mr-assets-table th[aria-sort=descending] span { color: #3577eb; }
 .mr-assets-table input[readonly], .mr-dialog input[readonly] { background: #f5f7fa; color: #7a879a; cursor: default; }
+.mr-liabilities-table input[data-liability-balance] { width: 140px; min-width: 120px; padding: 8px 10px; font-variant-numeric: tabular-nums; }
+.mr-liability-total { margin-left: auto; font-size: 12px; color: #6f8199; }

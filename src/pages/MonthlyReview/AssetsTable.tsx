@@ -47,7 +47,7 @@ export default function AssetsTable({ book, products, batch, busy, categoryNames
     if (next) { next.focus(); next.select(); }
     if (index >= 0 && !invalid.has(key)) onBatch(batch.check([key], true));
   }
-  return <div className="mr-table-wrap mr-assets-table" ref={table} tabIndex={-1} aria-label="资产与产品表格"><table><thead><tr>
+  return <div className="mr-table-wrap mr-assets-table" ref={table} tabIndex={-1} aria-label="资产表格"><table><thead><tr>
     {batch && <th>核对</th>}{heading('产品 / 账户', 'name')}<th>成员 / 币种</th>{batch && <th>上期余额</th>}
     {heading('较上次收益', 'gain')}{heading('XIRR', 'xirr')}{heading('年化 TWR', 'twr')}<th>操作</th><th>净投入</th>{heading('本期余额', 'balance')}
   </tr></thead><tbody>{displayed.map(p => {

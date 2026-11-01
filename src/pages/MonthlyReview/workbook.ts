@@ -13,6 +13,7 @@ const xml = (d: any) => new XMLSerializer().serializeToString(d);
 const quote = (s: string) => `'${s.replace(/'/g, "''")}'`;
 export interface Sheet { name: string; path: string; doc: any; cells: Map<string, any>; }
 export interface Product { sheet: string; row: number; name: string; account: string; category: string; sourceCategory?: string; currency: string; member: string; balance: number; previous: number; flow: Scalar; due: string; note: string; block?: Block; }
+export interface Liability { sheet: 'Liabilities'; row: number; account: string; balance: number; previous: number; repayment: Scalar; }
 export interface Block { sheet: string; start: number; end: number; summary: number; sourceRows?: number[]; shared?: boolean; }
 export interface Transaction { row?: number; date: string; amount: number; shares: number; price: number; kind: 'buy' | 'sell' | 'dividend'; }
 
@@ -146,6 +147,21 @@ export class MonthlyWorkbook {
       }
     }
     return out;
+  }
+  liabilities(): Liability[] {
+    const rows = [...new Set([...this.sheet('Liabilities').cells.keys()].filter(a => /^C\d+$/.test(a)).map(a => +a.slice(1)))].sort((a, b) => a - b);
+    return rows.filter(row => {
+      const account = this.value('Liabilities', `C${row}`);
+      return row > 2 && typeof account === 'string' && account.trim() && !['Sub Total', 'Grand Total', 'Account', 'Exchange Rate:'].includes(account.trim());
+    }).map(row => ({ sheet: 'Liabilities', row, account: String(this.value('Liabilities', `C${row}`)), balance: this.number('Liabilities', `D${row}`), previous: this.number('Liabilities', `H${row}`), repayment: this.value('Liabilities', `G${row}`) }));
+  }
+  updateLiability(liability: Liability, values: { balance: number; repayment: string }) {
+    const current = this.liabilities().find(row => row.row === liability.row && row.account === liability.account);
+    if (!current) throw new Error('负债账户位置已变化，请重新选择');
+    if (!Number.isFinite(values.balance) || values.balance < 0) throw new Error('负债余额须为有效的非负金额');
+    this.set('Liabilities', `D${current.row}`, values.balance);
+    // Keep numeric Excel dates and existing text untouched when only the balance changes.
+    if (values.repayment !== String(current.repayment ?? '')) this.set('Liabilities', `G${current.row}`, values.repayment.trim() || null);
   }
   blocks(sheet: string): Block[] {
     const s = this.sheet(sheet), out: Block[] = [];

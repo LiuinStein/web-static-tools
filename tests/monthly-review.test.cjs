@@ -290,3 +290,33 @@ test('new cash accounts need no transactions or manual flow and source category 
   book.deleteProduct(p); assert.equal(book.products()[0].name,anchor.name); assert.equal(book.products()[0].sourceCategory,'Monetary Fund');
   assert.equal(book.products()[1].category,'Debt Fund');
 });
+
+async function liabilityFixture() {
+  const book = await fixture();
+  for (const [address, value] of Object.entries({ C1:'Grand Total', C2:'Account', C3:'负债甲', D3:50, H3:10, G3:'每月1日', C4:'负债乙', D4:75, H4:20, G4:serialDate('2026-11-15'), C5:'Sub Total' })) book.set('Liabilities',address,value);
+  book.formula('Liabilities','D5','SUM(D3:D4)'); book.formula('Liabilities','D1','D5'); book.formula('Analyze','P3','Liabilities!D1');
+  return book;
+}
+test('liability edits target account rows only and preserve opening balances and repayment types on zeroing', async () => {
+  const book = await liabilityFixture(), rows = book.liabilities(); assert.equal(rows.length,2);
+  book.updateLiability(rows[0], {balance:0,repayment:String(rows[0].repayment)});
+  assert.equal(book.value('Liabilities','D3'),0); assert.equal(book.value('Liabilities','H3'),10); assert.equal(book.value('Liabilities','G3'),'每月1日'); assert.equal(book.number('Liabilities','D1'),75);
+  const date = book.value('Liabilities','G4'); book.updateLiability(rows[1],{balance:20.5,repayment:String(date)}); assert.equal(book.value('Liabilities','G4'),date);
+  assert.throws(()=>book.updateLiability(rows[0],{balance:-1,repayment:''}),/非负/);
+  assert.throws(()=>book.updateLiability({...rows[0],row:5},{balance:0,repayment:''}),/位置/);
+  book.updateLiability(book.liabilities()[0],{balance:100.25,repayment:'每月15日'});
+  const loaded=await MonthlyWorkbook.open(await book.export());assert.equal(loaded.liabilities()[0].repayment,'每月15日');assert.equal(loaded.liabilities()[0].balance,100.25);assert.equal(loaded.value('Liabilities','H3'),10);assert.equal(loaded.cell('Liabilities','D1').formula,'D5');
+});
+test('one batch preserves both assets and debts, validates hidden debt inputs and calculates net assets through original formulas', async () => {
+  const source=await liabilityFixture(), asset=source.products()[0], debt=source.liabilities()[0], key=productKey(debt);
+  let batch=new MonthlyBatch(source).balances([[productKey(asset),'1400'],[key,'90.25']]);
+  assert.equal(batch.book.number('Liabilities','D1'),165.25);assert.equal(batch.book.number('Analyze','Q3'),2500-165.25);
+  assert.equal(source.number('Liabilities','D3'),50);assert.equal(source.products()[0].balance,1100);assert.ok(batch.changedKeys().has(key));
+  batch=batch.check([key],true).balances([[key,'']]);assert.ok(batch.invalid.includes(key));assert.equal(batch.reviewed.has(key),false);assert.throws(()=>batch.apply(()=>{}),/无效余额/);
+  batch=batch.balances([[key,'0']]);assert.equal(batch.invalid.length,0);assert.equal(batch.book.number('Liabilities','D3'),0);
+  batch=batch.apply(next=>next.updateLiability(next.liabilities()[0],{balance:125.5,repayment:'每月20日'}),key);
+  assert.equal(batch.book.products()[0].balance,1400);assert.equal(batch.book.liabilities()[0].repayment,'每月20日');assert.equal(batch.reviewed.has(key),false);
+  batch=batch.check([key],true).apply(next=>next.addProduct(next.products()[0],'新增资产','测试账户'));
+  assert.equal(batch.reviewed.has(key),true);assert.equal(batch.book.number('Liabilities','D3'),125.5);
+  const loaded=await MonthlyWorkbook.open(await batch.book.export());assert.equal(loaded.liabilities()[0].balance,125.5);assert.equal(loaded.liabilities()[0].repayment,'每月20日');assert.equal(loaded.products().find(p=>p.name===asset.name).balance,1400);
+});

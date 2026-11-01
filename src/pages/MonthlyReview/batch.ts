@@ -1,7 +1,7 @@
 import { MonthlyWorkbook, Product } from './workbook';
 import { isCashAccount } from './categories';
 
-export const productKey = (p: Product) => `${p.sheet}:${p.row}`;
+export const productKey = (p: Pick<Product, 'sheet' | 'row'>) => `${p.sheet}:${p.row}`;
 export function balanceNumber(text: string): number | null {
   const value = text.trim();
   if (!/^(?:\d+(?:\.\d*)?|\.\d+|\d{1,3}(?:,\d{3})+(?:\.\d*)?)$/.test(value)) return null;
@@ -12,10 +12,10 @@ export function flowNumber(text: string): number | null {
   const trimmed = text.trim(), number = balanceNumber(trimmed.replace(/^[+-]/, ''));
   return number === null ? null : trimmed.startsWith('-') ? -number : number;
 }
-export function balancePaste(visible: Product[], start: string, text: string): Array<[string, string]> {
+export function balancePaste(visible: Array<Pick<Product, 'sheet' | 'row'>>, start: string, text: string): Array<[string, string]> {
   const lines = text.replace(/\r\n?/g, '\n').replace(/\n+$/, '').split('\n');
   const index = visible.findIndex(p => productKey(p) === start);
-  if (index < 0 || index + lines.length > visible.length) throw new Error('粘贴行数超出当前可见产品范围，请核对筛选条件和起始行');
+  if (index < 0 || index + lines.length > visible.length) throw new Error('粘贴行数超出当前可见行范围，请核对筛选条件和起始行');
   if (lines.some(line => line.includes('\t'))) throw new Error('请只复制一列余额，不要包含产品名称或其他列');
   if (lines.some(line => balanceNumber(line) === null)) throw new Error('粘贴内容含空白、负数或无效余额，本次粘贴未应用');
   return lines.map((line, i) => [productKey(visible[index + i]), line.trim()]);
@@ -39,12 +39,12 @@ export class MonthlyBatch {
   get invalid(): string[] { return [...new Set([...this.invalidBalances, ...this.invalidFlows])]; }
   balances(changes: Array<[string, string]>): MonthlyBatch {
     const next = this.book.clone(), inputs = new Map(this.inputs), reviewed = new Set(this.reviewed);
-    const products = new Map(next.products().map(p => [productKey(p), p]));
+    const rows = new Map([...next.products(), ...next.liabilities()].map(p => [productKey(p), p]));
     for (const [key, text] of changes) {
-      const p = products.get(key); if (!p) throw new Error('产品位置已变化，请重新选择');
+      const p = rows.get(key); if (!p) throw new Error('账户位置已变化，请重新选择');
       inputs.set(key, text); const number = balanceNumber(text);
       reviewed.delete(key);
-      if (number !== null) next.set(p.sheet, `E${p.row}`, number);
+      if (number !== null) next.set(p.sheet, `${p.sheet === 'Liabilities' ? 'D' : 'E'}${p.row}`, number);
     }
     return new MonthlyBatch(this.original, next, inputs, reviewed, new Set(this.touched), true, this.flows);
   }
@@ -65,13 +65,13 @@ export class MonthlyBatch {
     return new MonthlyBatch(this.original, this.book, this.inputs, reviewed, this.touched, this.dirty, this.flows);
   }
   apply(action: (next: MonthlyWorkbook) => void, touchedKey?: string): MonthlyBatch {
-    if (this.invalid.length) throw new Error('请先修正表格中的无效余额或净投入，再编辑产品或买卖记录');
+    if (this.invalid.length) throw new Error('请先修正表格中的无效余额或净投入，再编辑账户或买卖记录');
     const next = this.book.clone(); action(next);
     const before = this.book.products(), after = next.products();
     const structural = before.length !== after.length || before.some((p, i) => productKey(p) !== productKey(after[i]));
     // Row insertion/deletion shifts Excel addresses; require a fresh review instead of reusing stale marks.
-    const reviewed = structural ? new Set<string>() : new Set(this.reviewed);
-    const touched = structural ? new Set<string>() : new Set(this.touched);
+    const reviewed = structural ? new Set([...this.reviewed].filter(key => key.startsWith('Liabilities:'))) : new Set(this.reviewed);
+    const touched = structural ? new Set([...this.touched].filter(key => key.startsWith('Liabilities:'))) : new Set(this.touched);
     if (touchedKey && !structural) { touched.add(touchedKey); reviewed.delete(touchedKey); }
     return new MonthlyBatch(this.original, next, new Map(), reviewed, touched, true);
   }
@@ -82,6 +82,11 @@ export class MonthlyBatch {
     for (const p of this.book.products()) {
       const key = signature(p), count = counts.get(key) || 0;
       if (count) counts.set(key, count - 1); else changed.add(productKey(p));
+    }
+    const originalLiabilities = new Map(this.original.liabilities().map(row => [productKey(row), row]));
+    for (const row of this.book.liabilities()) {
+      const previous = originalLiabilities.get(productKey(row));
+      if (!previous || row.balance !== previous.balance || row.repayment !== previous.repayment) changed.add(productKey(row));
     }
     for (const key of this.invalid) changed.add(key);
     return changed;
