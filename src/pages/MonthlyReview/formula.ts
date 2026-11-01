@@ -73,18 +73,50 @@ export class FormulaEngine {
   private memo = new Map<string, Value>();
   private visiting = new Set<string>();
   private parsed = new Map<string, Node>();
+  private dependencies = new Map<string, Set<string>>();
+  private dependents = new Map<string, Set<string>>();
+  private stack: string[] = [];
   constructor(private lookup: Lookup) {}
-  clear() { this.memo.clear(); this.visiting.clear(); }
+  clear() { this.memo.clear(); this.visiting.clear(); this.dependencies.clear(); this.dependents.clear(); this.stack = []; }
+  fork(lookup: Lookup): FormulaEngine {
+    const next = new FormulaEngine(lookup);
+    next.memo = new Map(this.memo); next.parsed = this.parsed;
+    next.dependencies = new Map([...this.dependencies].map(([key, values]) => [key, new Set(values)]));
+    next.dependents = new Map([...this.dependents].map(([key, values]) => [key, new Set(values)]));
+    return next;
+  }
+  private unlink(key: string) {
+    for (const dependency of this.dependencies.get(key) || []) {
+      const parents = this.dependents.get(dependency); parents?.delete(key);
+      if (!parents?.size) this.dependents.delete(dependency);
+    }
+    this.dependencies.delete(key);
+  }
+  invalidate(sheet: string, address: string) {
+    const key = `${sheet}!${address.replace(/\$/g, '')}`, pending = [key], affected = new Set<string>();
+    while (pending.length) {
+      const current = pending.pop()!; if (affected.has(current)) continue;
+      affected.add(current); this.memo.delete(current);
+      for (const parent of this.dependents.get(current) || []) pending.push(parent);
+    }
+    this.unlink(key);
+  }
   get(sheet: string, address: string): Scalar {
     address = address.replace(/\$/g, ''); const key = `${sheet}!${address}`;
+    const parent = this.stack[this.stack.length - 1];
+    if (parent && parent !== key) {
+      if (!this.dependencies.has(parent)) this.dependencies.set(parent, new Set());
+      if (!this.dependents.has(key)) this.dependents.set(key, new Set());
+      this.dependencies.get(parent)!.add(key); this.dependents.get(key)!.add(parent);
+    }
     if (this.memo.has(key)) return this.memo.get(key) as Scalar;
     const cell = this.lookup(sheet, address); if (!cell) return null;
     if (!cell.formula) return cell.value;
     if (this.visiting.has(key)) return '#CYCLE!';
-    this.visiting.add(key); let value: Value;
+    this.unlink(key); this.visiting.add(key); this.stack.push(key); let value: Value;
     try { let n = this.parsed.get(cell.formula); if (!n) { n = parse(cell.formula); this.parsed.set(cell.formula, n); } value = this.evaluate(n, sheet); if (Array.isArray(value)) value = flatten(value)[0]; if (typeof value === 'number' && !Number.isFinite(value)) value = '#NUM!'; }
     catch (error) { value = error.message || '#VALUE!'; }
-    this.visiting.delete(key); this.memo.set(key, value); return value as Scalar;
+    this.stack.pop(); this.visiting.delete(key); this.memo.set(key, value); return value as Scalar;
   }
   private evaluate(n: Node, sheet: string): Value {
     const args = n.args || [];

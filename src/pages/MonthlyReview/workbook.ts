@@ -47,7 +47,7 @@ export class MonthlyWorkbook {
     next.shared = [...this.shared];
     next.sheets = this.sheets.map(s => ({ ...s, doc: s.doc.cloneNode(true), cells: new Map() }));
     next.extras = new Map([...this.extras].map(([path, doc]) => [path, doc.cloneNode(true)]));
-    next.reindex(); return next;
+    next.reindex(); next.engine = this.engine.fork((sheet, address) => next.cell(sheet, address)); return next;
   }
   static async open(data: ArrayBuffer | Uint8Array): Promise<MonthlyWorkbook> {
     if (data.byteLength > 10 * 1024 * 1024) throw new Error('文件不能超过 10MB');
@@ -127,7 +127,7 @@ export class MonthlyWorkbook {
     if (formula) { const f = this.element(doc, 'f', formula.replace(/^=/, '')); if (/_xlfn\.VSTACK|PRODUCT\([^)]*\+/.test(formula)) { f.setAttribute('t', 'array'); f.setAttribute('ref', address); } c.appendChild(f); }
     if (typeof value === 'string') { c.setAttribute('t', formula ? 'str' : 'inlineStr'); if (formula) c.appendChild(this.element(doc, 'v', value)); else { const is = this.element(doc, 'is'), t = this.element(doc, 't', value); t.setAttribute('xml:space', 'preserve'); is.appendChild(t); c.appendChild(is); } }
     else if (value !== null) { if (typeof value === 'boolean') c.setAttribute('t', 'b'); c.appendChild(this.element(doc, 'v', String(typeof value === 'boolean' ? Number(value) : value))); }
-    this.engine.clear();
+    this.engine.invalidate(sheet, address);
   }
   formula(s: string, a: string, f: string) { this.set(s, a, null, f); }
   products(): Product[] {
@@ -215,6 +215,39 @@ export class MonthlyWorkbook {
   }
   private copyStyle(sheet: string, sourceRow: number, targetRow: number, width: number) {
     for (let i = 1; i <= width; i++) { const c = this.sheet(sheet).cells.get(`${letters(i)}${sourceRow}`), target = this.node(sheet, `${letters(i)}${targetRow}`); if (c?.hasAttribute('s')) target.setAttribute('s', c.getAttribute('s')); }
+  }
+  addProductGroup(group: { sheet: string; currency: string; category: string }, name: string, account: string): Product {
+    if (!name.trim() || !account.trim()) throw new Error('请填写产品名称和账户');
+    const headers = [...this.sheet(group.sheet).cells.keys()].filter(a => /^A\d+$/.test(a) && this.value(group.sheet, a) === 'Assets').map(a => +a.slice(1)).sort((a, b) => a - b);
+    const header = headers.find(row => this.value(group.sheet, `B${row}`) === `in ${group.currency}`);
+    if (header === undefined) throw new Error('模板缺少所选币种分区，请使用包含该币种的月度模板');
+    const end = headers.find(row => row > header) ?? Infinity;
+    const at = [...this.sheet(group.sheet).cells.keys()].filter(a => /^A\d+$/.test(a)).map(a => +a.slice(1)).find(row => row > header && row < end && this.value(group.sheet, `A${row}`) === 'Grand Total');
+    if (at === undefined || !this.cell(group.sheet, `E${at}`)?.formula) throw new Error('模板缺少该币种的汇总公式，无法创建新分组');
+    const products = this.products().filter(p => p.sheet === group.sheet);
+    const reference = products.filter(p => p.currency === group.currency).slice(-1)[0] || products[0];
+    const findStyle = (column: string) => [...this.sheet(group.sheet).cells.keys()].filter(a => new RegExp(`^${column}\\d+$`).test(a)).map(a => +a.slice(1)).find(row => row > header && row < at && this.value(group.sheet, `${column}${row}`) === 'Sub Total') ?? reference?.row ?? header + 1;
+    const styles = [reference?.row ?? header + 1, findStyle('C'), findStyle('B')];
+    this.shiftRows(group.sheet, at, 4);
+    const subtotal = at + 1, categoryTotal = at + 2, grandTotal = at + 4;
+    for (let i = 0; i < 3; i++) this.copyStyle(group.sheet, styles[i] >= at ? styles[i] + 4 : styles[i], at + i, 14);
+    for (const [column, value] of [['B', group.category], ['C', account.trim()], ['D', name.trim()], ['E', 0], ['H', 0], ['I', 0], ['N', '']] as Array<[string, Scalar]>) this.set(group.sheet, `${column}${at}`, value);
+    this.formula(group.sheet, `J${at}`, `E${at}-H${at}-I${at}`);
+    this.set(group.sheet, `C${subtotal}`, 'Sub Total'); this.set(group.sheet, `B${categoryTotal}`, 'Sub Total');
+    for (const [row, source] of [[subtotal, at], [categoryTotal, subtotal]]) {
+      this.set(group.sheet, `H${row}`, 0);
+      for (const col of ['E', 'I', 'J']) this.formula(group.sheet, `${col}${row}`, `SUM(${col}${source})`);
+      for (const col of ['K', 'L', 'M']) this.formula(group.sheet, `${col}${row}`, `IF(COUNT(${col}${source})=COUNTA(${col}${source}),AVERAGE(${col}${source}),"Check inputs")`);
+    }
+    for (const row of [at, subtotal, categoryTotal]) this.formula(group.sheet, `F${row}`, `E${row}/E${grandTotal}`);
+    for (const col of ['E', 'I', 'J']) {
+      const original = this.cell(group.sheet, `${col}${grandTotal}`)?.formula;
+      if (original) this.formula(group.sheet, `${col}${grandTotal}`, `(${original})+${col}${categoryTotal}`);
+      else if (col === 'J') this.formula(group.sheet, `${col}${grandTotal}`, `${this.number(group.sheet, `${col}${grandTotal}`)}+${col}${categoryTotal}`);
+    }
+    const product = this.products().find(p => p.sheet === group.sheet && p.row === at)!;
+    this.cashAccountFlow(product); this.createEmptyBlock(product);
+    return this.products().find(p => p.sheet === group.sheet && p.row === at)!;
   }
   addProduct(anchor: Product, name: string, account: string): Product {
     if (!name.trim() || !account.trim()) throw new Error('请填写产品名称和账户');

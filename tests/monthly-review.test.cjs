@@ -74,18 +74,18 @@ test('new months preserve historical transactions and independently snapshot ope
   const b = await fixture(); b.rollover('2026-11-30'); assert.equal(b.value('Assets', 'H3'), 1100); assert.equal(b.value('Assets', 'N1'), serialDate('2026-10-31')); assert.equal(b.value('Assets', 'H1'), 1100); assert.throws(() => b.rollover('2026-10-01'));
 });
 test('new products use member/currency/category groups, start without an opening balance and accept new accounts', async () => {
-  let b = await fixture(); const groups = productGroups(b.products()); assert.equal(groups.length, 2);
+  let b = await fixture(); const groups = productGroups(); assert.equal(groups.length, 16);
   assert.ok(groups.every(g => !('name' in g) && !('account' in g)));
-  const group = groups.find(g => g.sheet === 'Assets');
+  const group = groups.find(g => g.sheet === 'Assets' && g.currency === 'RMB' && g.category === 'Debt Fund');
   const p = createProductEntry(b, group.key, { name: '  新产品  ', account: '  新账户  ', balance: 1100, flow: 1000, previous: 999, due: '', note: '' }, 'manual');
   assert.equal(p.name, '新产品'); assert.equal(p.account, '新账户'); assert.equal(p.previous, 0); assert.equal(p.flow, 1000); assert.equal(p.category, group.category);
   assert.equal(b.number(p.sheet, `J${p.row}`), 100); assert.equal(b.transactions(p.block).length, 0);
-  assert.equal(productGroups(b.products()).length, 2);
+  assert.equal(productGroups().length, 16);
   b = await MonthlyWorkbook.open(await b.export()); assert.ok(b.products().some(x => x.account === '新账户' && x.previous === 0 && x.flow === 1000));
 });
 test('a new product can record multiple purchases, sales and distributions across a multi-month accounting period', async () => {
   let b = await fixture(); b.set('Assets', 'N1', serialDate('2026-07-05')); b.set('Assets', 'L1', serialDate('2026-10-11'));
-  const group = productGroups(b.products()).find(g => g.sheet === 'Assets');
+  const group = productGroups().find(g => g.sheet === 'Assets' && g.currency === 'RMB' && g.category === 'Debt Fund');
   const rows = [
     { kind: 'buy', date: '2026-07-06', amount: 1000, shares: 100, price: 10 },
     { kind: 'buy', date: '2026-08-01', amount: 500, shares: 50, price: 10 },
@@ -100,7 +100,7 @@ test('a new product can record multiple purchases, sales and distributions acros
   assert.deepEqual(cashFlowSummary(rows, serialDate('2026-07-05'), serialDate('2026-10-11')), { buys: 1500, sales: 220, dividends: 10, net: 1270 });
 });
 test('new-product initial trades are validated before insertion and net cash flow uses decimal arithmetic', async () => {
-  const b = await fixture(), group = productGroups(b.products())[0], before = b.products().length;
+  const b = await fixture(), group = productGroups().find(g => g.sheet === 'Assets' && g.currency === 'RMB' && g.category === 'Debt Fund'), before = b.products().length;
   const values = { name: '校验产品', account: '新账户', balance: 0, flow: 0, due: '', note: '' };
   assert.throws(() => createProductEntry(b, group.key, values, 'transactions', [{ kind: 'buy', date: '2026-09-30', amount: 10, shares: 1, price: 10 }]), /上次记账日期之后/);
   assert.throws(() => createProductEntry(b, group.key, values, 'transactions', [{ kind: 'sell', date: '2026-10-01', amount: 10, shares: 1, price: 10 }]), /超过持仓/);
@@ -111,7 +111,7 @@ test('new-product initial trades are validated before insertion and net cash flo
   assert.equal(p.balance, 0); assert.equal(p.flow, -100); assert.equal(b.number(p.sheet, `J${p.row}`), 100);
 });
 test('new product rows keep FX lookup, settings writes and next-period FX snapshots on their currency headers', async () => {
-  const b = await fixture(), group = productGroups(b.products()).find(g => g.sheet === 'Assets');
+  const b = await fixture(), group = productGroups().find(g => g.sheet === 'Assets' && g.currency === 'RMB' && g.category === 'Debt Fund');
   createProductEntry(b, group.key, { name: '插行产品', account: '新账户', balance: 10, flow: 10, due: '', note: '' }, 'manual');
   assert.equal(b.exchangeRate('USD'), 7); assert.equal(b.exchangeRate('HKD'), 0.9); assert.equal(b.rateAddress('USD'), 'D62');
   b.set('Assets', b.rateAddress('USD'), 7.1); b.rollover('2026-11-30');
@@ -265,8 +265,8 @@ const { isCashAccount } = require('../src/pages/MonthlyReview/categories.ts');
 test('cash accounts merge legacy categories and enforce formula net flows across edits, transactions, rollover and export', async () => {
   let book = await fixture(); book.set('Assets', 'B3', 'Current Account'); book.set('WTH', 'B3', 'Monetary Fund'); book.applyCashAccountRules();
   assert.equal(book.products().filter(p => p.category === 'Current Account').length, 2);
-  assert.ok(productGroups(book.products()).every(g => g.category === 'Current Account'));
-  assert.equal(productGroups([book.products()[0], { ...book.products()[0], category:'Monetary Fund' }]).length, 1);
+  assert.equal(productGroups().filter(g => g.sheet === 'Assets' && g.currency === 'RMB' && g.category === 'Current Account').length, 1);
+  assert.equal(productGroups().length, 16);
   const p = book.products()[0], key = productKey(p);
   assert.equal(p.flow, 100); assert.equal(book.cell(p.sheet, `I${p.row}`).formula, `E${p.row}-H${p.row}`);
   const batch = new MonthlyBatch(book).balances([[key, '900.01']]); assert.equal(batch.book.value(p.sheet, `I${p.row}`), -99.99);
@@ -283,7 +283,7 @@ test('cash accounts merge legacy categories and enforce formula net flows across
 });
 test('new cash accounts need no transactions or manual flow and source category sections survive insertion/deletion', async () => {
   const book = await fixture(); book.set('Assets','B3','Monetary Fund'); book.applyCashAccountRules();
-  const anchor = book.products()[0], group = productGroups(book.products()).find(g => isCashAccount(g.category));
+  const anchor = book.products()[0], group = productGroups().find(g => isCashAccount(g.category));
   const p = createProductEntry(book, group.key, {name:'新活期账户',account:'新账户',balance:200.25,flow:NaN,due:'',note:''},'transactions',[]);
   assert.equal(p.flow,200.25); assert.equal(p.previous,0); assert.equal(p.sourceCategory,'Monetary Fund');
   assert.equal(book.cell(p.sheet, `I${p.row}`).formula, `E${p.row}-H${p.row}`);
@@ -319,4 +319,61 @@ test('one batch preserves both assets and debts, validates hidden debt inputs an
   batch=batch.check([key],true).apply(next=>next.addProduct(next.products()[0],'新增资产','测试账户'));
   assert.equal(batch.reviewed.has(key),true);assert.equal(batch.book.number('Liabilities','D3'),125.5);
   const loaded=await MonthlyWorkbook.open(await batch.book.export());assert.equal(loaded.liabilities()[0].balance,125.5);assert.equal(loaded.liabilities()[0].repayment,'每月20日');assert.equal(loaded.products().find(p=>p.name===asset.name).balance,1400);
+});
+
+test('configured groups include USD equity and can create an empty category without counting it inside another category', async () => {
+  const b=await fixture(); b.set('Assets','A6','Grand Total'); b.formula('Assets','E6','E4'); b.formula('Assets','D1','E6'); b.formula('Assets','E1','E6'); b.formula('Assets','J6','J4');
+  const group=productGroups().find(g=>g.sheet==='Assets'&&g.currency==='RMB'&&g.category==='Equity Fund');
+  assert.ok(productGroups().some(g=>g.sheet==='Assets'&&g.currency==='USD'&&g.category==='Equity Fund'));
+  const before=b.number('Assets','D1'); const p=createProductEntry(b,group.key,{name:'新分类产品',account:'新账户',balance:120,flow:100,due:'',note:''},'manual');
+  assert.equal(p.category,'Equity Fund'); assert.equal(p.currency,'RMB'); assert.equal(p.previous,0); assert.equal(p.flow,100);assert.equal(b.number('Assets','D1'),before+120);assert.equal(b.number('Assets','E4'),1100);assert.ok(p.block);
+  const loaded=await MonthlyWorkbook.open(await b.export());assert.equal(loaded.products().find(x=>x.name===p.name).category,'Equity Fund');assert.equal(loaded.number('Assets','D1'),before+120);
+  loaded.deleteProduct(loaded.products().find(x=>x.name===p.name));assert.equal(loaded.number('Assets','D1'),before);assert.equal(productGroups().length,16);
+});
+test('reference missing USD equity category supports trades, FX totals, rollover and Excel roundtrip', {skip:!template}, async()=>{
+  const b=await MonthlyWorkbook.open(fs.readFileSync(template)), group=productGroups().find(g=>g.sheet==='Assets'&&g.currency==='USD'&&g.category==='Equity Fund');
+  assert.equal(b.products().some(p=>p.sheet==='Assets'&&p.currency==='USD'&&p.category==='Equity Fund'),false);
+  const before=b.number('Assets','D1'),rate=b.exchangeRate('USD'), existing=b.products().map(p=>({name:p.name,account:p.account,category:p.category,currency:p.currency,balance:p.balance}));
+  let p=createProductEntry(b,group.key,{name:'美元权益基金验证',account:'ZA Bank',balance:2100,flow:2000,due:'',note:''},'manual');
+  assert.equal(p.currency,'USD');assert.equal(p.category,'Equity Fund');assert.ok(Math.abs(b.number('Assets','D1')-before-2100*rate)<1e-7);
+  b.saveTransactions(p,[{kind:'buy',date:'2026-10-01',amount:2000,shares:200,price:10}]);p=b.products().find(x=>x.name===p.name);assert.equal(typeof b.value(p.sheet,`K${p.row}`),'number');assert.equal(p.flow,2000);
+  const loaded=await MonthlyWorkbook.open(await b.export());assert.deepEqual(loaded.products().filter(x=>x.name!==p.name).map(x=>({name:x.name,account:x.account,category:x.category,currency:x.currency,balance:x.balance})),existing);
+  assert.equal(loaded.products().find(x=>x.name===p.name).currency,'USD');assert.equal(loaded.exchangeRate('HKD'),0.8513);
+  const next=loaded.clone();next.rollover('2026-11-30');const carried=next.products().find(x=>x.name===p.name);assert.equal(carried.previous,2100);assert.equal(carried.flow,0);
+  loaded.deleteProduct(loaded.products().find(x=>x.name===p.name));assert.ok(Math.abs(loaded.number('Assets','D1')-before)<1e-7);
+});
+
+test('staging keystrokes does not clone the workbook or recalculate cash flow and gains; blur commits once', async()=>{
+  const source=await fixture(), p=source.products()[0], key=productKey(p);let batch=new MonthlyBatch(source);const current=batch.book;
+  let clones=0;const clone=current.clone.bind(current);current.clone=()=>{clones++;return clone()};
+  for(const text of ['2','20','200','2000','2000.','2000.0','2000.01']) { batch=batch.stageBalances([[key,text]]);batch.changedKeys(); }
+  batch=batch.stageFlows([[key,'500']]);assert.equal(batch.book,current);assert.equal(clones,0);assert.equal(batch.book.number(p.sheet,`E${p.row}`),1100);assert.equal(batch.book.number(p.sheet,`J${p.row}`),100);assert.equal(batch.dirty,true);assert.ok(batch.changedKeys().has(key));
+  const committed=batch.commitInputs();assert.equal(clones,1);assert.equal(committed.book.number(p.sheet,`E${p.row}`),2000.01);assert.equal(committed.book.number(p.sheet,`I${p.row}`),500);assert.equal(committed.book.number(p.sheet,`J${p.row}`),500.01);assert.equal(committed.commitInputs(),committed);
+  const loaded=await MonthlyWorkbook.open(await committed.book.export());assert.equal(loaded.number(p.sheet,`E${p.row}`),2000.01);assert.equal(source.number(p.sheet,`E${p.row}`),1100);
+});
+test('pending inputs flush before review and actions, including cash-account auto flow and debt totals', async()=>{
+  const source=await liabilityFixture();source.set('Assets','B3','Current Account');source.applyCashAccountRules();const p=source.products()[0],debt=source.liabilities()[0];
+  let batch=new MonthlyBatch(source).stageBalances([[productKey(p),'2000'],[productKey(debt),'25.50']]);assert.equal(batch.book.products()[0].flow,100);assert.equal(batch.book.number('Liabilities','D1'),125);
+  batch=batch.check([productKey(p)],true);assert.equal(batch.book.products()[0].flow,1000);assert.equal(batch.book.number('Liabilities','D1'),100.5);assert.equal(batch.reviewed.has(productKey(p)),true);
+  batch=batch.stageBalances([[productKey(p),'2500']]).apply(next=>next.updateLiability(next.liabilities()[0],{balance:30,repayment:'每月10日'}),productKey(debt));assert.equal(batch.book.products()[0].balance,2500);assert.equal(batch.book.products()[0].flow,1500);assert.equal(batch.book.liabilities()[0].repayment,'每月10日');
+  const invalid=batch.stageBalances([[productKey(debt),'']]);assert.ok(invalid.invalid.includes(productKey(debt)));assert.throws(()=>invalid.apply(()=>{}),/无效/);assert.equal(source.liabilities()[0].balance,50);
+});
+
+test('incremental formula invalidation recomputes a row and its cross-sheet dependents while unrelated results stay cached',()=>{
+  const cells={'S!A1':{value:10},'S!H1':{value:5},'S!I1':{value:0,formula:'A1-H1'},'S!J1':{value:0,formula:'A1-H1-I1'},'S!B1':{value:7},'S!B2':{value:0,formula:'B1*2'},'Analyze!C1':{value:0,formula:'SUM(S!A1,S!B2)'}};
+  const engine=new FormulaEngine((s,a)=>cells[`${s}!${a}`]);assert.equal(engine.get('S','J1'),0);assert.equal(engine.get('Analyze','C1'),24);
+  const changed={...cells,'S!A1':{value:20}}, reads={};const fork=engine.fork((s,a)=>{const key=`${s}!${a}`;reads[key]=(reads[key]||0)+1;return changed[key]});
+  fork.invalidate('S','A1');assert.equal(fork.get('S','J1'),0);assert.equal(fork.get('S','I1'),15);assert.equal(fork.get('Analyze','C1'),34);assert.equal(fork.get('S','B2'),14);assert.equal(reads['S!B2']||0,0);assert.equal(reads['S!B1']||0,0);assert.equal(reads['S!J1'],1);assert.equal(engine.get('Analyze','C1'),24);
+});
+test('incremental dependencies track ranges, empty cells, lazy IF branches and cycle recovery',()=>{
+  const cells={'S!A1':{value:1},'S!A2':{value:0,formula:'IF(A1=1,B1,C1)'},'S!B1':{value:5},'S!C1':{value:7},'T!A1':{value:0,formula:'SUM(S!D1:D3)'},'S!E1':{value:0,formula:'E2'},'S!E2':{value:0,formula:'E1'}},reads={};
+  const e=new FormulaEngine((s,a)=>{const key=`${s}!${a}`;reads[key]=(reads[key]||0)+1;return cells[key]});assert.equal(e.get('S','A2'),5);assert.equal(e.get('T','A1'),0);
+  cells['S!D2']={value:9};e.invalidate('S','D2');assert.equal(e.get('T','A1'),9);cells['S!A1']={value:0};e.invalidate('S','A1');assert.equal(e.get('S','A2'),7);const count=reads['S!A2'];cells['S!B1']={value:6};e.invalidate('S','B1');assert.equal(e.get('S','A2'),7);assert.equal(reads['S!A2'],count);
+  cells['S!C1']={value:8};e.invalidate('S','C1');assert.equal(e.get('S','A2'),8);assert.equal(e.get('S','E1'),'#CYCLE!');cells['S!E1']={value:3};e.invalidate('S','E1');assert.equal(e.get('S','E2'),3);
+});
+test('reference incremental row updates match a full Excel reload for every formula', {skip:!template},async()=>{
+  const b=await MonthlyWorkbook.open(fs.readFileSync(template));const next=b.clone();next.set('Assets','E3',1234.56);next.set('Assets','E107',1000);next.set('Liabilities','D4',123.45);next.set('Assets','I69',100);
+  const full=await MonthlyWorkbook.open(await next.export());let checked=0;
+  for(const sheet of next.sheets)for(const address of sheet.cells.keys())if(next.cell(sheet.name,address)?.formula){assert.deepEqual(next.value(sheet.name,address),full.value(sheet.name,address),`${sheet.name}!${address}`);checked++;}
+  assert.ok(checked>1000);assert.equal(b.number('Liabilities','D4'),817.85);
 });

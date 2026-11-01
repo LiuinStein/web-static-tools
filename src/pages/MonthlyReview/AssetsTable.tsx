@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { MonthlyWorkbook, Product } from './workbook';
 import { Scalar } from './formula';
 import { isCashAccount } from './categories';
@@ -15,14 +15,16 @@ interface Props {
 }
 export default function AssetsTable({ book, products, batch, busy, categoryNames, money, pct, onBatch, onError, onEdit, onTransactions, onDelete }: Props) {
   const table = useRef<HTMLDivElement>(null);
+  const reviewOnBlur = useRef<string | null>(null);
+  const allProducts = useMemo(() => book.products(), [book]);
   const [sort, setSort] = useState<ProductSort | null>(null);
   const [batchOrder, setBatchOrder] = useState<string[] | null>(null);
   const changed = batch?.changedKeys() || new Set<string>(), invalid = new Set(batch?.invalid);
   const invalidBalances = new Set(batch?.invalidBalances), invalidFlows = new Set(batch?.invalidFlows);
-  const layout = book.products().map(productKey).join('|');
+  const layout = allProducts.map(productKey).join('|');
   useEffect(() => {
     // Keep rows still while entering values; refresh ordering when the user clicks a header.
-    setBatchOrder(batch ? sortedProducts(book.products(), book, sort, new Set(batch.invalid)).map(productKey) : null);
+    setBatchOrder(batch ? sortedProducts(allProducts, book, sort, new Set(batch.invalid)).map(productKey) : null);
   }, [Boolean(batch), layout]);
   const ranks = new Map((batchOrder || []).map((key, index) => [key, index]));
   const displayed = batch && batchOrder
@@ -31,11 +33,18 @@ export default function AssetsTable({ book, products, batch, busy, categoryNames
   const value = (p: Product, column: string) => invalid.has(productKey(p)) ? null : book.value(p.sheet, `${column}${p.row}`);
   function toggleSort(field: ProductSortField) {
     const next = nextProductSort(sort, field); setSort(next);
-    if (batch) setBatchOrder(sortedProducts(book.products(), book, next, invalid).map(productKey));
+    if (batch) setBatchOrder(sortedProducts(allProducts, book, next, invalid).map(productKey));
   }
   function heading(label: string, field: ProductSortField) {
     const direction = sort?.field === field ? sort.direction : null;
     return <th key={field} aria-sort={direction === 'asc' ? 'ascending' : direction === 'desc' ? 'descending' : 'none'}><button className="mr-sort-button" aria-label={`按${field === 'name' ? '产品名称' : label}排序`} disabled={busy} onClick={() => toggleSort(field)} title="点击切换升序、降序、原始顺序">{label}<span aria-hidden="true">{direction === 'asc' ? '↑' : direction === 'desc' ? '↓' : '↕'}</span></button></th>;
+  }
+  function finishInput(key: string) {
+    if (!batch) return;
+    const committed = batch.commitInputs(), review = reviewOnBlur.current === key;
+    reviewOnBlur.current = null;
+    const next = review ? committed.check([key], true) : committed;
+    if (next !== batch) onBatch(next);
   }
   function move(event: React.KeyboardEvent<HTMLInputElement>, key: string) {
     if (event.key === 'Escape') { event.preventDefault(); table.current?.focus(); return; }
@@ -46,8 +55,9 @@ export default function AssetsTable({ book, products, batch, busy, categoryNames
     const index = inputs.indexOf(event.currentTarget);
     // Clicking a net-investment input does not add that column to the Tab sequence.
     const next = index < 0 ? inputs.find(input => input.dataset.balanceInput === key) : inputs[(index + (event.shiftKey ? -1 : 1) + inputs.length) % inputs.length];
+    if (index >= 0) reviewOnBlur.current = key;
+    if (next === event.currentTarget) event.currentTarget.blur();
     if (next) { next.focus(); next.select(); }
-    if (index >= 0 && !invalid.has(key)) onBatch(batch.check([key], true));
   }
   return <div className="mr-table-wrap mr-assets-table" ref={table} tabIndex={-1} aria-label="资产表格"><table><thead><tr>
     {batch && <th>核对</th>}{heading('产品 / 账户', 'name')}<th>成员 / 币种</th>{batch && <th>上期余额</th>}
@@ -61,12 +71,12 @@ export default function AssetsTable({ book, products, batch, busy, categoryNames
       {batch && <td>{money(p.previous)}</td>}
       <td>{money(value(p, 'J'))}</td><td title={String(value(p, 'K') || '')}>{pct(value(p, 'K'))}</td><td>{pct(value(p, 'L'))}</td>
       <td><div className="mr-row-actions"><button disabled={busy} onClick={() => onEdit(p)}>编辑</button><button disabled={busy} onClick={() => onTransactions(p)}>买卖记录</button><button className="danger" disabled={busy} onClick={() => onDelete(p)}>删除</button></div></td>
-      <td>{batch ? <><input onFocus={selectAmount} onClick={selectAmount} data-flow-input={key} tabIndex={-1} aria-label={`${p.name} 净投入`} aria-invalid={badFlow} aria-describedby={badFlow ? `flow-error-${key}` : undefined} type="text" inputMode="decimal" autoComplete="off" readOnly={isCashAccount(p.category)} title={isCashAccount(p.category) ? '活期账户净投入 = 本期余额 − 上期余额，自动计算' : '投入为正，回款为负；保存买卖记录后会按流水重新汇总'} value={batch.flows.get(key) ?? (typeof p.flow === 'number' ? String(p.flow) : '')} placeholder={typeof p.flow === 'string' ? p.flow : '0'} disabled={busy} onChange={e => { if (!isCashAccount(p.category)) onBatch(batch.cashFlows([[key, e.target.value]])); }} onKeyDown={e => move(e, key)} />{badFlow && <small id={`flow-error-${key}`} className="mr-input-error">请输入有效的净投入金额</small>}</> : money(p.flow)}</td>
-      <td>{batch ? <><input onFocus={selectAmount} onClick={selectAmount} data-balance-input={key} aria-label={`${p.name} 本期余额`} aria-invalid={bad} aria-describedby={bad ? `balance-error-${key}` : undefined} type="text" inputMode="decimal" autoComplete="off" value={batch.inputs.get(key) ?? String(p.balance)} disabled={busy} onChange={e => onBatch(batch.balances([[key, e.target.value]]))} onKeyDown={e => move(e, key)} onPaste={e => {
+      <td>{batch ? <><input onFocus={selectAmount} onClick={selectAmount} data-flow-input={key} tabIndex={-1} aria-label={`${p.name} 净投入`} aria-invalid={badFlow} aria-describedby={badFlow ? `flow-error-${key}` : undefined} type="text" inputMode="decimal" autoComplete="off" readOnly={isCashAccount(p.category)} title={isCashAccount(p.category) ? '活期账户净投入 = 本期余额 − 上期余额，自动计算' : '投入为正，回款为负；保存买卖记录后会按流水重新汇总'} value={batch.flows.get(key) ?? (typeof p.flow === 'number' ? String(p.flow) : '')} placeholder={typeof p.flow === 'string' ? p.flow : '0'} disabled={busy} onChange={e => { if (!isCashAccount(p.category)) onBatch(batch.stageFlows([[key, e.target.value]])); }} onBlur={() => finishInput(key)} onKeyDown={e => move(e, key)} />{badFlow && <small id={`flow-error-${key}`} className="mr-input-error">请输入有效的净投入金额</small>}</> : money(p.flow)}</td>
+      <td>{batch ? <><input onFocus={selectAmount} onClick={selectAmount} data-balance-input={key} aria-label={`${p.name} 本期余额`} aria-invalid={bad} aria-describedby={bad ? `balance-error-${key}` : undefined} type="text" inputMode="decimal" autoComplete="off" value={batch.inputs.get(key) ?? String(p.balance)} disabled={busy} onChange={e => onBatch(batch.stageBalances([[key, e.target.value]]))} onBlur={() => finishInput(key)} onKeyDown={e => move(e, key)} onPaste={e => {
         const text = e.clipboardData.getData('text');
         if (!/[\r\n\t]/.test(text)) return;
         e.preventDefault();
-        try { onBatch(batch.balances(balancePaste(displayed, key, text))); onError(''); } catch (error) { onError(error.message); }
+        try { onBatch(batch.stageBalances(balancePaste(displayed, key, text))); onError(''); } catch (error) { onError(error.message); }
       }} />{bad && <small id={`balance-error-${key}`} className="mr-input-error">请输入有效的非负余额</small>}</> : money(p.balance)}</td>
 
     </tr>;
