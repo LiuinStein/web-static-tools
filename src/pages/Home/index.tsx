@@ -63,25 +63,24 @@ export default function Home() {
         <div className="home-eyebrow">SHAOQUN TOOLS · 你的日常工具箱</div>
         <h1>把记录留下，把事情算清。</h1>
         <p>从每笔交易到每月复盘，从收益测算到日常换算。<br />选一个顺手的工具，开始今天的整理。</p>
-        <div className="home-intro-actions"><Link to="/monthly-review" className="home-primary">开始月度复盘 <span aria-hidden="true">→</span></Link><a href="#home-toolbox" onClick={event => { event.preventDefault(); document.getElementById('home-toolbox')?.scrollIntoView({ behavior: 'smooth' }); }}>浏览全部工具 <span aria-hidden="true">↓</span></a></div>
+        <div className="home-intro-actions"><Link to="/monthly-review" className="home-primary">开始月度复盘</Link><a href="#home-toolbox" onClick={event => { event.preventDefault(); document.getElementById('home-toolbox')?.scrollIntoView({ behavior: 'smooth' }); }}>浏览全部工具 <span aria-hidden="true">↓</span></a></div>
         <div className="home-intro-mark" aria-hidden="true"><span>记录</span><span className="home-mark-line" /><span>计算</span><span className="home-mark-line" /><span>复盘</span></div>
       </section>
 
       <section className="home-section" aria-labelledby="home-recommend-heading">
         <div className="home-section-heading"><div><span className="home-kicker">从这里开始</span><h2 id="home-recommend-heading">值得养成习惯的两件事</h2></div><span className="home-heading-note">记录当下，也看见长期变化</span></div>
         <div className="home-featured-grid">{tools.filter(tool => tool.featured).map((tool, index) => <Link to={tool.path} key={tool.path} className={`home-featured home-featured-${index}`}>
-          <div className="home-feature-top"><span className="home-icon" aria-hidden="true"><ToolIcon icon={tool.icon} /></span><span className="home-scene">{tool.scene}</span><span className="home-card-arrow" aria-hidden="true">→</span></div>
-          <h3>{tool.title}</h3><p>{tool.description}</p><div className="home-card-bottom"><div className="home-tags">{tool.tags.map(tag => <span key={tag}>{tag}</span>)}</div><span className="home-enter">打开工具 →</span></div>
+          <div className="home-feature-top"><span className="home-icon" aria-hidden="true"><ToolIcon icon={tool.icon} /></span><span className="home-scene">{tool.scene}</span></div>
+          <h3>{tool.title}</h3><p>{tool.description}</p><div className="home-card-bottom"><div className="home-tags">{tool.tags.map(tag => <span key={tag}>{tag}</span>)}</div><span className="home-enter">打开工具</span></div>
         </Link>)}</div>
       </section>
 
       <section id="home-toolbox" className="home-section" aria-labelledby="home-all-heading">
         <div className="home-section-heading"><div><span className="home-kicker">按需取用</span><h2 id="home-all-heading">找到此刻需要的工具</h2></div><label className="home-search"><span aria-hidden="true">⌕</span><input type="search" aria-label="搜索工具" placeholder="搜索工具、用途或关键词" value={query} onChange={event => setQuery(event.target.value)} /></label></div>
         <div className="home-filter-row"><div className="home-filters" aria-label="工具分类">{categories.map(item => <button key={item} type="button" aria-pressed={category === item} className={category === item ? 'is-active' : ''} onClick={() => setCategory(item)}>{item}</button>)}</div><span className="home-count" aria-live="polite">{filtered.length} 个工具</span></div>
-        <div className="home-tool-grid">{filtered.map(tool => <Link to={tool.path} className="home-tool-card" key={tool.path}><div className="home-tool-top"><span className="home-icon" aria-hidden="true"><ToolIcon icon={tool.icon} /></span><span className="home-category">{tool.category}</span><span className="home-card-arrow" aria-hidden="true">→</span></div><h3>{tool.title}</h3><p>{tool.description}</p><div className="home-tags">{tool.tags.map(tag => <span key={tag}>{tag}</span>)}</div></Link>)}</div>
+        <div className="home-tool-grid">{filtered.map(tool => <Link to={tool.path} className="home-tool-card" key={tool.path}><div className="home-tool-top"><span className="home-icon" aria-hidden="true"><ToolIcon icon={tool.icon} /></span><span className="home-category">{tool.category}</span></div><h3>{tool.title}</h3><p>{tool.description}</p><div className="home-tags">{tool.tags.map(tag => <span key={tag}>{tag}</span>)}</div></Link>)}</div>
         {filtered.length === 0 && <div className="home-empty"><h3>暂时没有匹配的工具</h3><p>试试“收益”“日期”或“Excel”，也可以重新查看全部工具。</p><button type="button" onClick={() => { setQuery(''); setCategory('全部'); }}>重置筛选</button></div>}
       </section>
-      <aside className="home-tip"><span aria-hidden="true">→</span><p><strong>给每一次复盘一个起点</strong><br />交易后留下记录，月末整理资产，再用收益率工具核对回报。</p><Link to="/trading-journal">写一笔交易日记 →</Link></aside>
     </main>
   );
 }

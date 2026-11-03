@@ -12,7 +12,8 @@ import {
   today,
   validateTrade,
 } from './model';
-import { DriveConfig, OneDriveJournal, journalDrive } from './onedrive';
+import { OneDriveJournal, journalDrive } from './onedrive';
+import type { DriveConfig } from './onedrive';
 import { exportTrades } from './workbook';
 import { oneDriveConfig } from './config';
 import { calculateHoldings } from './holdings';

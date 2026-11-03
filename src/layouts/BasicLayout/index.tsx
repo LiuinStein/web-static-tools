@@ -97,7 +97,7 @@ export default function BasicLayout({
         </Shell.Navigation>
 
         <Shell.Content>{children}</Shell.Content>
-        <Shell.Footer>
+        <Shell.Footer style={{ paddingBottom: 10, justifyContent: 'flex-end' }}>
           <Footer />
         </Shell.Footer>
       </Shell>

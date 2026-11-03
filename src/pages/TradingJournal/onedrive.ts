@@ -1,8 +1,10 @@
 import { ResponseType } from '@microsoft/microsoft-graph-client';
-import { OneDriveConnection, DriveConfig, normalizePath } from '../../services/onedrive-connection';
+import { OneDriveConnection, normalizePath } from '../../services/onedrive-connection';
+import type { DriveConfig } from '../../services/onedrive-connection';
 import { Trade, TradeChange, mergeForSync } from './model';
 import { readWorkbook, writeWorkbook } from './workbook';
-export { DriveConfig, normalizePath } from '../../services/onedrive-connection';
+export { normalizePath } from '../../services/onedrive-connection';
+export type { DriveConfig } from '../../services/onedrive-connection';
 
 interface RemoteFile { id: string; eTag?: string; size?: number; }
 
