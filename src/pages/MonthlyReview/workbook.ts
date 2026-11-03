@@ -1,4 +1,4 @@
-import JSZip from 'jszip';
+import type JSZip from 'jszip';
 import { isCashAccount, normalizeProductCategory } from './categories';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { FormulaEngine, Scalar, letters, column, serialDate, isoDate } from './formula';
@@ -55,7 +55,8 @@ export class MonthlyWorkbook {
   }
   static async open(data: ArrayBuffer | Uint8Array): Promise<MonthlyWorkbook> {
     if (data.byteLength > 10 * 1024 * 1024) throw new Error('文件不能超过 10MB');
-    const zip = await JSZip.loadAsync(data); const book = new MonthlyWorkbook(zip);
+    const Zip = (await import('jszip')).default;
+    const zip = await Zip.loadAsync(data); const book = new MonthlyWorkbook(zip);
     if (Object.values(zip.files).reduce((s, f: any) => s + (f._data?.uncompressedSize || 0), 0) > 80 * 1024 * 1024) throw new Error('解压后文件过大');
     const read = async (p: string) => { const f = zip.file(p); if (!f) throw new Error(`Excel 缺少 ${p}`); return f.async('string'); };
     const wb = parse(await read('xl/workbook.xml')), rels = parse(await read('xl/_rels/workbook.xml.rels'));
@@ -583,7 +584,8 @@ export class MonthlyWorkbook {
   async export(): Promise<Uint8Array> {
     this.applyCashAccountRules();
     // Patch only XML parts we understand. Original styles, drawings and package relationships stay intact.
-    const result = await JSZip.loadAsync(await this.zip.generateAsync({ type: 'uint8array' }));
+    const Zip = (await import('jszip')).default;
+    const result = await Zip.loadAsync(await this.zip.generateAsync({ type: 'uint8array' }));
     const serializer = new XMLSerializer();
     for (const s of this.sheets) {
       const doc = parse(serializer.serializeToString(s.doc));

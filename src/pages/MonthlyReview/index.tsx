@@ -16,7 +16,7 @@ import { createAssetGroup, createProductEntry, productGroups } from './product-e
 import { cashFlowSummary } from './transactions';
 import TransactionsTable, { blankTransaction } from './TransactionsTable';
 import { Scalar, isoDate, serialDate } from './formula';
-import { MonthlyDrive, DriveFile } from './onedrive';
+import { MonthlyDrive, DriveFile, monthlyDrive } from './onedrive';
 import { Draft, listDrafts, saveDraft, draftOptionLabel, draftSourceTitle } from './storage';
 import './style.css';
 
@@ -39,12 +39,22 @@ const daysBetween = (end: string, start: string): number | null => {
 };
 const fileId = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
+// Saved, parsed local views survive route changes. Cloud views are scoped to the
+// verified account and directory; unsaved batch work is never put in this cache.
+const localViews = new Map<string, { book: MonthlyWorkbook; draft: Draft }>();
 export default function MonthlyReview() {
-  const [savedBook, setBook] = useState<MonthlyWorkbook | null>(null);
+  const [initial] = useState(() => {
+    const config = readConfig();
+    const service = monthlyDrive(config.clientId, config.folder);
+    const user = service.currentAccount();
+    const scope = user ? `${service.config.clientId}:${user.homeAccountId}:${service.folder}` : '';
+    return { config, service, user, scope, view: localViews.get(scope || 'local') };
+  });
+  const [savedBook, setBook] = useState<MonthlyWorkbook | null>(initial.view?.book || null);
   const [batch, setBatch] = useState<MonthlyBatch | null>(null);
   const [onlyUnchecked, setOnlyUnchecked] = useState(false);
   const book = batch?.book || savedBook;
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(initial.view?.draft || null);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [tab, setTab] = useState('总览');
   const [query, setQuery] = useState('');
@@ -52,11 +62,11 @@ export default function MonthlyReview() {
   const [currency, setCurrency] = useState('全部');
   const [accountFilter, setAccountFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
-  const [config, setConfig] = useState(readConfig);
-  const [drive, setDrive] = useState<MonthlyDrive | null>(null);
-  const [scope, setScope] = useState('');
-  const [account, setAccount] = useState('');
-  const [files, setFiles] = useState<DriveFile[]>([]);
+  const [config, setConfig] = useState(initial.config);
+  const [drive, setDrive] = useState<MonthlyDrive | null>(initial.user ? initial.service : null);
+  const [scope, setScope] = useState(initial.scope);
+  const [account, setAccount] = useState(initial.user?.username || initial.user?.name || '');
+  const [files, setFiles] = useState<DriveFile[]>(() => initial.service.cachedFiles());
   const [settings, setSettings] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -77,18 +87,38 @@ export default function MonthlyReview() {
   const input = useRef<HTMLInputElement>(null);
   const lock = useRef(false);
   const mounted = useRef(true);
+  const backgroundRevision = useRef(0);
+  const openedDraft = useRef(draft);
+  openedDraft.current = draft;
   useEffect(() => { mounted.current = true; listDrafts().then(setDrafts).catch(e => setError(`无法读取本机草稿：${e.message}`)); return () => { mounted.current = false; }; }, []);
   useEffect(() => {
+    if (savedBook && draft && (!draft.scope || draft.scope === scope)) localViews.set(scope || 'local', { book: savedBook, draft });
+  }, [savedBook, draft, scope]);
+  useEffect(() => {
     let cancelled = false;
-    if (config.clientId.trim()) run(async () => {
-      const service = new MonthlyDrive(config.clientId, config.folder);
+    const revision = backgroundRevision.current;
+    const active = () => !cancelled && revision === backgroundRevision.current;
+    if (config.clientId.trim()) (async () => {
+      const service = initial.service;
       const user = await service.restore();
-      if (!user || cancelled) return;
+      if (!user || !active()) return;
+      const nextScope = `${service.config.clientId}:${user.homeAccountId}:${service.folder}`;
+      setDrive(service); setFiles(service.cachedFiles()); setAccount(user.username || user.name || 'Microsoft 账户'); setScope(nextScope);
+      // Restore the previously opened local view without waiting for the network.
+      if (!initial.view && !openedDraft.current) {
+        const view = localViews.get(nextScope);
+        if (view) { setBook(view.book); setDraft(view.draft); }
+      }
       const listed = await service.list();
-      if (cancelled) return;
-      setDrive(service); setFiles(listed); setAccount(user.username || user.name || 'Microsoft 账户');
-      setScope(`${service.config.clientId}:${user.homeAccountId}:${service.folder}`);
-    });
+      if (active()) {
+        setFiles(listed);
+        const opened = (initial.view || localViews.get(nextScope))?.draft;
+        const cloud = listed.find(file => file.id === opened?.source?.id);
+        if (opened?.source && opened.scope === nextScope && (!cloud || cloud.eTag !== opened.source.eTag)) {
+          setNotice('云端账本已有变化，本机草稿已保留。请核对云端版本后再发布。');
+        }
+      }
+    })().catch(e => { if (active()) setError(`后台刷新失败：${e.message}。本机草稿不受影响，可点击连接重试。`); });
     return () => { cancelled = true; };
   }, []);
   useEffect(() => {
@@ -224,7 +254,8 @@ export default function MonthlyReview() {
     });
   }
   async function connect(switchAccount = false) {
-    const service = new MonthlyDrive(config.clientId, config.folder); const user = await service.connect(switchAccount);
+    backgroundRevision.current += 1;
+    const service = monthlyDrive(config.clientId, config.folder); const user = await service.connect(switchAccount);
     const key = `${service.config.clientId}:${user.homeAccountId}:${service.folder}`;
     const listed = await service.list(); setDrive(service); setFiles(listed); setAccount(user.username || user.name || 'Microsoft 账户'); setScope(key);
     const applied = { clientId: service.config.clientId, folder: service.folder };
@@ -256,7 +287,7 @@ export default function MonthlyReview() {
       <div className="mr-toolbar-group"><button disabled={busy || !book || Boolean(batch)} onClick={() => run(async () => { if (!book || !draft) return; const data = await book.export(); const url = URL.createObjectURL(new Blob([data as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })); const a = document.createElement('a'); a.href = url; a.download = draft.name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); setNotice('Excel 已生成，包含原有公式及当前计算结果。'); })}>↓ 下载 Excel</button><button className="primary" disabled={busy || !book || !drive || Boolean(batch)} onClick={() => run(publish)}>发布到 OneDrive</button><button disabled={busy} onClick={() => setSettings(!settings)}>同步设置</button></div>
     </div>
     {error && !modal && <div className="mr-message error" role="alert">{error}</div>}{notice && <div className="mr-message" role="status">{notice}</div>}
-    {settings && <section className="mr-panel"><h2>OneDrive 连接</h2><p>与交易日记共用 Microsoft 登录，账本目录独立。连接后修改目录并应用即可，无需重复登录。请在 Entra 中注册当前站点的重定向网址，并授予 Files.ReadWrite 权限。</p><div className="mr-grid">{field('应用客户端 ID', config.clientId, v => setConfig({ ...config, clientId: v }))}{field('账本文件夹', config.folder, v => setConfig({ ...config, folder: v }))}</div><div className="mr-actions"><button disabled={busy} onClick={() => setConfig({ ...monthlyOneDriveConfig })}>恢复默认配置</button><button className="primary" disabled={busy} onClick={() => run(() => connect())}>{drive ? '应用目录' : '连接 OneDrive'}</button>{drive && <button disabled={busy} onClick={() => run(() => connect(true))}>切换账户</button>}{drive && <button disabled={busy} onClick={() => run(async () => { await drive.disconnect(); setDrive(null); setFiles([]); setScope(''); setAccount(''); })}>断开共享登录</button>}</div></section>}
+    {settings && <section className="mr-panel"><h2>OneDrive 连接</h2><p>与交易日记共用 Microsoft 登录，账本目录独立。连接后修改目录并应用即可，无需重复登录。请在 Entra 中注册当前站点的重定向网址，并授予 Files.ReadWrite 权限。</p><div className="mr-grid">{field('应用客户端 ID', config.clientId, v => setConfig({ ...config, clientId: v }))}{field('账本文件夹', config.folder, v => setConfig({ ...config, folder: v }))}</div><div className="mr-actions"><button disabled={busy} onClick={() => setConfig({ ...monthlyOneDriveConfig })}>恢复默认配置</button><button className="primary" disabled={busy} onClick={() => run(() => connect())}>{drive ? '应用目录' : '连接 OneDrive'}</button>{drive && <button disabled={busy} onClick={() => run(() => connect(true))}>切换账户</button>}{drive && <button disabled={busy} onClick={() => run(async () => { backgroundRevision.current += 1; await drive.disconnect(); setDrive(null); setFiles([]); setScope(''); setAccount(''); })}>断开共享登录</button>}</div></section>}
     {drive && <div className="mr-cloud"><span>● {account} · /{drive.folder}/</span><select aria-label="打开 OneDrive Excel" disabled={busy || Boolean(batch)} value="" onChange={e => { const file = files.find(f => f.id === e.target.value); if (file) run(async () => { const result = await drive.download(file); await activate(new Uint8Array(result.data), result.file.name, { source: result.file, scope, sourceLabel: `${account} · /${drive.folder}/`, published: new Date().toISOString() }); }); }}><option value="">选择云端 Excel</option>{files.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}</select><button disabled={busy} onClick={() => run(async () => setFiles(await drive.list()))}>刷新文件</button></div>}
     {drive && book && draft?.scope && draft.scope !== scope && <div className="mr-message">当前账本来自其他账户或目录，原文件保持原位。可打开当前目录账本，或 <button disabled={busy || Boolean(batch)} onClick={() => run(async () => {
       if (!draft || !window.confirm(`将“${draft.name}”另存为当前账户 /${drive.folder}/ 的副本？原账本保留，发布时不会覆盖同名文件。`)) return;

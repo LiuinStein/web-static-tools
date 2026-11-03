@@ -1,71 +1,24 @@
-import { AccountInfo } from '@azure/msal-browser';
-import { OneDriveSession, oneDriveSession } from '../../services/onedrive-session';
-import { Client, ResponseType } from '@microsoft/microsoft-graph-client';
+import { ResponseType } from '@microsoft/microsoft-graph-client';
+import { OneDriveConnection, DriveConfig, normalizePath } from '../../services/onedrive-connection';
 import { Trade, TradeChange, mergeForSync } from './model';
 import { readWorkbook, writeWorkbook } from './workbook';
+export { DriveConfig, normalizePath } from '../../services/onedrive-connection';
 
-export interface DriveConfig {
-  clientId: string;
-  path: string;
-}
-interface RemoteFile {
-  id: string;
-  eTag?: string;
-  size?: number;
-}
-export function normalizePath(path: string): string {
-  const clean = path.trim().replace(/^\/+|\/+$/g, '');
-  if (
-    !clean ||
-    !clean.toLowerCase().endsWith('.xlsx') ||
-    clean.split('/').some((part) => !part || part === '.' || part === '..' || /[\\:*?"<>|]/.test(part))
-  ) {
-    throw new Error('请输入有效的 .xlsx 文件路径，例如 文档/BalanceSheet/TradingJournal.xlsx');
-  }
-  return clean;
-}
-export class OneDriveJournal {
-  private session: OneDriveSession;
-  protected client: Client;
-  private account: AccountInfo;
-  private allowInteractiveAuth = true;
-  private cachedRead?: { id: string; eTag: string; trades: Trade[] };
-  readonly config: DriveConfig;
-  constructor(config: DriveConfig) {
-    if (!/^[0-9a-f-]{36}$/i.test(config.clientId.trim())) throw new Error('请输入 Microsoft 应用的客户端 ID');
-    this.config = { clientId: config.clientId.trim().toLowerCase(), path: normalizePath(config.path) };
-    this.session = oneDriveSession(this.config.clientId);
-    this.client = Client.initWithMiddleware({
-      authProvider: {
-        getAccessToken: () => this.accessToken(),
-      },
-    });
-  }
-  private async accessToken(): Promise<string> {
-    if (!this.account) throw new Error('请先连接 OneDrive');
-    return this.session.token(this.account.homeAccountId, this.allowInteractiveAuth);
-  }
-  async restore(accountId?: string): Promise<AccountInfo | null> {
-    const account = await this.session.restore(accountId);
-    if (!account) return null;
-    this.account = account;
-    return account;
-  }
-  async connect(switchAccount = false): Promise<AccountInfo> {
-    const account = await this.session.connect(switchAccount);
-    this.account = account;
-    return account;
-  }
-  async disconnect(): Promise<void> {
-    this.cachedRead = undefined;
-    await this.session.disconnect(this.account?.homeAccountId);
+interface RemoteFile { id: string; eTag?: string; size?: number; }
+
+export class OneDriveJournal extends OneDriveConnection {
+  private cachedRead?: { id: string; eTag: string; trades: Trade[]; scope: string };
+  protected identityChanged() { this.cachedRead = undefined; }
+  cachedTrades(): Trade[] | null {
+    return this.currentAccount() && this.cachedRead?.scope === this.cacheScope()
+      ? this.cachedRead.trades.map(trade => ({ ...trade })) : null;
   }
   private endpoint(): string {
     return `/me/drive/root:/${this.config.path.split('/').map(encodeURIComponent).join('/')}`;
   }
   private remember(item: RemoteFile | null | undefined, trades: Trade[]): void {
     this.cachedRead = item && item.id && item.eTag
-      ? { id: item.id, eTag: item.eTag, trades: trades.map((trade) => ({ ...trade })) }
+      ? { id: item.id, eTag: item.eTag, scope: this.cacheScope(), trades: trades.map((trade) => ({ ...trade })) }
       : undefined;
   }
   private async metadata(): Promise<RemoteFile | null> {
@@ -83,6 +36,7 @@ export class OneDriveJournal {
     return item;
   }
   private async load(knownItem?: RemoteFile | null) {
+    const scope = this.cacheScope();
     const item = knownItem === undefined ? await this.metadata() : knownItem;
     if (!item) return { ...(await readWorkbook()), item: null };
     const data = await this.client
@@ -92,13 +46,15 @@ export class OneDriveJournal {
     const latest = await this.client.api(`/me/drive/items/${item.id}`).select('eTag').get();
     if (latest.eTag !== item.eTag) throw new Error('文件正在被其他设备修改，请重新同步');
     const result = await readWorkbook(data);
+    this.assertScope(scope);
     this.remember(item, result.trades);
     return { ...result, item };
   }
-  async read(): Promise<Trade[]> {
+  async read(): Promise<Trade[]> { return this.sync([], [], false); }
+  private async readVerified(): Promise<Trade[]> {
     const item = await this.metadata();
     const cached = this.cachedRead;
-    if (item && item.eTag && cached && cached.id === item.id && cached.eTag === item.eTag) {
+    if (item && item.eTag && cached && cached.scope === this.cacheScope() && cached.id === item.id && cached.eTag === item.eTag) {
       return cached.trades.map((trade) => ({ ...trade }));
     }
     if (!item) return [];
@@ -128,15 +84,11 @@ export class OneDriveJournal {
     }
   }
   async sync(pending: Trade[], changes: TradeChange[] = [], interactive = true): Promise<Trade[]> {
-    this.allowInteractiveAuth = interactive;
-    try {
-      return await this.syncWorkbook(pending, changes);
-    } finally {
-      this.allowInteractiveAuth = true;
-    }
+    return this.operation(interactive, () => this.syncWorkbook(pending, changes));
   }
   private async syncWorkbook(pending: Trade[], changes: TradeChange[]): Promise<Trade[]> {
-    if (!pending.length && !changes.length) return this.read();
+    const scope = this.cacheScope();
+    if (!pending.length && !changes.length) return this.readVerified();
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const { workbook, trades, item } = await this.load();
       const merged = mergeForSync(trades, pending, changes);
@@ -162,6 +114,7 @@ export class OneDriveJournal {
             .put(data);
         }
         // Graph returns the saved file's version. Without it, verify via a fresh read next time.
+        this.assertScope(scope);
         this.remember(uploaded, merged);
         return merged;
       } catch (error) {
@@ -170,4 +123,12 @@ export class OneDriveJournal {
     }
     throw new Error('云端文件发生冲突，请重试');
   }
+}
+
+const journals = new Map<string, OneDriveJournal>();
+export function journalDrive(config: DriveConfig): OneDriveJournal {
+  const key = JSON.stringify([config.clientId.trim().toLowerCase(), normalizePath(config.path)]);
+  let service = journals.get(key);
+  if (!service) { service = new OneDriveJournal(config); journals.set(key, service); }
+  return service;
 }

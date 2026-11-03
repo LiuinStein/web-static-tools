@@ -225,6 +225,7 @@ test('automatic sync never opens an authorization popup and restores manual auth
   let popups = 0;
   service.account = { homeAccountId: 'account-a' };
   service.session = {
+    currentAccount() { return service.account; },
     async token(id, interactive) {
       assert.equal(id, 'account-a');
       if (!interactive) throw new Error('Microsoft 登录已过期');

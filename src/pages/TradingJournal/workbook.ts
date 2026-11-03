@@ -1,4 +1,4 @@
-import ExcelJS from 'exceljs';
+import type ExcelJS from 'exceljs';
 import { Trade, validateTrade } from './model';
 
 const sheetName = '交易记录';
@@ -17,7 +17,8 @@ const columns: Array<[keyof Trade, string]> = [
   ['reason', '交易原因'],
 ];
 export async function readWorkbook(data?: ArrayBuffer): Promise<{ workbook: ExcelJS.Workbook; trades: Trade[] }> {
-  const workbook = new ExcelJS.Workbook();
+  const Excel = (await import('exceljs')).default;
+  const workbook = new Excel.Workbook();
   if (data) await workbook.xlsx.load(data);
   let sheet = workbook.getWorksheet(sheetName);
   if (!sheet) {

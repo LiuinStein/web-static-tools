@@ -57,7 +57,7 @@ test('disconnect prevents automatic relogin through cached accounts or legacy fe
 });
 test('silent restore and background work never show a popup, while explicit work can renew auth', async () => {
   const { session, state } = fixture(); await session.connect(); state.expired = true;
-  await assert.rejects(session.restore(), InteractionRequiredAuthError);
+  assert.equal((await session.restore()).homeAccountId, 'account-a'); // Reuse identity; token validity is checked at request time.
   await assert.rejects(session.token('account-a', false), /登录已过期/);
   assert.equal(state.tokenPopups, 0); assert.equal(state.logins, 1);
   assert.equal(await session.token('account-a', true), 'token-account-a'); assert.equal(state.tokenPopups, 1);
@@ -82,4 +82,16 @@ test('different Microsoft applications have independent login identity', async (
   const other = new OneDriveSession('client-b', { ...auth, getAllAccounts: () => [] }, { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) });
   assert.equal(await other.restore(), null); await other.disconnect();
   assert.equal((await session.restore()).homeAccountId, 'account-a'); assert.equal(state.logins, 1);
+});
+
+test('returning to either feature reuses restored identity without another silent token request', async () => {
+  const { session, auth, state } = fixture(); state.accounts = [accountA];
+  let silent = 0; const original = auth.acquireTokenSilent;
+  auth.acquireTokenSilent = async args => { silent++; return original(args); };
+  await Promise.all([session.restore(), session.restore()]);
+  await session.restore(); await session.restore();
+  assert.equal(state.init, 1); assert.equal(silent, 1);
+  assert.equal(session.currentAccount().homeAccountId, accountA.homeAccountId);
+  await session.token(accountA.homeAccountId, false); assert.equal(silent, 2);
+  await session.disconnect(); assert.equal(session.currentAccount(), null);
 });

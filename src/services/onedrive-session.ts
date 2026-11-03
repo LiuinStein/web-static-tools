@@ -11,6 +11,13 @@ export class OneDriveSession {
   private connecting?: Promise<AccountInfo>;
   private refreshing?: Promise<string>;
   private epoch = 0;
+  private restoredAccount?: AccountInfo;
+  private restoring?: Promise<AccountInfo | null>;
+  get revision() { return this.epoch; }
+  currentAccount(): AccountInfo | null {
+    const account = this.restoredAccount;
+    return account && this.find()?.homeAccountId === account.homeAccountId ? account : null;
+  }
   private readonly key: string;
   constructor(readonly clientId: string, private auth: AuthClient, private storage: SessionStorage) {
     this.key = `onedrive:session:v1:${clientId}`;
@@ -39,11 +46,18 @@ export class OneDriveSession {
     if (epoch !== this.epoch || (expectedId && selected && selected.accountId !== expectedId)) throw new Error('OneDrive 账户或登录状态已变化，请重新连接当前页面');
   }
   async restore(preferredId?: string): Promise<AccountInfo | null> {
+    const current = this.currentAccount();
+    if (current) return current;
+    if (this.restoring) return this.restoring;
     const epoch = this.epoch;
-    await this.initialize(); this.check(epoch);
-    const account = this.find(preferredId); if (!account) return null;
-    await this.auth.acquireTokenSilent({ scopes, account }); this.check(epoch, account.homeAccountId);
-    this.select(account); return account;
+    const task = (async () => {
+      await this.initialize(); this.check(epoch);
+      const account = this.find(preferredId); if (!account) return null;
+      await this.auth.acquireTokenSilent({ scopes, account }); this.check(epoch, account.homeAccountId);
+      this.select(account); this.restoredAccount = account; return account;
+    })();
+    this.restoring = task;
+    try { return await task; } finally { if (this.restoring === task) this.restoring = undefined; }
   }
   async connect(switchAccount = false): Promise<AccountInfo> {
     if (this.connecting) return this.connecting;
@@ -58,13 +72,13 @@ export class OneDriveSession {
             if (!(error instanceof InteractionRequiredAuthError)) throw error;
             await this.popupToken(account, epoch);
           }
-          this.check(epoch, account.homeAccountId); this.select(account); return account;
+          this.check(epoch, account.homeAccountId); this.select(account); this.restoredAccount = account; return account;
         }
       }
       const result = await this.auth.loginPopup({ scopes, prompt: 'select_account' });
       this.check(epoch);
       if (!result.account) throw new Error('Microsoft 登录未返回账户');
-      this.epoch += 1; this.select(result.account); return result.account;
+      this.epoch += 1; this.restoring = undefined; this.select(result.account); this.restoredAccount = result.account; return result.account;
     };
     this.connecting = task();
     try { return await this.connecting; } finally { this.connecting = undefined; }
@@ -95,7 +109,7 @@ export class OneDriveSession {
   }
   async disconnect(expectedId?: string): Promise<void> {
     await this.initialize(); this.check(this.epoch, expectedId);
-    const account = this.find(); this.epoch += 1;
+    const account = this.find(); this.epoch += 1; this.restoredAccount = undefined; this.restoring = undefined;
     this.storage.setItem(this.key, JSON.stringify({ accountId: null }));
     this.auth.setActiveAccount(null);
     if (account) await this.auth.clearCache({ account });

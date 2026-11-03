@@ -12,7 +12,7 @@ import {
   today,
   validateTrade,
 } from './model';
-import { DriveConfig, OneDriveJournal } from './onedrive';
+import { DriveConfig, OneDriveJournal, journalDrive } from './onedrive';
 import { exportTrades } from './workbook';
 import { oneDriveConfig } from './config';
 import { calculateHoldings } from './holdings';
@@ -53,10 +53,16 @@ const number = (value: number) => value.toLocaleString('zh-CN', { minimumFractio
 export default function TradingJournal() {
   const settings = useRef(readJSON(settingsKey, { config: oneDriveConfig }));
   const [config, setConfig] = useState<DriveConfig>(settings.current.config);
-  const [cache, setCache] = useState<Cache>(() => readJSON(localKey, emptyCache));
-  const [cacheKey, setCacheKey] = useState(localKey);
-  const [drive, setDrive] = useState<OneDriveJournal | null>(null);
-  const [account, setAccount] = useState('');
+  const [initial] = useState(() => {
+    const service = journalDrive(settings.current.config);
+    const user = service.currentAccount();
+    const key = user ? `trading-journal:cloud:v1:${service.config.clientId}:${user.homeAccountId}:${service.config.path}` : localKey;
+    return { service, user, key };
+  });
+  const [cache, setCache] = useState<Cache>(() => readJSON(initial.key, emptyCache));
+  const [cacheKey, setCacheKey] = useState(initial.key);
+  const [drive, setDrive] = useState<OneDriveJournal | null>(initial.user ? initial.service : null);
+  const [account, setAccount] = useState(initial.user?.username || initial.user?.name || '');
   const [draft, setDraft] = useState(blank);
   const [editing, setEditing] = useState<Trade | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Trade | null>(null);
@@ -73,6 +79,7 @@ export default function TradingJournal() {
   const [error, setError] = useState('');
   const busyRef = useRef(false);
   const formRef = useRef<HTMLDivElement>(null);
+  const backgroundRevision = useRef(0);
   const cacheRef = useRef(cache);
   cacheRef.current = cache;
   const all = visibleTrades(cache.remote, cache.pending, cache.changes || []);
@@ -107,25 +114,28 @@ export default function TradingJournal() {
   const stanceStyles = { 看多: 'bull', 看空: 'bear', 平仓: 'flat' };
   useEffect(() => {
     let cancelled = false;
+    const revision = backgroundRevision.current;
+    const active = () => !cancelled && revision === backgroundRevision.current;
     const saved = settings.current;
     if (saved.config.clientId) {
-      run(async () => {
-        const service = new OneDriveJournal(saved.config);
+      // Show the account-scoped local snapshot before any cloud I/O. Background
+      // restoration must not lock the entry form or open an authorization popup.
+      (async () => {
+        const service = initial.service;
         const user = await service.restore(saved.accountId);
-        if (!user || cancelled) return;
-        const key = `trading-journal:cloud:v1:${saved.config.clientId}:${user.homeAccountId}:${service.config.path}`;
+        if (!user || !active()) return;
+        const key = `trading-journal:cloud:v1:${service.config.clientId}:${user.homeAccountId}:${service.config.path}`;
         const local = readJSON(key, emptyCache) as Cache;
-        const remote = await service.read();
-        if (cancelled) return;
-        persist({ ...local, remote, lastSync: new Date().toISOString() }, key);
-        setCacheKey(key);
-        setDrive(service);
+        setCache(local); setCacheKey(key); setDrive(service);
         setAccount(user.username || user.name || 'Microsoft 账户');
-      });
+        const remote = await service.read();
+        if (!active()) return;
+        // A save may have happened during refresh. Preserve its pending changes.
+        const latest = readJSON(key, local) as Cache;
+        if (latest.lastSync === local.lastSync) persist({ ...latest, remote, lastSync: new Date().toISOString() }, key);
+      })().catch(error => { if (active()) setSyncError(`后台刷新失败：${error.message}。本机记录已保留，可点击同步重试。`); });
     }
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
   useEffect(() => {
     if (!drive) return undefined;
@@ -223,9 +233,10 @@ export default function TradingJournal() {
     });
   }
   async function connect(switchAccount = false) {
+    backgroundRevision.current += 1;
     await run(async () => {
       await syncQueue.current.run(async () => {
-        const service = new OneDriveJournal(config);
+        const service = journalDrive(config);
         const user = await service.connect(switchAccount);
         const key = `trading-journal:cloud:v1:${service.config.clientId}:${user.homeAccountId}:${service.config.path}`;
         const saved = readJSON(key, emptyCache) as Cache;
@@ -369,6 +380,7 @@ export default function TradingJournal() {
                   type="normal"
                   onClick={() =>
                     run(async () => {
+                      backgroundRevision.current += 1;
                       await drive.disconnect();
                       setSyncError('');
                       localStorage.setItem(settingsKey, JSON.stringify({ config }));
