@@ -355,10 +355,11 @@
 }
 .j-form-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0 16px;
 }
 .j-field {
+  min-width: 0;
   display: block;
   font-size: 14px;
   color: var(--color-text1-3, #666);
@@ -384,6 +385,17 @@
   margin-top: 7px;
   min-width: 0;
   outline: none;
+}
+@media (min-width: 601px) {
+  .journal-entry .j-field select {
+    -webkit-appearance: none;
+    appearance: none;
+    padding-right: 32px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='m3 4.5 3 3 3-3' stroke='%23666' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 12px 12px;
+  }
 }
 .j-field input:focus,
 .j-field select:focus,
@@ -532,8 +544,11 @@
     flex-shrink: 0;
   }
   .journal-sync {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    align-items: start;
     padding: 16px;
-    gap: 9px;
+    gap: 10px;
   }
   .journal-cloud {
     flex: 0 0 28px;
@@ -548,10 +563,72 @@
     line-height: 1.8;
   }
   .journal-sync-actions {
-    margin-left: 37px;
-    flex: 1 1 calc(100% - 37px);
-    gap: 9px;
-    flex-wrap: wrap;
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 40px;
+    width: 100%;
+    margin-left: 0;
+    gap: 10px;
+    padding-top: 4px;
+  }
+  .journal-sync-actions .journal-dot {
+    grid-column: 1 / -1;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .journal-sync-actions .j-btn {
+    width: 100%;
+    height: 40px;
+    font-size: 14px;
+    color: var(--color-brand1-6, #209bfa);
+    border-color: var(--color-brand1-6, #209bfa);
+  }
+  .journal-sync-actions .j-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 1px solid var(--color-line1-2, #e6e6e6);
+    border-radius: var(--corner-1, 3px);
+    background: var(--color-white, #fff);
+    font-size: 18px;
+  }
+  .journal .j-field input,
+  .journal .j-field select {
+    max-width: 100%;
+    min-height: 44px;
+    height: 44px;
+    font-size: 16px;
+    line-height: normal;
+  }
+  .journal .j-field input[type=date] {
+    -webkit-appearance: none;
+    appearance: none;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    padding: 0 8px;
+    line-height: 42px;
+    text-align: left;
+  }
+  /* iOS Safari renders the date text in its own native value element. */
+  .journal .j-field input[type=date]::-webkit-date-and-time-value {
+    display: block;
+    height: 42px;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    line-height: 42px;
+    text-align: left;
+  }
+  .journal .j-field input[type=date]::-webkit-datetime-edit {
+    display: inline-flex;
+    align-items: center;
+    height: 42px;
+    padding: 0;
+    line-height: normal;
   }
   .journal-stats {
     grid-template-columns: 1fr 1fr;

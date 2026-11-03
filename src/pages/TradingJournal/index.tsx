@@ -651,7 +651,7 @@ export default function TradingJournal() {
           <form onSubmit={save}>
             <div className="j-form-grid">
               <label className="j-field">
-                日期 <em>*</em>
+                <span>日期 <em>*</em></span>
                 <input
                   aria-label="日期"
                   type="date"
@@ -661,7 +661,7 @@ export default function TradingJournal() {
                 />
               </label>
               <label className="j-field">
-                类型 <em>*</em>
+                <span>类型 <em>*</em></span>
                 <select
                   aria-label="类型"
                   value={draft.type}
