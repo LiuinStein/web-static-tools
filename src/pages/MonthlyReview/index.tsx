@@ -6,6 +6,7 @@ import AssetsTable from './AssetsTable';
 import AssetGroupDialog from './AssetGroupDialog';
 import LiabilitiesTable from './LiabilitiesTable';
 import { isCashAccount } from './categories';
+import { productBalance } from './validation';
 import { isUnavailable } from './display';
 import { matchesSearch } from './search';
 import { MonthlyBatch, productKey, balanceNumber } from './batch';
@@ -161,7 +162,7 @@ export default function MonthlyReview() {
     // Apply to a copy; a rejected operation leaves both the visible workbook and saved draft intact.
     const next = await MonthlyWorkbook.open(draft.data); action(next);
     const data = await next.export(); const updated = { ...draft, data, updated: new Date().toISOString(), published: undefined };
-    const saved = await saveDraft(updated); setBook(next); setDraft(saved); setDrafts(await listDrafts()); setNotice('已保存本机草稿，页面结果已更新。');
+    const saved = await saveDraft(updated, draft); setBook(next); setDraft(saved); setDrafts(await listDrafts()); setNotice('已保存本机草稿，页面结果已更新。');
   }
   function startBatch(source = book, target = '资产') {
     if (!source) return;
@@ -173,7 +174,7 @@ export default function MonthlyReview() {
     if (completed.invalid.length) throw new Error('仍有 ' + completed.invalid.length + ' 项金额无效，请修正后再保存（包含其他 tab 或被筛选隐藏的账户）');
     completed.book.validate();
     const data = await completed.book.export();
-    const saved = await saveDraft({ ...draft, data, updated: new Date().toISOString(), published: undefined });
+    const saved = await saveDraft({ ...draft, data, updated: new Date().toISOString(), published: undefined }, draft);
     setBook(completed.book); setDraft(saved); setDrafts(await listDrafts()); setBatch(null); setOnlyUnchecked(false);
     setNotice('批量记账已保存到本机草稿，可下载 Excel 检查或发布到 OneDrive。');
   }
@@ -242,9 +243,9 @@ export default function MonthlyReview() {
     event.preventDefault();
     run(async () => {
       await mutate(next => {
-        const values = { ...productForm, name: productForm.name.trim(), account: productForm.account.trim(), balance: Number(productForm.balance) };
+        const values = { ...productForm, name: productForm.name.trim(), account: productForm.account.trim(), balance: productBalance(productForm.balance, '本期余额') };
         if (selected) {
-          next.updateProduct(selected, { ...values, previous: Number(productForm.previous), flow: productForm.flow.trim() !== '' && Number.isFinite(Number(productForm.flow)) ? Number(productForm.flow) : productForm.flow });
+          next.updateProduct(selected, { ...values, previous: productBalance(productForm.previous, '上期余额'), flow: productForm.flow.trim() !== '' && Number.isFinite(Number(productForm.flow)) ? Number(productForm.flow) : productForm.flow });
         } else {
           if (!automaticFlow && entryMode === 'manual' && productForm.flow.trim() === '') throw new Error('请填写净投入金额');
           createProductEntry(next, anchorKey, { ...values, flow: Number(productForm.flow) }, automaticFlow ? 'manual' : entryMode, automaticFlow ? [] : initialTransactions);
@@ -269,7 +270,7 @@ export default function MonthlyReview() {
     const updated = { ...draft, data, source: result, scope, sourceLabel: `${account} · /${drive.folder}/`, published: new Date().toISOString() };
     // Publication is already successful even if refreshing the folder or persisting cache fails.
     setDraft(updated); setNotice('已发布到 OneDrive。');
-    try { const saved = await saveDraft(updated); setDraft(saved); setDrafts(await listDrafts()); setFiles(await drive.list()); } catch (e) { setError(`文件已发布，但刷新本机缓存失败：${e.message}`); }
+    try { const saved = await saveDraft(updated, draft); setDraft(saved); setDrafts(await listDrafts()); setFiles(await drive.list()); } catch (e) { setError(`文件已发布，但刷新本机缓存失败：${e.message}`); }
   }
   const accountingDate = isoDate(val('Assets', 'L1'));
   const previousDate = isoDate(val('Assets', 'N1'));

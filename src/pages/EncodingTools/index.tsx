@@ -3,6 +3,7 @@ import { ResponsiveGrid } from '@alifd/next';
 
 import PageHeader from '@/components/PageHeader';
 import CommonEncoder from '@/components/Code/CommonEncoder';
+import { encodeBase64, decodeBase64 } from '@/components/Code/CommonEncoder/model';
 
 const { Cell } = ResponsiveGrid;
 
@@ -18,7 +19,7 @@ export default function () {
             </Cell>
 
             <Cell colSpan={12}>
-                <CommonEncoder title={'Base64'} encoder={(v: string) => btoa(v)} decoder={(v: string) => atob(v)} />
+                <CommonEncoder title={'Base64'} encoder={encodeBase64} decoder={decodeBase64} />
             </Cell>
 
             <Cell colSpan={12}>

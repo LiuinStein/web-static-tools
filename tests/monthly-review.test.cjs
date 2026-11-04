@@ -441,3 +441,28 @@ test('extended workbook parts can be read by ExcelJS with hidden configuration, 
   assert.ok(native.getWorksheet(p.sheet).getCell('D1').value.formula);assert.equal(native.getWorksheet(p.block.sheet).getCell(`E${p.block.end}`).value.result,10);
   const clone=b.clone();createAssetGroup(clone,{member:'新成员',currency:'RMB',category:'债券',account:'新账户',name:'新资产',balance:1});assert.equal(b.members().some(m=>m.member==='新成员'),false);assert.equal(clone.members().some(m=>m.member==='新成员'),true);
 });
+
+test('reserved product and account names are rejected before modifying workbook cells', async () => {
+  const book = await fixture(), p = book.products()[0];
+  const values = { ...p, flow: 0, due: '', note: '' };
+  for (const change of [{ name: 'Product' }, { account: 'Exchange Rate:' }, { account: 'Sub Total' }]) {
+    assert.throws(() => book.updateProduct(p, { ...values, ...change }), /模板表头/);
+    assert.equal(book.products().length, 2);
+    assert.equal(book.value(p.sheet, `D${p.row}`), p.name);
+    assert.equal(book.value(p.sheet, `C${p.row}`), p.account);
+  }
+  assert.throws(() => book.addProduct(p, 'Product', '账户'), /模板表头/);
+  assert.throws(() => book.addProductGroup({ sheet: 'Assets', currency: 'RMB', category: 'Stock' }, '产品', 'Exchange Rate:'), /模板表头/);
+  book.updateProduct(p, { ...values, name: '正常中文产品' });
+  const loaded = await MonthlyWorkbook.open(await book.export());
+  assert.equal(loaded.products().find(row => row.row === p.row && row.sheet === p.sheet).name, '正常中文产品');
+});
+
+test('product balance validation rejects blanks and invalid amounts while accepting explicit zero', () => {
+  const { productBalance } = require('../src/pages/MonthlyReview/validation.ts');
+  for (const label of ['本期余额', '上期余额']) {
+    for (const input of ['', '  ', '-1', 'NaN', 'Infinity', 'abc']) assert.throws(() => productBalance(input, label), new RegExp(label));
+    assert.equal(productBalance('0', label), 0);
+    assert.equal(productBalance('1234.56', label), 1234.56);
+  }
+});

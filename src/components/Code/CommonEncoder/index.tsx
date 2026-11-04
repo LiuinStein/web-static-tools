@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Form, Card, Input, Icon } from '@alifd/next';
+import { convertInput, EncodingState } from './model';
 
 export default function (props: any) {
     const FormItem = Form.Item;
@@ -7,8 +8,8 @@ export default function (props: any) {
         colSpan: 4,
     };
 
-    const [text, setText] = React.useState<any>({
-        raw: '', encoded: '', encoding: true
+    const [text, setText] = React.useState<EncodingState>({
+        raw: '', encoded: '', encoding: true, error: ''
     });
 
     return <Card free>
@@ -22,7 +23,7 @@ export default function (props: any) {
             >
                 <FormItem {...formItemLayout} label="编码前">
                     <Input.TextArea placeholder="decoded" rows={6} onChange={(v) => {
-                        setText({ raw: v, encoded: props.encoder(v), encoding: true })
+                        setText(convertInput(String(v), true, props.encoder))
                     }} value={text.raw} />
                 </FormItem>
                 <FormItem {...formItemLayout} style={{ textAlign: 'center' }} label=" ">
@@ -30,10 +31,11 @@ export default function (props: any) {
                 </FormItem>
                 <FormItem {...formItemLayout} label="编码后">
                     <Input.TextArea placeholder="encoded" rows={6} onChange={(v) => {
-                        setText({ raw: props.decoder(v), encoded: v, encoding: false })
+                        setText(convertInput(String(v), false, props.decoder))
                     }} value={text.encoded} />
                 </FormItem>
             </Form>
+            {text.error && <p role="status">{text.error}</p>}
         </Card.Content>
     </Card>
 }

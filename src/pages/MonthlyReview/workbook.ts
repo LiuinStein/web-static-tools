@@ -1,4 +1,5 @@
 import type JSZip from 'jszip';
+import { validateProductNames } from './validation';
 import { isCashAccount, normalizeProductCategory } from './categories';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { FormulaEngine, Scalar, letters, column, serialDate, isoDate } from './formula';
@@ -406,7 +407,7 @@ export class MonthlyWorkbook {
     for (let i = 1; i <= width; i++) { const c = this.sheet(sheet).cells.get(`${letters(i)}${sourceRow}`), target = this.node(sheet, `${letters(i)}${targetRow}`); if (c?.hasAttribute('s')) target.setAttribute('s', c.getAttribute('s')); }
   }
   addProductGroup(group: { sheet: string; currency: string; category: string }, name: string, account: string): Product {
-    if (!name.trim() || !account.trim()) throw new Error('请填写产品名称和账户');
+    validateProductNames(name, account);
     const headers = [...this.sheet(group.sheet).cells.keys()].filter(a => /^A\d+$/.test(a) && this.value(group.sheet, a) === 'Assets').map(a => +a.slice(1)).sort((a, b) => a - b);
     const header = headers.find(row => this.value(group.sheet, `B${row}`) === `in ${group.currency}`);
     if (header === undefined) throw new Error('模板缺少所选币种分区，请使用包含该币种的月度模板');
@@ -440,7 +441,7 @@ export class MonthlyWorkbook {
     return this.products().find(p => p.sheet === group.sheet && p.row === at)!;
   }
   addProduct(anchor: Product, name: string, account: string): Product {
-    if (!name.trim() || !account.trim()) throw new Error('请填写产品名称和账户');
+    validateProductNames(name, account);
     const at = anchor.row; this.shiftRows(anchor.sheet, at, 1); this.copyStyle(anchor.sheet, at + 1, at, 14);
     for (const [c, v] of [['B', anchor.sourceCategory || anchor.category], ['C', account.trim()], ['D', name.trim()], ['E', 0], ['H', 0], ['I', 0], ['N', '']] as Array<[string, Scalar]>) this.set(anchor.sheet, `${c}${at}`, v);
     for (const c of ['F', 'J']) { const f = this.cell(anchor.sheet, `${c}${at + 1}`)?.formula; if (f) this.formula(anchor.sheet, `${c}${at}`, f.replace(new RegExp(`(?<![0-9])${at + 1}(?![0-9])`, 'g'), String(at))); }
@@ -505,6 +506,7 @@ export class MonthlyWorkbook {
     return this.products().find(x => x.sheet === p.sheet && x.row === p.row)!;
   }
   updateProduct(p: Product, values: { name: string; account: string; balance: number; previous: number; flow: number | string; due: string; note: string }) {
+    validateProductNames(values.name, values.account);
     if (!values.name.trim() || !values.account.trim() || !Number.isFinite(values.balance) || values.balance < 0 || !Number.isFinite(values.previous) || values.previous < 0) throw new Error('产品名称、账户或余额无效');
     const due = values.due ? serialDate(values.due) : null;
     // Make inherited account/category explicit before editing, so following rows retain their identity.

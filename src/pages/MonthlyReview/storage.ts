@@ -1,6 +1,6 @@
 import type { DriveFile } from './onedrive';
 
-export interface Draft { id: string; name: string; data: Uint8Array; updated: string; source?: DriveFile; scope?: string; sourceLabel?: string; published?: string; }
+export interface Draft { id: string; name: string; data: Uint8Array; updated: string; revision?: string; source?: DriveFile; scope?: string; sourceLabel?: string; published?: string; }
 
 function cloudLocation(draft: Draft) {
   if (!draft.scope) return null;
@@ -43,24 +43,32 @@ function database(): Promise<IDBDatabase> {
 
 // Match and replace in one transaction so concurrent imports cannot create duplicates.
 // The returned ID is the stored ID, keeping the dropdown selection consistent.
-export async function saveDraft(draft: Draft): Promise<Draft> {
+export async function saveDraft(draft: Draft, baseline?: Draft): Promise<Draft> {
   const db = await database();
   try {
     return await new Promise<Draft>((resolve, reject) => {
       const tx = db.transaction('drafts', 'readwrite'), store = tx.objectStore('drafts');
       let saved = draft;
+      let conflict: Error | undefined;
       const request = store.getAll();
       request.onsuccess = () => {
         const current = request.result as Draft[];
+        if (baseline) {
+          const existing = current.find(row => row.id === baseline.id);
+          if (!existing || existing.revision !== baseline.revision || existing.updated !== baseline.updated) {
+            conflict = new Error('此账本已在其他页面修改，本次未覆盖。请保留当前输入，重新打开页面读取最新草稿后再修改。');
+            tx.abort(); return;
+          }
+        }
         const matches = current.filter(row => draftIdentity(row) === draftIdentity(draft)).sort(newestFirst);
         const own = matches.find(row => row.id === draft.id);
-        saved = { ...draft, id: own?.id || matches[0]?.id || draft.id };
+        saved = { ...draft, id: own?.id || matches[0]?.id || draft.id, revision: crypto.randomUUID() };
         store.put(saved);
         for (const row of current) if (row.id !== saved.id && (draftIdentity(row) === draftIdentity(saved) || row.id === draft.id)) store.delete(row.id);
       };
       tx.oncomplete = () => resolve(saved);
       tx.onerror = () => reject(tx.error || new Error('保存草稿失败'));
-      tx.onabort = () => reject(tx.error || new Error('保存草稿失败'));
+      tx.onabort = () => reject(conflict || tx.error || new Error('保存草稿失败'));
     });
   } finally { db.close(); }
 }
