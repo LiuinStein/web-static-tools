@@ -62,7 +62,8 @@
     "test:journal": "node --test tests/trading-journal.test.cjs",
     "test:monthly": "node tests/monthly-review.test.cjs",
     "test:onedrive": "node --test tests/onedrive-session.test.cjs tests/onedrive-cache.test.cjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:stock": "node --test tests/stock-fees.test.cjs"
   },
   "publishConfig": {
     "access": "public"
