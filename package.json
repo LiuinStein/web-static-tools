@@ -63,7 +63,8 @@
     "test:monthly": "node tests/monthly-review.test.cjs",
     "test:onedrive": "node --test tests/onedrive-session.test.cjs tests/onedrive-cache.test.cjs",
     "typecheck": "tsc --noEmit",
-    "test:stock": "node --test tests/stock-fees.test.cjs"
+    "test:stock": "node --test tests/stock-fees.test.cjs",
+    "test:bond": "node --test tests/bond-calculator.test.cjs"
   },
   "publishConfig": {
     "access": "public"
