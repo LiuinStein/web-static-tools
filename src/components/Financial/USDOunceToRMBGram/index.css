@@ -1,0 +1,29 @@
+.gold-converter .gold-label { display: block; margin-bottom: 8px; color: #333; font-size: 14px; }
+.gold-converter .gold-rate-row { display: flex; gap: 8px; max-width: 580px; align-items: center; }
+.gold-converter .gold-rate-input { width: 100%; min-width: 0; }
+.gold-converter .gold-rate-mode { width: 132px; position: relative; background: #fafafa; }
+.gold-converter .gold-rate-status { margin: 8px 0 24px; font-size: 12px; line-height: 1.7; color: #666; }
+.gold-converter .gold-error { color: #c62828; }
+.gold-converter .gold-conversion-row { display: grid; grid-template-columns: minmax(0, 1fr) 40px minmax(0, 1fr); align-items: end; gap: 12px; margin-bottom: 20px; }
+.gold-converter .gold-conversion-row .next-input { width: 100%; }
+.gold-converter .gold-arrow { text-align: center; line-height: 32px; color: #666; }
+.gold-converter .gold-footnote { color: #666; font-size: 12px; line-height: 1.7; margin-bottom: 0; }
+@media (max-width: 480px) {
+    .gold-converter .gold-conversion-row { grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr); gap: 6px; }
+}
+
+.gold-converter .gold-rate-mode::after { content: ""; visibility: visible; clear: none; z-index: 1; position: absolute; right: 8px; top: 12px; width: 6px; height: 6px; border-right: 1px solid #666; border-bottom: 1px solid #666; transform: rotate(45deg); pointer-events: none; }
+.gold-converter .gold-rate-mode .next-input { border-radius: 3px 0 0 3px; background: #fafafa; }
+.gold-converter .gold-rate-input > .next-input { border-radius: 0 3px 3px 0; }
+
+.gold-converter .gold-refresh-button { flex: 0 0 32px; width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.gold-converter .gold-refresh-icon { width: 16px; height: 16px; }
+.gold-converter .gold-refresh-spinning { animation: gold-refresh-spin 1s linear infinite; }
+@keyframes gold-refresh-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .gold-converter .gold-refresh-spinning { animation: none; } }
+
+.gold-converter .gold-rate-mode .next-select-values { justify-content: flex-start; padding-left: 8px; padding-right: 18px; text-align: left; }
+.gold-converter .gold-rate-mode .next-input-control { display: none; }
+
+.gold-source-label { display: inline-flex; align-items: center; gap: 6px; vertical-align: middle; }
+.gold-source-label img { display: block; flex: 0 0 16px; width: 16px; height: 16px; object-fit: contain; }
