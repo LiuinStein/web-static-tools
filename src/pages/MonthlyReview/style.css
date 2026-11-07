@@ -94,3 +94,15 @@
 
 .mr-assets-table td.mr-gain-positive { color: #16845b; }
 .mr-assets-table td.mr-gain-negative { color: #d14343; }
+
+.mr-rate-field { min-width: 0; }
+.mr-rate-comparison { display: block; margin-top: 6px; color: #778499; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+
+.mr-record-dialog .next-dialog-header { padding: 24px 48px 8px 24px; min-height: 0; line-height: 24px; }
+.mr-record-dialog .next-dialog-body { padding: 8px 24px 24px; }
+.mr-record-dialog .next-dialog-close { top: 20px; }
+.mr-record-dialog .next-dialog-body > p:first-child { margin-top: 0; }
+.mr-record-dialog .next-dialog-body > form > .mr-grid:first-child { margin-top: 0; }
+.mr-setting-modified { margin-left: 8px; font-size: 11px; font-weight: 400; color: #3577eb; }
+.mr-rate-up { color: #16845b; }
+.mr-rate-down { color: #d14343; }

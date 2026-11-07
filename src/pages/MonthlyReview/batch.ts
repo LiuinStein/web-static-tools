@@ -1,3 +1,4 @@
+import type { ReviewState } from './storage';
 import { MonthlyWorkbook, Product } from './workbook';
 import { isCashAccount } from './categories';
 
@@ -42,6 +43,21 @@ export class MonthlyBatch {
   constructor(original: MonthlyWorkbook, book = original.clone(), inputs = new Map<string, string>(), reviewed = new Set<string>(), touched = new Set<string>(), dirty = false, flows = new Map<string, string>()) {
     this.original = original; this.book = book; this.inputs = inputs; this.reviewed = reviewed; this.touched = touched; this.dirty = dirty; this.flows = flows;
   }
+  static restore(book: MonthlyWorkbook, state?: ReviewState): MonthlyBatch {
+    const valid = new Set(batchRows(book).keys());
+    return new MonthlyBatch(book, book.clone(), new Map(),
+      new Set((state?.reviewed || []).filter(key => valid.has(key))),
+      new Set([...(state?.changed || []).filter(key => valid.has(key)), ...(state?.settingsChanged || []).map(key => '__settings:' + key)]));
+  }
+  reviewState(): ReviewState {
+    const valid = new Set(batchRows(this.book).keys());
+    return { reviewed: [...this.reviewed].filter(key => valid.has(key)), changed: [...this.changedKeys()].filter(key => valid.has(key)), settingsChanged: [...this.touched].filter(key => key.startsWith('__settings:')).map(key => key.slice(11)) };
+  }
+  markSettings(keys: string[]): MonthlyBatch {
+    if (!keys.length) return this;
+    return new MonthlyBatch(this.original, this.book, this.inputs, this.reviewed,
+      new Set([...this.touched, ...keys.map(key => '__settings:' + key)]), true, this.flows);
+  }
   get invalidBalances(): string[] { return [...this.inputs].filter(([, text]) => balanceNumber(text) === null).map(([key]) => key); }
   get invalidFlows(): string[] { return [...this.flows].filter(([, text]) => flowNumber(text) === null).map(([key]) => key); }
   get invalid(): string[] { return [...new Set([...this.invalidBalances, ...this.invalidFlows])]; }
@@ -84,7 +100,8 @@ export class MonthlyBatch {
   check(keys: string[], checked: boolean): MonthlyBatch {
     const current = this.commitInputs(), reviewed = new Set(current.reviewed), invalid = new Set(current.invalid);
     for (const key of keys) { if (checked && !invalid.has(key)) reviewed.add(key); else reviewed.delete(key); }
-    return new MonthlyBatch(current.original, current.book, current.inputs, reviewed, current.touched, current.dirty, current.flows);
+    const changed = reviewed.size !== current.reviewed.size || [...reviewed].some(key => !current.reviewed.has(key));
+    return new MonthlyBatch(current.original, current.book, current.inputs, reviewed, current.touched, current.dirty || changed, current.flows);
   }
   apply(action: (next: MonthlyWorkbook) => void, touchedKey?: string): MonthlyBatch {
     if (this.invalid.length) throw new Error('请先修正表格中的无效余额或净投入，再编辑账户或买卖记录');
@@ -93,7 +110,7 @@ export class MonthlyBatch {
     const structural = before.length !== after.length || before.some((p, i) => productKey(p) !== productKey(after[i]));
     // Row insertion/deletion shifts Excel addresses; require a fresh review instead of reusing stale marks.
     const reviewed = structural ? new Set([...this.reviewed].filter(key => key.startsWith('Liabilities:'))) : new Set(this.reviewed);
-    const touched = structural ? new Set([...this.touched].filter(key => key.startsWith('Liabilities:'))) : new Set(this.touched);
+    const touched = structural ? new Set([...this.touched].filter(key => key.startsWith('Liabilities:') || key.startsWith('__settings:'))) : new Set(this.touched);
     if (touchedKey && !structural) { touched.add(touchedKey); reviewed.delete(touchedKey); }
     return new MonthlyBatch(this.original, next, new Map(), reviewed, touched, true);
   }

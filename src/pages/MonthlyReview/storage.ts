@@ -1,6 +1,8 @@
 import type { DriveFile } from './onedrive';
 
-export interface Draft { id: string; name: string; data: Uint8Array; updated: string; revision?: string; source?: DriveFile; scope?: string; sourceLabel?: string; published?: string; }
+export interface ReviewState { reviewed: string[]; changed: string[]; settingsChanged?: string[]; }
+
+export interface Draft { reviewState?: ReviewState; id: string; name: string; data: Uint8Array; updated: string; revision?: string; source?: DriveFile; scope?: string; sourceLabel?: string; published?: string; }
 
 function cloudLocation(draft: Draft) {
   if (!draft.scope) return null;

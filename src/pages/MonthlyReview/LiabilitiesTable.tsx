@@ -1,4 +1,6 @@
-import { formatAmount, rawAmount } from './amount';
+import type { ReviewState } from './storage';
+import AmountInput from './AmountInput';
+import { rawAmount } from './amount';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Liability, MonthlyWorkbook } from './workbook';
 import { Scalar } from './formula';
@@ -8,18 +10,19 @@ import { displayValue } from './display';
 import { matchesSearch } from './search';
 
 interface Props {
+  reviewState?: ReviewState;
   book: MonthlyWorkbook; batch: MonthlyBatch | null; busy: boolean; money: (value: Scalar) => string;
   onStart: () => void; onBatch: (next: MonthlyBatch) => void; onError: (message: string) => void;
   onEdit: (row: Liability) => void; onZero: (row: Liability) => void;
 }
-export default function LiabilitiesTable({ book, batch, busy, money, onStart, onBatch, onError, onEdit, onZero }: Props) {
+export default function LiabilitiesTable({ reviewState, book, batch, busy, money, onStart, onBatch, onError, onEdit, onZero }: Props) {
   const [query, setQuery] = useState(''), [unchecked, setUnchecked] = useState(false);
   const [sort, setSort] = useState<{ field: 'account' | 'balance' | 'previous'; direction: 'asc' | 'desc' } | null>(null);
   const [order, setOrder] = useState<string[] | null>(null);
   const table = useRef<HTMLDivElement>(null), reviewOnBlur = useRef<string | null>(null);
   const rows = useMemo(() => book.liabilities(), [book]);
   const growth = useMemo(() => new Map(rows.map(row => [productKey(row), new Decimal(row.balance).minus(row.previous).toNumber()])), [rows]);
-  const changed = batch?.changedKeys() || new Set<string>(), invalid = new Set(batch?.invalidBalances);
+  const changed = batch?.changedKeys() || new Set(reviewState?.changed || []), invalid = new Set(batch?.invalidBalances);
   const sorted = (items: Liability[], next = sort) => !next ? [...items] : [...items].sort((a, b) => (next.field === 'account' ? a.account.localeCompare(b.account, 'zh-CN', { numeric: true }) : a[next.field] - b[next.field]) * (next.direction === 'asc' ? 1 : -1));
   const layout = rows.map(productKey).join('|');
   useEffect(() => { setOrder(batch ? sorted(rows).map(productKey) : null); if (!batch) setUnchecked(false); }, [Boolean(batch), layout]);
@@ -55,13 +58,13 @@ export default function LiabilitiesTable({ book, batch, busy, money, onStart, on
     {batch && <div className="mr-batch-help"><p>金额输入在失去焦点后重算。直接修改本期余额，Tab / 回车核对并跳至下一行，Esc 退出连续录入；支持粘贴一列余额。通过「编辑」修改余额及还款日，「清零」将余额置为 0，所有修改统一保存或取消。</p><div className="mr-toolbar-group"><label><input type="checkbox" checked={unchecked} onChange={e => setUnchecked(e.target.checked)} />仅看未核对</label><button disabled={busy || !displayed.length} onClick={() => onBatch(batch.check(displayed.map(productKey), true))}>将当前可见项标为已核对</button><button disabled={busy || !rows.some(row => batch.reviewed.has(productKey(row)))} onClick={() => onBatch(batch.check(rows.map(productKey), false))}>清除核对标记</button></div></div>}
     <div className="mr-table-wrap mr-assets-table mr-liabilities-table" ref={table} tabIndex={-1} aria-label="负债表格"><table><thead><tr>{batch && <th>核对</th>}{heading('账户', 'account')}{heading('上期余额', 'previous')}<th>还款日</th><th>操作</th><th>净增长</th>{heading('本期余额', 'balance')}</tr></thead><tbody>{displayed.map(row => {
       const key = productKey(row), bad = invalid.has(key);
-      return <tr key={key} className={batch && changed.has(key) ? 'mr-balance-changed' : undefined}>
+      return <tr key={key} className={changed.has(key) ? 'mr-balance-changed' : undefined}>
         {batch && <td><input type="checkbox" aria-label={`${row.account} 已核对`} checked={batch.reviewed.has(key)} disabled={busy || bad} onChange={e => onBatch(batch.check([key], e.target.checked))} /></td>}
-        <td><strong className="mr-product-name"><span>{displayValue(row.account)}</span>{batch && <span className={`mr-change-tag ${batch.reviewed.has(key) ? 'reviewed' : ''}`}>{batch.reviewed.has(key) ? '已核对' : changed.has(key) ? '已修改' : ''}</span>}</strong></td>
+        <td><strong className="mr-product-name"><span>{displayValue(row.account)}</span>{(batch || reviewState) && <span className={`mr-change-tag ${(batch ? batch.reviewed.has(key) : reviewState?.reviewed.includes(key)) ? 'reviewed' : ''}`}>{(batch ? batch.reviewed.has(key) : reviewState?.reviewed.includes(key)) ? '已核对' : changed.has(key) ? '已修改' : ''}</span>}</strong></td>
         <td>RMB {money(row.previous)}</td><td>{displayValue(row.repayment)}</td>
         <td><div className="mr-row-actions"><button disabled={busy} onClick={() => onEdit(row)}>编辑</button><button disabled={busy} onClick={() => onZero(row)}>清零</button></div></td>
         <td data-liability-growth={key}>RMB {money(growth.get(key) ?? null)}</td>
-        <td>RMB {batch ? <><input onFocus={event => event.currentTarget.select()} onClick={event => event.currentTarget.select()} data-liability-balance={key} type="text" inputMode="decimal" autoComplete="off" aria-label={`${row.account} 本期余额`} aria-invalid={bad} aria-describedby={bad ? `debt-error-${key}` : undefined} disabled={busy} value={formatAmount(batch.inputs.get(key) ?? String(row.balance))} onChange={e => onBatch(batch.stageBalances([[key, rawAmount(e.target.value)]]))} onBlur={() => finishInput(key)} onKeyDown={e => move(e, key)} onPaste={e => {
+        <td>RMB {batch ? <><AmountInput onFocus={event => event.currentTarget.select()} onClick={event => event.currentTarget.select()} data-liability-balance={key} type="text" inputMode="decimal" autoComplete="off" aria-label={`${row.account} 本期余额`} aria-invalid={bad} aria-describedby={bad ? `debt-error-${key}` : undefined} disabled={busy} value={(batch.inputs.get(key) ?? String(row.balance))} onChange={e => onBatch(batch.stageBalances([[key, rawAmount(e.target.value)]]))} onBlur={() => finishInput(key)} onKeyDown={e => move(e, key)} onPaste={e => {
           const text = e.clipboardData.getData('text'); if (!/[\r\n\t]/.test(text)) return; e.preventDefault();
           try { onBatch(batch.stageBalances(balancePaste(displayed, key, text))); onError(''); } catch (error) { onError(error.message); }
         }} />{bad && <small id={`debt-error-${key}`} className="mr-input-error">请输入有效的非负余额</small>}</> : money(row.balance)}</td>

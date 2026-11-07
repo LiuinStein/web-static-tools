@@ -1,4 +1,6 @@
-import { formatAmount, formatFixedAmount, rawAmount, currencyCode } from './amount';
+import AmountInput from './AmountInput';
+import { linkedOptions } from './filters';
+import { rawAmount, currencyCode } from './amount';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog } from '@alifd/next';
 import { Prompt } from 'react-router-dom';
@@ -59,7 +61,6 @@ export default function MonthlyReview() {
   const [draft, setDraft] = useState<Draft | null>(initial.view?.draft || null);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [tab, setTab] = useState('总览');
-  const [focusedNumeric, setFocusedNumeric] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [member, setMember] = useState('全部');
   const [currency, setCurrency] = useState('全部');
@@ -93,7 +94,20 @@ export default function MonthlyReview() {
   const backgroundRevision = useRef(0);
   const openedDraft = useRef(draft);
   openedDraft.current = draft;
-  useEffect(() => { mounted.current = true; listDrafts().then(setDrafts).catch(e => setError(`无法读取本机草稿：${e.message}`)); return () => { mounted.current = false; }; }, []);
+  useEffect(() => { mounted.current = true;
+    listDrafts().then(async drafts => {
+      if (!mounted.current) return;
+      setDrafts(drafts);
+      const id = localStorage.getItem('monthly-review:last-draft:' + (initial.scope || 'local'));
+      const previous = drafts.find(d => d.id === id);
+      if (previous && !openedDraft.current) {
+        const restored = await MonthlyWorkbook.open(previous.data);
+        if (mounted.current && !openedDraft.current) { setBook(restored); setDraft(previous); }
+      }
+    }).catch(e => setError(`无法读取本机草稿：${e.message}`));
+    return () => { mounted.current = false; };
+  }, []);
+  useEffect(() => { if (draft) localStorage.setItem('monthly-review:last-draft:' + (scope || 'local'), draft.id); }, [draft?.id, scope]);
   useEffect(() => {
     if (savedBook && draft && (!draft.scope || draft.scope === scope)) localViews.set(scope || 'local', { book: savedBook, draft });
   }, [savedBook, draft, scope]);
@@ -154,21 +168,22 @@ export default function MonthlyReview() {
     const entry: Draft = { id: fileId(), name, data, updated: new Date().toISOString(), ...metadata };
     const saved = await saveDraft(entry); setDrafts(await listDrafts()); setBook(opened); setDraft(saved); setModal(null);
   }
-  async function mutate(action: (next: MonthlyWorkbook) => void, touchedKey?: string) {
+  async function mutate(action: (next: MonthlyWorkbook) => void, touchedKey?: string, settingsKeys: string[] = []) {
     if (!book || !draft) return;
     if (batch) {
-      const next = batch.apply(action, touchedKey); setBatch(next);
+      const next = batch.apply(action, touchedKey).markSettings(settingsKeys); setBatch(next);
       setNotice('修改已加入本次批量记账，点击「保存本机草稿」后统一保存。产品增删后需重新核对各行。');
       return;
     }
     // Apply to a copy; a rejected operation leaves both the visible workbook and saved draft intact.
-    const next = await MonthlyWorkbook.open(draft.data); action(next);
-    const data = await next.export(); const updated = { ...draft, data, updated: new Date().toISOString(), published: undefined };
+    const edited = MonthlyBatch.restore(await MonthlyWorkbook.open(draft.data), draft.reviewState).apply(action, touchedKey).markSettings(settingsKeys);
+    const next = edited.book;
+    const data = await next.export(); const updated = { ...draft, data, reviewState: edited.reviewState(), updated: new Date().toISOString(), published: undefined };
     const saved = await saveDraft(updated, draft); setBook(next); setDraft(saved); setDrafts(await listDrafts()); setNotice('已保存本机草稿，页面结果已更新。');
   }
   function startBatch(source = book, target = '资产') {
     if (!source) return;
-    setBatch(new MonthlyBatch(source)); setOnlyUnchecked(false); setTab(target); setError(''); setNotice('');
+    setBatch(MonthlyBatch.restore(source, source === book ? draft?.reviewState : undefined)); setOnlyUnchecked(false); setTab(target); setError(''); setNotice('');
   }
   async function saveBatch() {
     if (!batch || !draft) return;
@@ -176,7 +191,7 @@ export default function MonthlyReview() {
     if (completed.invalid.length) throw new Error('仍有 ' + completed.invalid.length + ' 项金额无效，请修正后再保存（包含其他 tab 或被筛选隐藏的账户）');
     completed.book.validate();
     const data = await completed.book.export();
-    const saved = await saveDraft({ ...draft, data, updated: new Date().toISOString(), published: undefined }, draft);
+    const saved = await saveDraft({ ...draft, data, reviewState: completed.reviewState(), updated: new Date().toISOString(), published: undefined }, draft);
     setBook(completed.book); setDraft(saved); setDrafts(await listDrafts()); setBatch(null); setOnlyUnchecked(false);
     setNotice('批量记账已保存到本机草稿，可下载 Excel 检查或发布到 OneDrive。');
   }
@@ -207,16 +222,15 @@ export default function MonthlyReview() {
     });
   }
   const groupOptions = useMemo(() => productGroups(book || undefined), [book]);
-  const memberOptions = useMemo(() => book?.members().map(m => m.member) || ['本人', 'WTH'], [book]);
-  const currencyOptions = useMemo(() => book?.currencyCodes() || ['RMB', 'USD', 'HKD'], [book]);
+  const filterOptions = linkedOptions(products, { member, currency, account: accountFilter });
+  const memberOptions = filterOptions.members, currencyOptions = filterOptions.currencies;
   const liquidity = useMemo(() => book?.liquiditySummary() || [], [book]);
   const automaticFlow = isCashAccount(selected?.category || groupOptions.find(g => g.key === anchorKey)?.category || '');
   const formAutomaticFlow = [productForm.balance, ...(selected ? [productForm.previous] : [])].every(v => v.trim() !== '' && Number.isFinite(Number(v))) ? new Decimal(productForm.balance).minus(selected ? productForm.previous : 0).toNumber() : NaN;
-  const accounts = useMemo(() => [...new Set(products.map(p => p.account))].sort((a, b) => a.localeCompare(b, 'zh-CN')), [products]);
   const categories = useMemo(() => [...new Set(products.map(p => p.category))].sort((a, b) => (categoryNames[a] || a).localeCompare(categoryNames[b] || b, 'zh-CN')), [products]);
   useEffect(() => {
     if (book && categoryFilter && !products.some(p => p.category === categoryFilter)) setCategoryFilter('');
-    if (book && accountFilter && !products.some(p => p.account === accountFilter)) setAccountFilter('');
+    if (book && accountFilter && !filterOptions.accounts.includes(accountFilter)) setAccountFilter('');
     if (book && member !== '全部' && !memberOptions.includes(member)) setMember('全部');
     if (book && currency !== '全部' && !currencyOptions.includes(currency)) setCurrency('全部');
   }, [book, products, accountFilter, categoryFilter, member, currency, memberOptions, currencyOptions]);
@@ -236,7 +250,7 @@ export default function MonthlyReview() {
   }
   function newProduct() {
     const group = groupOptions.find(g => g.sheet === 'Assets' && g.currency === 'RMB' && g.category === 'Debt Fund') || groupOptions[0];
-    const accountName = accountFilter || products.find(p => p.sheet === group?.sheet && p.currency === group?.currency && p.category === group?.category)?.account || accounts[0] || '';
+    const accountName = products.find(p => p.member === group?.member && p.currency === group?.currency && p.account === accountFilter)?.account || products.find(p => p.member === group?.member && p.currency === group?.currency)?.account || '';
     setSelected(null); setAnchorKey(group?.key || ''); setAccountChoice(accountName || '__new__'); setError('');
     setProductForm({ ...blankProduct, account: accountName }); setEntryMode('manual');
     setInitialTransactions(group && isCashAccount(group.category) ? [] : [blankTransaction(isoDate(val('Assets', 'L1')))]); setModal('product');
@@ -280,12 +294,33 @@ export default function MonthlyReview() {
   const recordedDays = daysBetween(accountingDate, previousDate);
   const notedProducts = products.filter(p => p.note.trim());
   const initialSummary = cashFlowSummary(initialTransactions, book?.number('Assets', 'N1') || 0, book?.number('Assets', 'L1') || 0);
-  const field = (label: string, value: string, onChange: (v: string) => void, type = 'text', readOnly = false) => {
+  const savedSettingsMarks = new Set((batch ? batch.reviewState().settingsChanged : draft?.reviewState?.settingsChanged) || []);
+  const settingsBaseline = batch?.original || savedBook;
+  const differs = (value: string, baseline: Scalar) => value.trim() === '' || !Number.isFinite(Number(value)) || Number(value) !== Number(baseline);
+  const baselineRate = (code: string): Scalar => { try { return settingsBaseline?.value('Assets', settingsBaseline.rateAddress(code)) ?? null; } catch { return null; } };
+  const changedSettingKeys = [
+    ...(settingsBaseline ? ['USD', 'HKD', ...Object.keys(extraRates)].filter(code => differs(code === 'USD' ? finance.usd : code === 'HKD' ? finance.hkd : extraRates[code], baselineRate(code))).map(code => 'rate:' + code) : []),
+    ...(settingsBaseline && differs(finance.salary, settingsBaseline.value('Analyze', 'C5')) ? ['salary:本人'] : []),
+    ...(settingsBaseline && differs(finance.wthSalary, settingsBaseline.value('Analyze', 'I5')) ? ['salary:WTH'] : []),
+  ];
+  const settingModified = (key: string) => savedSettingsMarks.has(key) || changedSettingKeys.includes(key);
+  const rateField = (code: 'USD' | 'HKD', current: string, update: (value: string) => void) => {
+    let previous: Scalar = null;
+    try { previous = book?.value('Assets', book.rateAddress(code, true)) ?? null; } catch { /* Older templates may not contain an opening rate. */ }
+    const validPrevious = typeof previous === 'number' && Number.isFinite(previous) && previous > 0;
+    const validCurrent = current.trim() !== '' && Number.isFinite(Number(current)) && Number(current) > 0;
+    const rateFormat = new Intl.NumberFormat('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 8 });
+    const difference = validPrevious && validCurrent ? new Decimal(current).minus(previous as number) : null;
+    const movement = difference ? `${difference.greaterThan(0) ? '+' : ''}${rateFormat.format(difference.toNumber())}（${difference.greaterThan(0) ? '+' : ''}${difference.div(previous as number).times(100).toFixed(2)}%）` : '—';
+    return <div className="mr-rate-field">{field(`${code} → RMB`, current, update, 'number', false, settingModified('rate:' + code))}<small className="mr-rate-comparison" aria-live="polite">上期汇率 {validPrevious ? rateFormat.format(previous as number) : '—'} · 较上期 <span className={difference?.greaterThan(0) ? 'mr-rate-up' : difference?.lessThan(0) ? 'mr-rate-down' : undefined}>{movement}</span></small></div>;
+  };
+  const field = (label: string, value: string, onChange: (v: string) => void, type = 'text', readOnly = false, modified = false) => {
     const numeric = type === 'number';
     const code = modal === 'liability' ? 'RMB' : currencyCode(selected?.currency || groupOptions.find(g => g.key === anchorKey)?.currency || 'RMB');
     const balanceTitle = modal === 'product' && /^(本期余额|上期余额)$/.test(label);
     const prefix = modal === 'product' ? '' : /余额|净投入/.test(label) ? code : /工资收入/.test(label) ? 'RMB' : '';
-    return <label className={label === '备注' ? 'mr-field mr-note-field' : 'mr-field'}><span>{balanceTitle ? `${label}（${code}）` : label}</span>{label === '备注' ? <textarea rows={5} value={value} onChange={e => onChange(e.target.value)} /> : <div className="mr-amount-field">{prefix && <span>{prefix}</span>}<input type={numeric ? 'text' : type} inputMode={numeric ? 'decimal' : undefined} value={numeric ? modal === 'product' && focusedNumeric !== label ? formatFixedAmount(value) : formatAmount(value) : value} readOnly={readOnly} onFocus={event => { if (numeric) { setFocusedNumeric(label); event.currentTarget.select(); } }} onBlur={() => setFocusedNumeric(null)} onClick={event => { if (numeric) event.currentTarget.select(); }} onChange={e => onChange(numeric ? rawAmount(e.target.value) : e.target.value)} /></div>}</label>;
+    const inputProps = { value, readOnly, onChange: (event: React.ChangeEvent<HTMLInputElement>) => onChange(numeric ? rawAmount(event.target.value) : event.target.value) };
+    return <label className={label === '备注' ? 'mr-field mr-note-field' : 'mr-field'}><span>{balanceTitle ? `${label}（${code}）` : label}{modified && <small className="mr-setting-modified">已修改</small>}</span>{label === '备注' ? <textarea rows={5} value={value} onChange={e => onChange(e.target.value)} /> : <div className="mr-amount-field">{prefix && <span>{prefix}</span>}{numeric && !label.includes('→') ? <AmountInput {...inputProps} onFocus={event => event.currentTarget.select()} /> : <input {...inputProps} type={numeric ? 'text' : type} inputMode={numeric ? 'decimal' : undefined} onFocus={numeric ? event => event.currentTarget.select() : undefined} onClick={numeric ? event => event.currentTarget.select() : undefined} />}</div>}</label>;
   };
   return <div className="monthly-review" aria-busy={busy}>
     <Prompt when={Boolean(batch?.dirty)} message="批量记账尚未保存，离开将丢弃本次修改。确定离开？" />
@@ -313,27 +348,27 @@ export default function MonthlyReview() {
           <section className="mr-panel"><h2>本期收支与收益</h2><div className="mr-summary-row"><span>工资收入</span><strong>RMB {money(val('Analyze', 'O5'))}</strong></div><div className="mr-summary-row"><span>估算支出</span><strong>RMB {money(val('Analyze', 'O6'))}</strong></div><div className="mr-summary-row"><span>估算投资收益（含汇率影响）</span><strong>RMB {money(val('Analyze', 'O7'))}</strong></div><div className="mr-summary-row"><span>估算期间收益率</span><strong>{pct(val('Analyze', 'O8'))}</strong></div><div className="mr-summary-row"><span>估算年化收益率</span><strong>{pct(val('Analyze', 'Q8'))}</strong></div><p className="mr-footnote">沿用模板计算口径：期间收益以期末余额为分母，属于估算。产品平均收益率不等同于组合收益率。</p></section></div>
         <section className="mr-panel"><h2>流动性概览</h2><div className="mr-liquidity">{[['受限资金', '32'], ['本月底前到期', '33'], ['随后三个月内到期', '34'], ['更晚到期', '35'], ['即时 / 未登记期限', '36']].map(([label, row], index) => <div key={row}><span>{label}</span><strong>RMB {money(liquidity[index])}</strong></div>)}</div><p className="mr-footnote">按模板已登记到期日分类；即时余额不代表已核实实际赎回规则。</p></section>
       </>}
-      {tab === '资产' && <section className="mr-panel"><div className="mr-section-heading"><div><h2>资产</h2><p>更新余额，管理产品与现金流。金额均以产品原币显示。</p></div><div className="mr-toolbar-group">{!batch && <button disabled={busy || !products.length} onClick={() => startBatch()}>批量记账</button>}<button disabled={busy} onClick={() => { setError(''); setModal('group'); }}>＋ 新增分组</button><button className="primary" disabled={busy} onClick={newProduct}>＋ 新增产品</button></div></div><div className="mr-filters"><input aria-label="搜索产品" placeholder="搜索产品、账户或备注" value={query} onChange={e => setQuery(e.target.value)} /><select aria-label="筛选成员" value={member} onChange={e => setMember(e.target.value)}><option value="全部">全部成员</option>{memberOptions.map(v => <option key={v} value={v}>{v}</option>)}</select><select aria-label="筛选币种" value={currency} onChange={e => setCurrency(e.target.value)}><option value="全部">全部币种</option>{currencyOptions.map(v => <option key={v} value={v}>{v}</option>)}</select><select aria-label="筛选账户" value={accountFilter} onChange={e => setAccountFilter(e.target.value)}><option value="">全部账户</option>{accounts.map(v => <option key={v} value={v}>{v}</option>)}</select><select aria-label="筛选产品类型" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}><option value="">全部产品类型</option>{categories.map(v => <option key={v} value={v}>{categoryNames[v] || v}</option>)}</select></div>{batch && <div className="mr-batch-help"><p>金额输入在失去焦点后重算。直接填写本期余额，按 Tab / 回车核对并跳至下一行，Esc 退出连续录入；可从 Excel 粘贴一列余额，按当前可见顺序从所选行开始填入。可点击产品名称、余额或收益表头排序，录入时行顺序保持不变。活期账户净投入自动计算且不可编辑；其他产品净投入可直接填写，投入为正、回款为负，保存买卖记录后会按流水重算。上期余额只读，其他信息仍可通过「编辑」修改。</p><div className="mr-toolbar-group"><label><input type="checkbox" checked={onlyUnchecked} onChange={e => setOnlyUnchecked(e.target.checked)} />仅看未核对</label><button disabled={busy || !visibleProducts.length} onClick={() => setBatch(batch.check(visibleProducts.map(productKey), true))}>将当前可见项标为已核对</button><button disabled={busy || !batch.reviewed.size} onClick={() => setBatch(batch.check(products.map(productKey), false))}>清除核对标记</button></div></div>}
-        <AssetsTable book={book} products={visibleProducts} batch={batch} busy={busy} categoryNames={categoryNames} money={money} pct={pct} onBatch={next => { setBatch(next); setError(''); setNotice(''); }} onError={setError} onEdit={editProduct} onTransactions={p => { setSelected(p); setTransactions(p.block ? book.transactions(p.block) : []); setError(''); setModal('transactions'); }} onDelete={p => { if (window.confirm(`删除“${p.name}”及其关联交易？这会更新本期汇总，历史月份不受影响。清仓请记录卖出。`)) run(() => mutate(next => next.deleteProduct(p))); }} /></section>}
+      {tab === '资产' && <section className="mr-panel"><div className="mr-section-heading"><div><h2>资产</h2><p>更新余额，管理产品与现金流。金额均以产品原币显示。</p></div><div className="mr-toolbar-group">{!batch && <button disabled={busy || !products.length} onClick={() => startBatch()}>批量记账</button>}<button disabled={busy} onClick={() => { setError(''); setModal('group'); }}>＋ 新增分组</button><button className="primary" disabled={busy} onClick={newProduct}>＋ 新增产品</button></div></div><div className="mr-filters"><input aria-label="搜索产品" placeholder="搜索产品、账户或备注" value={query} onChange={e => setQuery(e.target.value)} /><select aria-label="筛选成员" value={member} onChange={e => setMember(e.target.value)}><option value="全部">全部成员</option>{memberOptions.map(v => <option key={v} value={v}>{v}</option>)}</select><select aria-label="筛选币种" value={currency} onChange={e => setCurrency(e.target.value)}><option value="全部">全部币种</option>{currencyOptions.map(v => <option key={v} value={v}>{v}</option>)}</select><select aria-label="筛选账户" value={accountFilter} onChange={e => setAccountFilter(e.target.value)}><option value="">全部账户</option>{filterOptions.accounts.map(v => <option key={v} value={v}>{v}</option>)}</select><select aria-label="筛选产品类型" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}><option value="">全部产品类型</option>{categories.map(v => <option key={v} value={v}>{categoryNames[v] || v}</option>)}</select></div>{batch && <div className="mr-batch-help"><p>金额输入在失去焦点后重算。直接填写本期余额，按 Tab / 回车核对并跳至下一行，Esc 退出连续录入；可从 Excel 粘贴一列余额，按当前可见顺序从所选行开始填入。可点击产品名称、余额或收益表头排序，录入时行顺序保持不变。活期账户净投入自动计算且不可编辑；其他产品净投入可直接填写，投入为正、回款为负，保存买卖记录后会按流水重算。上期余额只读，其他信息仍可通过「编辑」修改。</p><div className="mr-toolbar-group"><label><input type="checkbox" checked={onlyUnchecked} onChange={e => setOnlyUnchecked(e.target.checked)} />仅看未核对</label><button disabled={busy || !visibleProducts.length} onClick={() => setBatch(batch.check(visibleProducts.map(productKey), true))}>将当前可见项标为已核对</button><button disabled={busy || !batch.reviewed.size} onClick={() => setBatch(batch.check(products.map(productKey), false))}>清除核对标记</button></div></div>}
+        <AssetsTable reviewState={draft?.reviewState} book={book} products={visibleProducts} batch={batch} busy={busy} categoryNames={categoryNames} money={money} pct={pct} onBatch={next => { setBatch(next); setError(''); setNotice(''); }} onError={setError} onEdit={editProduct} onTransactions={p => { setSelected(p); setTransactions(p.block ? book.transactions(p.block) : []); setError(''); setModal('transactions'); }} onDelete={p => { if (window.confirm(`删除“${p.name}”及其关联交易？这会更新本期汇总，历史月份不受影响。清仓请记录卖出。`)) run(() => mutate(next => next.deleteProduct(p))); }} /></section>}
       {tab === '备注事项' && <section className="mr-panel"><h2>备注事项</h2><AssetsTable notes book={book} products={notedProducts} batch={null} busy={busy} categoryNames={categoryNames} money={money} pct={pct} onBatch={next => { setBatch(next); setError(''); setNotice(''); }} onError={setError} onEdit={editProduct} onTransactions={p => { setSelected(p); setTransactions(p.block ? book.transactions(p.block) : []); setError(''); setModal('transactions'); }} onDelete={p => { if (window.confirm(`删除“${p.name}”及其关联交易？这会更新本期汇总，历史月份不受影响。清仓请记录卖出。`)) run(() => mutate(next => next.deleteProduct(p))); }} /></section>}
-      {tab === '负债' && <LiabilitiesTable book={book} batch={batch} busy={busy} money={money} onStart={() => startBatch(book, '负债')} onBatch={next => { setBatch(next); setError(''); setNotice(''); }} onError={setError} onEdit={editLiability} onZero={row => {
+      {tab === '负债' && <LiabilitiesTable reviewState={draft?.reviewState} book={book} batch={batch} busy={busy} money={money} onStart={() => startBatch(book, '负债')} onBatch={next => { setBatch(next); setError(''); setNotice(''); }} onError={setError} onEdit={editLiability} onZero={row => {
         if (batch) { setBatch(batch.balances([[productKey(row), '0']])); setError(''); setNotice(''); }
         else run(() => mutate(next => next.updateLiability(row, { balance: 0, repayment: String(row.repayment ?? '') })));
       }} />}
-      {tab === '记账设置' && <section className="mr-panel"><h2>日期、汇率与收入</h2><p>汇率表示 1 单位外币折合的人民币。工资为本次记账区间的累计收入。</p><div className="mr-grid">{field('本次记账日期', finance.date, v => setFinance({ ...finance, date: v }), 'date')}{field('上次记账日期', previousDate, () => {}, 'date', true)}<p className="mr-date-gap" aria-live="polite">{elapsedDays === null ? '请选择有效的本次记账日期以查看间隔天数。' : elapsedDays < 0 ? '本次记账日期早于上次记账日期，请调整。' : `本次记账日期距上次记账日期已过去 ${elapsedDays} 天。`}</p>{field('USD → RMB', finance.usd, v => setFinance({ ...finance, usd: v }), 'number')}{field('HKD → RMB', finance.hkd, v => setFinance({ ...finance, hkd: v }), 'number')}{Object.entries(extraRates).map(([code, rate]) => <React.Fragment key={code}>{field(`${code} → RMB`, rate, value => setExtraRates({ ...extraRates, [code]: value }), 'number')}</React.Fragment>)}{field('本人工资收入', finance.salary, v => setFinance({ ...finance, salary: v }), 'number')}{field('WTH 工资收入', finance.wthSalary, v => setFinance({ ...finance, wthSalary: v }), 'number')}</div><button className="primary" disabled={busy} onClick={() => run(() => mutate(next => { const date = serialDate(finance.date); if (date <= next.number('Assets', 'N1')) throw new Error('记账日期须晚于上次记账日期'); if (products.some(p => p.block && next.transactions(p.block).some(t => t.date && serialDate(t.date) > date))) throw new Error('记账日期不能早于已有交易日期'); if (![finance.usd, finance.hkd, ...Object.values(extraRates)].every(v => Number.isFinite(Number(v)) && Number(v) > 0) || ![finance.salary, finance.wthSalary].every(v => v !== '' && Number.isFinite(Number(v)))) throw new Error('汇率或收入无效'); next.set('Assets', 'L1', date); next.set('Assets', next.rateAddress('USD'), Number(finance.usd)); next.set('Assets', next.rateAddress('HKD'), Number(finance.hkd)); for (const [code, rate] of Object.entries(extraRates)) next.set('Assets', next.rateAddress(code), Number(rate)); next.set('Analyze', 'C5', Number(finance.salary)); next.set('Analyze', 'I5', Number(finance.wthSalary)); }))}>保存并重新计算</button></section>}
+      {tab === '记账设置' && <section className="mr-panel"><h2>日期、汇率与收入</h2><p>汇率表示 1 单位外币折合的人民币。工资为本次记账区间的累计收入。</p><div className="mr-grid">{field('本次记账日期', finance.date, v => setFinance({ ...finance, date: v }), 'date')}{field('上次记账日期', previousDate, () => {}, 'date', true)}<p className="mr-date-gap" aria-live="polite">{elapsedDays === null ? '请选择有效的本次记账日期以查看间隔天数。' : elapsedDays < 0 ? '本次记账日期早于上次记账日期，请调整。' : `本次记账日期距上次记账日期已过去 ${elapsedDays} 天。`}</p>{rateField('USD', finance.usd, v => setFinance({ ...finance, usd: v }))}{rateField('HKD', finance.hkd, v => setFinance({ ...finance, hkd: v }))}{Object.entries(extraRates).map(([code, rate]) => <React.Fragment key={code}>{field(`${code} → RMB`, rate, value => setExtraRates({ ...extraRates, [code]: value }), 'number', false, settingModified('rate:' + code))}</React.Fragment>)}{field('本人工资收入', finance.salary, v => setFinance({ ...finance, salary: v }), 'number', false, settingModified('salary:本人'))}{field('WTH 工资收入', finance.wthSalary, v => setFinance({ ...finance, wthSalary: v }), 'number', false, settingModified('salary:WTH'))}</div><button className="primary" disabled={busy} onClick={() => run(() => mutate(next => { const date = serialDate(finance.date); if (date <= next.number('Assets', 'N1')) throw new Error('记账日期须晚于上次记账日期'); if (products.some(p => p.block && next.transactions(p.block).some(t => t.date && serialDate(t.date) > date))) throw new Error('记账日期不能早于已有交易日期'); if (![finance.usd, finance.hkd, ...Object.values(extraRates)].every(v => Number.isFinite(Number(v)) && Number(v) > 0) || ![finance.salary, finance.wthSalary].every(v => v !== '' && Number.isFinite(Number(v)))) throw new Error('汇率或收入无效'); next.set('Assets', 'L1', date); next.set('Assets', next.rateAddress('USD'), Number(finance.usd)); next.set('Assets', next.rateAddress('HKD'), Number(finance.hkd)); for (const [code, rate] of Object.entries(extraRates)) next.set('Assets', next.rateAddress(code), Number(rate)); next.set('Analyze', 'C5', Number(finance.salary)); next.set('Analyze', 'I5', Number(finance.wthSalary)); }, undefined, changedSettingKeys))}>保存并重新计算</button></section>}
       {tab === '待核实事项' && <section className="mr-panel"><h2>数据检查</h2><p>保留原始数据与提示，缺失信息不自动补造。修正产品或交易后会重新计算。</p>{issues.map(p => <div className="mr-issue" key={`${p.sheet}:${p.row}`}><strong>{p.name} · {p.account}</strong><span>XIRR：{pct(val(p.sheet, `K${p.row}`))} / TWR：{pct(val(p.sheet, `L${p.row}`))}</span><button onClick={() => { setSelected(p); setTransactions(p.block ? book.transactions(p.block) : []); setError(''); setModal('transactions'); }}>检查交易</button></div>)}{Number(val('Liabilities', 'F1')) !== Number(val('Liabilities', 'H12')) && <div className="mr-issue">上期负债总额 RMB {money(val('Liabilities', 'F1'))} 与上期明细合计 RMB {money(val('Liabilities', 'H12'))} 不一致。历史快照保持原值，请核对来源。</div>}<details><summary>查看模板原有说明</summary>{[...book.sheet('Analyze').cells.keys()].filter(a => /^B\d+$/.test(a) && +a.slice(1) >= 40).map(a => <p key={a}>{val('Analyze', a)}</p>)}</details><p className="mr-footnote">#NUM! 表示现金流或日期无法求得收益率；#DIV/0! 表示缺少有效份额或计算分母为零。</p></section>}
     </>}
     <AssetGroupDialog visible={modal === 'group'} busy={busy} book={book} error={error} categoryNames={categoryNames} onClose={() => setModal(null)} onSave={values => run(async () => {
       await mutate(next => { createAssetGroup(next, values); });
       setMember(values.member.trim()); setCurrency(values.currency.trim().toUpperCase()); setAccountFilter(values.account.trim()); setCategoryFilter(''); setQuery(''); setOnlyUnchecked(false); setModal(null);
     })} />
-    <Dialog visible={modal === 'product'} title={selected ? '编辑产品' : '新增产品'} footer={false} onClose={() => setModal(null)} className={`mr-dialog ${selected ? '' : 'mr-wide-dialog mr-product-dialog'}`}>
+    <Dialog visible={modal === 'product'} title={selected ? '编辑产品' : '新增产品'} footer={false} onClose={() => setModal(null)} className={`mr-dialog mr-record-dialog ${selected ? '' : 'mr-wide-dialog mr-product-dialog'}`}>
       {error && <div className="mr-message error" role="alert">{error}</div>}
       <form onSubmit={saveProduct}>
-        {!selected && <label className="mr-field"><span>所属分组</span><select aria-label="所属分组" disabled={busy} value={anchorKey} onChange={e => setAnchorKey(e.target.value)}>{groupOptions.map(g => <option key={g.key} value={g.key}>{g.member} · {g.currency} · {categoryNames[g.category] || g.category}</option>)}</select></label>}
+        {!selected && <label className="mr-field"><span>所属分组</span><select aria-label="所属分组" disabled={busy} value={anchorKey} onChange={e => { const group = groupOptions.find(g => g.key === e.target.value); setAnchorKey(e.target.value); const account = products.find(p => p.member === group?.member && p.currency === group?.currency && p.account === productForm.account)?.account || products.find(p => p.member === group?.member && p.currency === group?.currency)?.account || ''; setAccountChoice(account || '__new__'); setProductForm({ ...productForm, account }); }}>{groupOptions.map(g => <option key={g.key} value={g.key}>{g.member} · {g.currency} · {categoryNames[g.category] || g.category}</option>)}</select></label>}
         <div className="mr-grid">
           {field('产品名称', productForm.name, v => setProductForm({ ...productForm, name: v }))}
-          <label className="mr-field"><span>账户</span><select aria-label="账户" disabled={busy} value={accountChoice} onChange={e => { const choice = e.target.value; setAccountChoice(choice); setProductForm({ ...productForm, account: choice === '__new__' ? '' : choice }); }}>{accounts.map(name => <option key={name} value={name}>{name}</option>)}<option value="__new__">＋ 新增账户</option></select></label>
+          <label className="mr-field"><span>账户</span><select aria-label="账户" disabled={busy} value={accountChoice} onChange={e => { const choice = e.target.value; setAccountChoice(choice); setProductForm({ ...productForm, account: choice === '__new__' ? '' : choice }); }}>{[...new Set(products.filter(p => p.member === (selected?.member || groupOptions.find(g => g.key === anchorKey)?.member) && p.currency === (selected?.currency || groupOptions.find(g => g.key === anchorKey)?.currency)).map(p => p.account))].map(name => <option key={name} value={name}>{name}</option>)}<option value="__new__">＋ 新增账户</option></select></label>
           {accountChoice === '__new__' && field('新账户名称', productForm.account, v => setProductForm({ ...productForm, account: v }))}
           {field('本期余额', productForm.balance, v => setProductForm({ ...productForm, balance: v }), 'number')}
           {selected && field('上期余额', productForm.previous, v => setProductForm({ ...productForm, previous: v }), 'number')}
@@ -361,7 +396,7 @@ export default function MonthlyReview() {
         <div className="mr-actions"><button type="button" disabled={busy} onClick={() => setModal(null)}>取消</button><button className="primary" disabled={busy}>{batch ? '应用到批量记账' : '保存产品'}</button></div>
       </form>
     </Dialog>
-    <Dialog visible={modal === 'transactions'} title={`${selected?.name || ''} · 买卖记录`} footer={false} onClose={() => setModal(null)} className="mr-dialog mr-wide-dialog">
+    <Dialog visible={modal === 'transactions'} title={`${selected?.name || ''} · 买卖记录`} footer={false} onClose={() => setModal(null)} className="mr-dialog mr-wide-dialog mr-record-dialog">
       {error && <div className="mr-message error" role="alert">{error}</div>}
       <p>按日期顺序登记。金额与份额填正数，系统按交易方向写入正负号。分红需填写当日除息净值。</p>
       <TransactionsTable rows={transactions} onChange={setTransactions} date={accountingDate} disabled={busy} />

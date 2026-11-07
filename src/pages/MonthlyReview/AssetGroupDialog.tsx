@@ -1,4 +1,5 @@
-import { formatAmount, rawAmount } from './amount';
+import AmountInput from './AmountInput';
+import { rawAmount } from './amount';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Dialog } from '@alifd/next';
 import { MonthlyWorkbook } from './workbook';
@@ -16,12 +17,13 @@ export default function AssetGroupDialog({ visible, busy, book, error, categoryN
   const options = {
     member: book?.members().map(m => m.member) || ['本人', 'WTH'],
     currency: book?.currencyCodes() || ['RMB', 'USD', 'HKD'],
-    account: [...new Set(products.map(p => p.account))],
+    account: [...new Set(products.filter(p => p.member === (form.member === '__new__' ? form.newMember : form.member) && p.currency === (form.currency === '__new__' ? form.newCurrency : form.currency)).map(p => p.account))],
     category: [...new Set([...Object.keys(categoryNames), ...products.map(p => p.category)])],
   };
   const value = (key: 'member' | 'currency' | 'category' | 'account') => (form[key] === '__new__' ? form[`new${key[0].toUpperCase()}${key.slice(1)}`] : form[key]).trim();
   const currency = value('currency').toUpperCase(), needsRate = currency && !options.currency.includes(currency) && currency !== 'RMB';
   const update = (key: string, text: string) => setForm(current => ({ ...current, [key]: text }));
+  useEffect(() => { if (form.account !== '__new__' && !options.account.includes(form.account)) update('account', '__new__'); }, [form.member, form.newMember, form.currency, form.newCurrency, products]);
   const selectAll = (event: React.SyntheticEvent<HTMLInputElement>) => event.currentTarget.select();
   const choice = (label: string, key: 'member' | 'currency' | 'category' | 'account', custom: string) => <React.Fragment key={key}>
     <label className="mr-field"><span>{label}</span><select aria-label={`分组${label}`} value={form[key]} disabled={busy} onChange={e => update(key, e.target.value)}>{options[key].map(option => <option key={option} value={option}>{key === 'category' ? categoryNames[option] || option : option}</option>)}<option value="__new__">＋ 新增{label}</option></select></label>
@@ -39,8 +41,8 @@ export default function AssetGroupDialog({ visible, busy, book, error, categoryN
       {needsRate && <label className="mr-field"><span>{currency} → RMB</span><input aria-label="新币种兑人民币汇率" required disabled={busy} type="text" inputMode="decimal" min="0.00000001" step="any" value={form.rate} onFocus={selectAll} onClick={selectAll} onChange={e => update('rate', e.target.value)} /></label>}
       {choice('账户', 'account', '新账户名称')}{choice('产品类型', 'category', '新产品类型')}
       <label className="mr-field"><span>产品名称（留空使用账户名）</span><input aria-label="分组产品名称" disabled={busy} value={form.name} placeholder={value('account') || '默认使用账户名'} onChange={e => update('name', e.target.value)} /></label>
-      <label className="mr-field"><span>上期余额</span><span>{currency}</span><input aria-label="分组上期余额" readOnly value="0" /></label>
-      <label className="mr-field"><span>本期余额</span><span>{currency}</span><input aria-label="分组本期余额" required disabled={busy} type="text" inputMode="decimal" min="0" step="any" value={formatAmount(form.balance)} onFocus={selectAll} onClick={selectAll} onChange={e => update('balance', rawAmount(e.target.value))} /></label>
+      <label className="mr-field"><span>上期余额</span><span>{currency}</span><input aria-label="分组上期余额" readOnly value="0.00" /></label>
+      <label className="mr-field"><span>本期余额</span><span>{currency}</span><AmountInput aria-label="分组本期余额" required disabled={busy} type="text" inputMode="decimal" min="0" step="any" value={(form.balance)} onFocus={selectAll} onClick={selectAll} onChange={e => update('balance', rawAmount(e.target.value))} /></label>
     </div><p className="mr-footnote">上期余额固定为 0，初始净投入按本期余额建立。保存后可继续编辑净投入及买卖记录。新成员会增加资产与 XIRR 工作表，新币种按原样式增加分区，并参与家庭资产合计。</p>
     <div className="mr-actions"><button type="button" disabled={busy} onClick={onClose}>取消</button><button className="primary" disabled={busy || !book}>创建分组与资产</button></div></form>
   </Dialog>;

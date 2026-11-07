@@ -1,6 +1,8 @@
+import type { ReviewState } from './storage';
+import AmountInput from './AmountInput';
 import { sumAvailableAmounts } from './totals';
 import Decimal from 'decimal.js';
-import { formatAmount, rawAmount, currencyCode } from './amount';
+import { rawAmount, currencyCode } from './amount';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { MonthlyWorkbook, Product } from './workbook';
 import { Scalar } from './formula';
@@ -14,18 +16,19 @@ const gainClass = (value: Scalar) => typeof value === 'number' && value > 0 ? 'm
 const selectAmount = (event: React.SyntheticEvent<HTMLInputElement>) => event.currentTarget.select();
 
 interface Props {
+  reviewState?: ReviewState;
   notes?: boolean; book: MonthlyWorkbook; products: Product[]; batch: MonthlyBatch | null; busy: boolean;
   categoryNames: Record<string, string>; money: (n: Scalar) => string; pct: (n: Scalar) => string;
   onBatch: (batch: MonthlyBatch) => void; onError: (message: string) => void;
   onEdit: (p: Product) => void; onTransactions: (p: Product) => void; onDelete: (p: Product) => void;
 }
-export default function AssetsTable({ notes = false, book, products, batch, busy, categoryNames, money, pct, onBatch, onError, onEdit, onTransactions, onDelete }: Props) {
+export default function AssetsTable({ reviewState, notes = false, book, products, batch, busy, categoryNames, money, pct, onBatch, onError, onEdit, onTransactions, onDelete }: Props) {
   const table = useRef<HTMLDivElement>(null);
   const reviewOnBlur = useRef<string | null>(null);
   const allProducts = useMemo(() => book.products(), [book]);
   const [sort, setSort] = useState<ProductSort | null>({ field: 'name', direction: 'asc' });
   const [batchOrder, setBatchOrder] = useState<string[] | null>(null);
-  const changed = batch?.changedKeys() || new Set<string>(), invalid = new Set(batch?.invalid);
+  const changed = batch?.changedKeys() || new Set(reviewState?.changed || []), invalid = new Set(batch?.invalid);
   const invalidBalances = new Set(batch?.invalidBalances), invalidFlows = new Set(batch?.invalidFlows);
   const layout = allProducts.map(productKey).join('|');
   useEffect(() => {
@@ -71,15 +74,15 @@ export default function AssetsTable({ notes = false, book, products, batch, busy
     {heading('较上次收益', 'gain')}{heading('XIRR', 'xirr')}{heading('年化 TWR', 'twr')}{!notes && <th>操作</th>}<th>净投入</th>{heading('本期余额', 'balance')}{notes && <th>备注</th>}
   </tr></thead><tbody>{displayed.map(p => {
     const key = productKey(p), bad = invalidBalances.has(key), badFlow = invalidFlows.has(key);
-    return <tr key={key} className={batch && changed.has(key) ? 'mr-balance-changed' : undefined}>
+    return <tr key={key} className={changed.has(key) ? 'mr-balance-changed' : undefined}>
       {batch && <td><input type="checkbox" aria-label={`${p.name} 已核对`} checked={batch.reviewed.has(key)} disabled={busy || invalid.has(key)} onChange={e => onBatch(batch.check([key], e.target.checked))} /></td>}
-      <td><strong className="mr-product-name"><span>{displayValue(p.name)}</span>{batch && <span className={`mr-change-tag ${batch.reviewed.has(key) ? 'reviewed' : ''}`}>{batch.reviewed.has(key) ? '已核对' : changed.has(key) ? '已修改' : ''}</span>}</strong><small>{displayValue(p.account)} · {displayValue(categoryNames[p.category] || p.category)}</small></td>
+      <td><strong className="mr-product-name"><span>{displayValue(p.name)}</span>{(batch || reviewState) && <span className={`mr-change-tag ${(batch ? batch.reviewed.has(key) : reviewState?.reviewed.includes(key)) ? 'reviewed' : ''}`}>{(batch ? batch.reviewed.has(key) : reviewState?.reviewed.includes(key)) ? '已核对' : changed.has(key) ? '已修改' : ''}</span>}</strong><small>{displayValue(p.account)} · {displayValue(categoryNames[p.category] || p.category)}</small></td>
       <td>{displayValue(p.member)}<small>{displayValue(p.currency)}</small></td>
       <td>{currencyMoney(p, p.previous)}</td>
       <td className={gainClass(value(p, 'J'))}>{money(value(p, 'J'))}</td><td title={displayValue(value(p, 'K'))}>{pct(value(p, 'K'))}</td><td>{pct(value(p, 'L'))}</td>
       {!notes && <td><div className="mr-row-actions"><button disabled={busy} onClick={() => onEdit(p)}>编辑</button><button disabled={busy} onClick={() => onTransactions(p)}>买卖记录</button><button className="danger" disabled={busy} onClick={() => onDelete(p)}>删除</button></div></td>}
-      <td>{batch ? <><input onFocus={selectAmount} onClick={selectAmount} data-flow-input={key} tabIndex={-1} aria-label={`${p.name} 净投入`} aria-invalid={badFlow} aria-describedby={badFlow ? `flow-error-${key}` : undefined} type="text" inputMode="decimal" autoComplete="off" readOnly={isCashAccount(p.category)} title={isCashAccount(p.category) ? '活期账户净投入 = 本期余额 − 上期余额，自动计算' : '投入为正，回款为负；保存买卖记录后会按流水重新汇总'} value={formatAmount(batch.flows.get(key) ?? (typeof p.flow === 'number' ? String(p.flow) : ''))} placeholder={typeof p.flow === 'string' ? displayValue(p.flow) : '0'} disabled={busy} onChange={e => { if (!isCashAccount(p.category)) onBatch(batch.stageFlows([[key, rawAmount(e.target.value)]])); }} onBlur={() => finishInput(key)} onKeyDown={e => move(e, key)} />{badFlow && <small id={`flow-error-${key}`} className="mr-input-error">请输入有效的净投入金额</small>}</> : money(p.flow)}</td>
-      <td>{batch ? <><span className="mr-currency-prefix">{currencyCode(p.currency)}</span><input onFocus={selectAmount} onClick={selectAmount} data-balance-input={key} aria-label={`${p.name} 本期余额`} aria-invalid={bad} aria-describedby={bad ? `balance-error-${key}` : undefined} type="text" inputMode="decimal" autoComplete="off" value={formatAmount(batch.inputs.get(key) ?? String(p.balance))} disabled={busy} onChange={e => onBatch(batch.stageBalances([[key, rawAmount(e.target.value)]]))} onBlur={() => finishInput(key)} onKeyDown={e => move(e, key)} onPaste={e => {
+      <td>{batch ? <><AmountInput onFocus={selectAmount} onClick={selectAmount} data-flow-input={key} tabIndex={-1} aria-label={`${p.name} 净投入`} aria-invalid={badFlow} aria-describedby={badFlow ? `flow-error-${key}` : undefined} type="text" inputMode="decimal" autoComplete="off" readOnly={isCashAccount(p.category)} title={isCashAccount(p.category) ? '活期账户净投入 = 本期余额 − 上期余额，自动计算' : '投入为正，回款为负；保存买卖记录后会按流水重新汇总'} value={(batch.flows.get(key) ?? (typeof p.flow === 'number' ? String(p.flow) : ''))} placeholder={typeof p.flow === 'string' ? displayValue(p.flow) : '0'} disabled={busy} onChange={e => { if (!isCashAccount(p.category)) onBatch(batch.stageFlows([[key, rawAmount(e.target.value)]])); }} onBlur={() => finishInput(key)} onKeyDown={e => move(e, key)} />{badFlow && <small id={`flow-error-${key}`} className="mr-input-error">请输入有效的净投入金额</small>}</> : money(p.flow)}</td>
+      <td>{batch ? <><span className="mr-currency-prefix">{currencyCode(p.currency)}</span><AmountInput onFocus={selectAmount} onClick={selectAmount} data-balance-input={key} aria-label={`${p.name} 本期余额`} aria-invalid={bad} aria-describedby={bad ? `balance-error-${key}` : undefined} type="text" inputMode="decimal" autoComplete="off" value={(batch.inputs.get(key) ?? String(p.balance))} disabled={busy} onChange={e => onBatch(batch.stageBalances([[key, rawAmount(e.target.value)]]))} onBlur={() => finishInput(key)} onKeyDown={e => move(e, key)} onPaste={e => {
         const text = e.clipboardData.getData('text');
         if (!/[\r\n\t]/.test(text)) return;
         e.preventDefault();

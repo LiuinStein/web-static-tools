@@ -509,3 +509,105 @@ test('gain totals add each currency independently and retain valid gains alongsi
   assert.equal(sumAvailableAmounts([0, null, 'N/A']), 0);
   assert.equal(sumAvailableAmounts([null, 'N/A', NaN, Infinity]), null);
 });
+
+test('asset dropdown options are linked in all three directions', () => {
+  const { linkedOptions } = require('../src/pages/MonthlyReview/filters.ts');
+  const rows = [
+    { member: '本人', currency: 'RMB', account: '人民币账户' },
+    { member: '本人', currency: 'USD', account: '美元账户' },
+    { member: 'WTH', currency: 'RMB', account: 'WTH账户' },
+  ];
+  assert.deepEqual(linkedOptions(rows, { member: 'WTH', currency: '全部', account: '' }).accounts, ['WTH账户']);
+  assert.deepEqual(linkedOptions(rows, { member: '本人', currency: 'USD', account: '' }).accounts, ['美元账户']);
+  const account = linkedOptions(rows, { member: '全部', currency: '全部', account: '美元账户' });
+  assert.deepEqual(account.members, ['本人']);
+  assert.deepEqual(account.currencies, ['USD']);
+});
+
+test('saved review metadata restores assets and debts without appearing in Excel or new months', async () => {
+  const { MonthlyBatch, productKey } = require('../src/pages/MonthlyReview/batch.ts');
+  const original = await fixture();
+  original.set('Liabilities', 'C3', '信用卡'); original.set('Liabilities', 'D3', 100); original.set('Liabilities', 'H3', 120);
+  const asset = original.products()[0], debt = original.liabilities()[0];
+  const keys = [productKey(asset), productKey(debt)];
+  const completed = new MonthlyBatch(original).balances([[keys[0], '1234.56'], [keys[1], '88.12']]).check(keys, true);
+  const metadata = JSON.parse(JSON.stringify(completed.reviewState()));
+  const data = await completed.book.export();
+  const restoredBook = await MonthlyWorkbook.open(data);
+  const restored = MonthlyBatch.restore(restoredBook, metadata);
+  assert.deepEqual([...restored.reviewed].sort(), keys.sort());
+  for (const key of keys) assert.ok(restored.changedKeys().has(key));
+  const edited = restored.balances([[productKey(asset), '1200.12']]);
+  assert.ok(!edited.reviewed.has(productKey(asset)));
+  assert.ok(restored.reviewed.has(productKey(asset)), 'cancelled edits leave saved marks intact');
+  assert.ok(restored.reviewed.has(productKey(debt)));
+  const plain = MonthlyBatch.restore(await MonthlyWorkbook.open(data));
+  assert.equal(plain.reviewed.size, 0);
+  assert.equal(plain.changedKeys().size, 0, 'Excel contains no review metadata');
+  const nextBook = await MonthlyWorkbook.open(data);
+  nextBook.rollover('2026-11-30');
+  const nextMonth = MonthlyBatch.restore(nextBook);
+  assert.equal(nextMonth.reviewed.size, 0);
+  assert.equal(nextMonth.changedKeys().size, 0);
+});
+
+test('amount input retains a typed decimal point across numeric parent updates and formats after blur', () => {
+  const React = require('react');
+  const originalHook = React.useState, originalEffect = React.useEffect;
+  React.useEffect = () => {};
+  const oldExtension = require.extensions['.tsx'];
+  require.extensions['.tsx'] = (m, f) => m._compile(ts.transpileModule(fs.readFileSync(f, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React, esModuleInterop: true } }).outputText, f);
+  let states = [], cursor = 0;
+  React.useState = initial => {
+    const index = cursor++;
+    if (!(index in states)) states[index] = initial;
+    return [states[index], value => { states[index] = value; }];
+  };
+  try {
+    const AmountInput = require('../src/pages/MonthlyReview/AmountInput.tsx').default;
+    let value = 1;
+    const render = () => { cursor = 0; return AmountInput({ value, onChange: e => { value = Number(e.target.value); } }); };
+    let input = render();
+    assert.equal(input.props.value, '1.00');
+    input.props.onFocus({ currentTarget: { value: '1.00' } });
+    input = render();
+    input.props.onChange({ target: { value: '1.' } });
+    input = render();
+    assert.equal(input.props.value, '1.');
+    input.props.onChange({ target: { value: '1.25' } });
+    assert.equal(value, 1.25);
+    input = render();
+    assert.equal(input.props.value, '1.25');
+    input.props.onBlur({});
+    assert.equal(render().props.value, '1.25');
+    value = 1234.5;
+    assert.equal(render().props.value, '1,234.50');
+  } finally {
+    React.useState = originalHook;
+    React.useEffect = originalEffect;
+    if (oldExtension) require.extensions['.tsx'] = oldExtension; else delete require.extensions['.tsx'];
+  }
+});
+test('review-only changes need saving and legacy drafts restore without marks', async () => {
+  const { MonthlyBatch, productKey } = require('../src/pages/MonthlyReview/batch.ts');
+  const book = await fixture(), key = productKey(book.products()[0]);
+  const batch = MonthlyBatch.restore(book);
+  assert.equal(batch.dirty, false);
+  const checked = batch.check([key], true);
+  assert.equal(checked.dirty, true);
+  assert.deepEqual(checked.reviewState().reviewed, [key]);
+  assert.equal(batch.reviewed.size, 0);
+});
+test('settings modification marks persist only in local review metadata', async () => {
+  const { MonthlyBatch } = require('../src/pages/MonthlyReview/batch.ts');
+  const book = await fixture();
+  const batch = MonthlyBatch.restore(book).markSettings(['rate:USD', 'salary:本人']);
+  const state = JSON.parse(JSON.stringify(batch.reviewState()));
+  assert.deepEqual(state.settingsChanged, ['rate:USD', 'salary:本人']);
+  assert.deepEqual(state.changed, []);
+  const data = await batch.book.export();
+  const reopened = await MonthlyWorkbook.open(data);
+  assert.deepEqual(MonthlyBatch.restore(reopened, state).reviewState().settingsChanged, state.settingsChanged);
+  assert.deepEqual(MonthlyBatch.restore(reopened).reviewState().settingsChanged, []);
+  assert.deepEqual(batch.apply(next => next.addProduct(book.products()[0], 'New settings test product', 'New account')).reviewState().settingsChanged, state.settingsChanged);
+});
