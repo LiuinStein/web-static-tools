@@ -654,3 +654,161 @@ test('benchmark defaults, disabled types, custom categories and persisted config
     { metric: 'xirr', high: Infinity, middle: 10, low: 5 },
   ]) assert.equal(validBenchmark(rule), false);
 });
+
+test('inline note edits preserve financial cells, support multiline clearing and respect batch isolation', async () => {
+  const { MonthlyBatch, productKey } = require('../src/pages/MonthlyReview/batch.ts');
+  const original = await fixture(), product = original.products()[0];
+  const addresses = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M'].map(column => column + product.row);
+  const before = addresses.map(address => original.cell(product.sheet, address));
+  const key = productKey(product), note = '第一行备注\n第二行 <原样保留>';
+  const batch = new MonthlyBatch(original).check([key], true).apply(next => next.updateProductNote(product, note), key);
+  assert.equal(original.products()[0].note, '');
+  assert.equal(batch.book.products()[0].note, note);
+  assert.ok(!batch.reviewed.has(key));
+  assert.ok(batch.changedKeys().has(key));
+  assert.deepEqual(addresses.map(address => batch.book.cell(product.sheet, address)), before);
+  const reopened = await MonthlyWorkbook.open(await batch.book.export());
+  const saved = reopened.products().find(p => productKey(p) === key);
+  assert.equal(saved.note, note);
+  reopened.updateProductNote(saved, '');
+  assert.equal(reopened.products().filter(p => p.note.trim()).length, 0);
+  assert.throws(() => reopened.updateProductNote({ ...saved, account: 'Wrong account' }, 'wrong'), /产品位置已变化/);
+  assert.equal(reopened.products()[0].note, '');
+});
+
+test('new liability accounts expand totals and cross-sheet references, survive Excel and roll over', async () => {
+  const book = await liabilityFixture();
+  book.formula('Liabilities', 'H5', 'SUM(H3:H4)');
+  book.formula('Analyze', 'R1', "SUM('Liabilities'!$D$3:$D$4)");
+  book.formula('Analyze', 'S1', 'SUM(Assets!D3:D4)');
+  book.formula('Analyze', 'T1', 'IF(1=1,"Liabilities!D3:D4",0)');
+  const previousRows = book.liabilities();
+  const assets = book.number('Analyze', 'O3');
+  const created = book.addLiability({ account: ' 新信用账户 ', balance: 25.5, repayment: ' 每月20日 ' });
+  assert.equal(created.account, '新信用账户');
+  assert.equal(created.previous, 0);
+  assert.equal(created.balance, 25.5);
+  assert.equal(created.repayment, '每月20日');
+  assert.deepEqual(book.liabilities().slice(0, 2), previousRows);
+  assert.equal(book.number('Liabilities', 'D1'), 150.5);
+  assert.equal(book.number('Analyze', 'R1'), 150.5);
+  assert.equal(book.number('Analyze', 'Q3'), assets - 150.5);
+  assert.equal(book.cell('Liabilities', 'D1').formula, 'D6');
+  assert.equal(book.cell('Liabilities', 'D6').formula, 'SUM(D3:D5)');
+  assert.equal(book.number('Liabilities', 'H6'), 30);
+  assert.equal(book.cell('Analyze', 'S1').formula, 'SUM(Assets!D3:D4)');
+  assert.equal(book.cell('Analyze', 'T1').formula, 'IF(1=1,"Liabilities!D3:D4",0)');
+  const loaded = await MonthlyWorkbook.open(await book.export());
+  assert.equal(loaded.liabilities().find(row => row.account === '新信用账户').balance, 25.5);
+  assert.equal(loaded.number('Liabilities', 'D1'), 150.5);
+  loaded.rollover('2026-11-30');
+  assert.equal(loaded.liabilities().find(row => row.account === '新信用账户').previous, 25.5);
+  assert.equal(loaded.number('Liabilities', 'F1'), 150.5);
+});
+
+test('liability additions validate before mutation, work in empty tables and remain isolated in batches', async () => {
+  const source = await liabilityFixture(), rows = source.liabilities();
+  for (const values of [
+    { account: '', balance: 1 }, { account: rows[0].account, balance: 1 },
+    { account: 'Sub Total', balance: 1 }, { account: 'New', balance: -1 }, { account: 'New', balance: NaN },
+  ]) {
+    assert.throws(() => source.addLiability({ ...values, repayment: '' }));
+    assert.equal(source.liabilities().length, 2);
+    assert.equal(source.number('Liabilities', 'D1'), 125);
+  }
+  const assetKey = productKey(source.products()[0]), debtKey = productKey(rows[0]);
+  const batch = new MonthlyBatch(source).check([assetKey, debtKey], true).apply(next => next.addLiability({ account: 'Batch debt', balance: 0.01, repayment: '' }));
+  assert.equal(source.liabilities().length, 2);
+  assert.equal(batch.book.liabilities().length, 3);
+  assert.equal(batch.book.number('Liabilities', 'D1'), 125.01);
+  assert.ok(batch.reviewed.has(assetKey));
+  assert.ok(batch.reviewed.has(debtKey));
+  const added = batch.book.liabilities().find(row => row.account === 'Batch debt');
+  assert.ok(batch.changedKeys().has(productKey(added)));
+  assert.ok(!batch.changedKeys().has(debtKey));
+  const empty = await fixture();
+  empty.set('Liabilities', 'D1', 0);
+  empty.addLiability({ account: 'First debt', balance: 1234.56, repayment: '' });
+  empty.addLiability({ account: 'Second debt', balance: 1.24, repayment: '' });
+  assert.equal(empty.liabilities().length, 2);
+  assert.equal(empty.number('Liabilities', 'D1'), 1235.8);
+});
+
+test('recurring repayment schedules parse English and Chinese and serialize correct ordinal suffixes', () => {
+  const { parseRepayment, repaymentForm, encodeRepayment } = require('../src/pages/MonthlyReview/repayment.ts');
+  for (const day of Array.from({ length: 31 }, (_, i) => i + 1)) for (const months of [1, 2, 3, 4, 6, 12, 24]) {
+    const encoded = encodeRepayment({ ...repaymentForm(null), day: String(day), months: String(months) });
+    assert.deepEqual(parseRepayment(encoded), { day, months });
+  }
+  assert.equal(encodeRepayment({ ...repaymentForm(null), day: '1' }), '1st Day Every Month');
+  assert.equal(encodeRepayment({ ...repaymentForm(null), day: '22', months: '2' }), '22nd Day Every 2 Months');
+  for (const [day, suffix] of [[2, 'nd'], [3, 'rd'], [11, 'th'], [12, 'th'], [13, 'th'], [21, 'st'], [23, 'rd'], [31, 'st']]) {
+    assert.ok(encodeRepayment({ ...repaymentForm(null), day: String(day) }).startsWith(day + suffix + ' '));
+  }
+  for (const text of ['22nd Day Every 2 Months', '22nd Day Every Other Month', '22nd Day Every Two Months', '每2个月22日', '每双月22日']) assert.deepEqual(parseRepayment(text), { day: 22, months: 2 });
+  assert.deepEqual(parseRepayment('每月1日'), { day: 1, months: 1 });
+  assert.deepEqual(parseRepayment('31st Day Every Quarter'), { day: 31, months: 3 });
+  assert.equal(repaymentForm('31st Day Every 4 Months').customInterval, true);
+  assert.equal(repaymentForm('31st Day Every Month').customInterval, false);
+});
+
+test('repayment inputs validate integer day and interval while preserving unrecognized legacy values', () => {
+  const { parseRepayment, repaymentForm, encodeRepayment, liabilityGrowthClass } = require('../src/pages/MonthlyReview/repayment.ts');
+  for (const day of ['0', '32', '-1', '1.5', 'abc', '1e1']) assert.throws(() => encodeRepayment({ ...repaymentForm(null), day }), /1–31/);
+  for (const months of ['', '0', '-2', '1.5', 'text', '9007199254740992']) assert.throws(() => encodeRepayment({ ...repaymentForm(null), day: '22', months }), /月份间隔/);
+  for (const text of ['32nd Day Every Month', '22nd Day Every 0 Months', '2026-12-01']) assert.equal(parseRepayment(text), null);
+  for (const value of ['2026-12-01', '原模板特殊规则', serialDate('2026-12-01')]) {
+    const form = repaymentForm(value);
+    assert.equal(form.mode, value === '原模板特殊规则' ? 'legacy' : 'once');
+    assert.equal(encodeRepayment(form), String(value));
+  }
+  assert.equal(encodeRepayment(repaymentForm(null)), '');
+  assert.equal(encodeRepayment({ ...repaymentForm('1st Day Every Month'), mode: 'none' }), '');
+  assert.equal(liabilityGrowthClass(1), 'mr-debt-increase');
+  assert.equal(liabilityGrowthClass(-1), 'mr-debt-decrease');
+  for (const value of [0, -0, NaN, Infinity]) assert.equal(liabilityGrowthClass(value), undefined);
+});
+
+test('new and edited liability schedules survive Excel roundtrip without changing numeric legacy dates', async () => {
+  const { repaymentForm, encodeRepayment } = require('../src/pages/MonthlyReview/repayment.ts');
+  const book = await liabilityFixture();
+  const numeric = book.liabilities()[1];
+  book.updateLiability(numeric, { balance: 88.1, repayment: encodeRepayment(repaymentForm(numeric.repayment)) });
+  assert.equal(typeof book.value('Liabilities', 'G4'), 'number');
+  const schedule = encodeRepayment({ ...repaymentForm(null), day: '22', months: '2' });
+  const added = book.addLiability({ account: '双月账户', balance: 100.01, repayment: schedule });
+  const reopened = await MonthlyWorkbook.open(await book.export());
+  const row = reopened.liabilities().find(p => p.account === added.account);
+  assert.deepEqual(repaymentForm(row.repayment), { mode: 'recurring', day: '22', months: '2', original: '22nd Day Every 2 Months', customInterval: false, date: '', originalDate: '' });
+  reopened.updateLiability(row, { balance: row.balance, repayment: encodeRepayment({ ...repaymentForm(row.repayment), day: '31', months: '12' }) });
+  assert.equal(reopened.liabilities().find(p => p.account === row.account).repayment, '31st Day Every 12 Months');
+});
+
+test('one-time payoff dates validate, parse legacy dates and preserve numeric Excel date types', async () => {
+  const { repaymentDate, repaymentForm, encodeRepayment } = require('../src/pages/MonthlyReview/repayment.ts');
+  for (const date of ['2026-12-22', '2028-02-29', '2027-01-01']) {
+    const form = { ...repaymentForm(null), mode: 'once', date };
+    assert.equal(encodeRepayment(form), date);
+    assert.equal(repaymentForm(date).mode, 'once');
+    assert.equal(repaymentForm(date).date, date);
+  }
+  assert.equal(repaymentDate('2027/1/2'), '2027-01-02');
+  for (const date of ['', '2027-02-29', '2027-04-31', 'bad', '2027-13-01']) assert.throws(() => encodeRepayment({ ...repaymentForm(null), mode: 'once', date }), /还清日期/);
+  assert.equal(repaymentDate(Infinity), '');
+  const book = await liabilityFixture(), numeric = book.liabilities()[1];
+  const form = repaymentForm(numeric.repayment);
+  assert.equal(form.mode, 'once');
+  assert.equal(form.date, '2026-11-15');
+  book.updateLiability(numeric, { balance: 10, repayment: encodeRepayment(form) });
+  assert.equal(book.value('Liabilities', 'G4'), numeric.repayment);
+  assert.equal(typeof book.value('Liabilities', 'G4'), 'number');
+  book.updateLiability(numeric, { balance: 10, repayment: encodeRepayment({ ...form, date: '2027-01-22' }) });
+  assert.equal(book.value('Liabilities', 'G4'), '2027-01-22');
+  const added = book.addLiability({ account: '一次性还清账户', balance: 500, repayment: encodeRepayment({ ...repaymentForm(null), mode: 'once', date: '2027-06-30' }) });
+  const reopened = await MonthlyWorkbook.open(await book.export());
+  const saved = reopened.liabilities().find(row => row.account === added.account);
+  assert.equal(repaymentForm(saved.repayment).mode, 'once');
+  assert.equal(repaymentForm(saved.repayment).date, '2027-06-30');
+  assert.equal(encodeRepayment({ ...repaymentForm(saved.repayment), mode: 'recurring', day: '22', months: '2' }), '22nd Day Every 2 Months');
+  assert.equal(encodeRepayment({ ...repaymentForm(saved.repayment), mode: 'none' }), '');
+});

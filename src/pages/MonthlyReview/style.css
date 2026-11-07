@@ -119,3 +119,31 @@
 .mr-performance-middle { background: #f0f8e7; color: #568c28; }
 .mr-performance-low { background: #fff7d6; color: #986b00; }
 .mr-performance-below { background: #ffeded; color: #c53737; }
+
+.mr-note-display > div { white-space: pre-wrap; overflow-wrap: anywhere; }
+.mr-note-display .mr-note-edit { margin-top: 8px; padding: 4px 8px; font-size: 11px; }
+.mr-note-editor { min-width: 260px; white-space: normal; }
+.mr-note-editor textarea { box-sizing: border-box; width: 100%; min-height: 120px; resize: vertical; padding: 10px; border: 1px solid #dce3ed; border-radius: 6px; font: inherit; color: #35455e; }
+.mr-note-editor textarea:focus { outline: 2px solid #b9d2ff; outline-offset: 1px; }
+.mr-note-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.mr-note-actions button { padding: 5px 10px; }
+
+.mr-note-display { white-space: pre-wrap; overflow-wrap: anywhere; }
+.mr-note-display .mr-note-text { display: inline; }
+.mr-note-display .mr-note-edit { margin: 0 0 0 8px; vertical-align: baseline; }
+
+.mr-liabilities-table td.mr-debt-increase { color: #d14343; }
+.mr-liabilities-table td.mr-debt-decrease { color: #16845b; }
+.mr-repayment-fields { margin-top: 16px; }
+.mr-repayment-fields > .mr-grid { margin-bottom: 0; }
+.mr-repayment-original { overflow-wrap: anywhere; }
+
+.mr-repayment-date { margin-top: 16px; }
+
+.mr-liability-edit-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.mr-liability-edit-form > .mr-grid, .mr-liability-edit-form > .mr-repayment-fields { display: contents; }
+.mr-liability-edit-form .mr-repayment-fields > .mr-grid, .mr-liability-edit-form .mr-repayment-date, .mr-liability-edit-form .mr-repayment-original, .mr-liability-edit-form > .mr-footnote, .mr-liability-edit-form > .mr-actions { grid-column: 1 / -1; }
+.mr-liability-edit-form .mr-repayment-fields > .mr-grid { margin: 0; }
+.mr-liability-edit-form .mr-repayment-date, .mr-liability-edit-form > .mr-actions { margin-top: 0; }
+.mr-liability-edit-form > .mr-footnote { margin-top: 0 !important; }
+@media (max-width: 600px) { .mr-liability-edit-form { grid-template-columns: 1fr; } }

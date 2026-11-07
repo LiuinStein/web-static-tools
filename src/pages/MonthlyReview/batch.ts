@@ -108,10 +108,13 @@ export class MonthlyBatch {
     const next = this.commitInputs().book.clone(); action(next);
     const before = this.book.products(), after = next.products();
     const structural = before.length !== after.length || before.some((p, i) => productKey(p) !== productKey(after[i]));
+    const debtsBefore = this.book.liabilities(), debtsAfter = next.liabilities();
+    const debtsStructural = debtsBefore.some(p => !debtsAfter.some(row => productKey(row) === productKey(p) && row.account === p.account));
+    const keep = (key: string) => (!structural || key.startsWith('Liabilities:') || key.startsWith('__settings:')) && (!debtsStructural || !key.startsWith('Liabilities:'));
     // Row insertion/deletion shifts Excel addresses; require a fresh review instead of reusing stale marks.
-    const reviewed = structural ? new Set([...this.reviewed].filter(key => key.startsWith('Liabilities:'))) : new Set(this.reviewed);
-    const touched = structural ? new Set([...this.touched].filter(key => key.startsWith('Liabilities:') || key.startsWith('__settings:'))) : new Set(this.touched);
-    if (touchedKey && !structural) { touched.add(touchedKey); reviewed.delete(touchedKey); }
+    const reviewed = new Set([...this.reviewed].filter(keep));
+    const touched = new Set([...this.touched].filter(keep));
+    if (touchedKey && !structural && !debtsStructural) { touched.add(touchedKey); reviewed.delete(touchedKey); }
     return new MonthlyBatch(this.original, next, new Map(), reviewed, touched, true);
   }
   changedKeys(): Set<string> {
@@ -124,7 +127,7 @@ export class MonthlyBatch {
       for (const p of batchRows(this.book).values()) {
         if ('repayment' in p) {
           const previous = batchRows(this.original).get(productKey(p));
-          if (!previous || !('repayment' in previous) || p.balance !== previous.balance || p.repayment !== previous.repayment) base.add(productKey(p));
+          if (!previous || !('repayment' in previous) || p.balance !== previous.balance || p.previous !== previous.previous || p.repayment !== previous.repayment) base.add(productKey(p));
         } else {
           const key = signature(p), count = counts.get(key) || 0;
           if (count) counts.set(key, count - 1); else base.add(productKey(p));

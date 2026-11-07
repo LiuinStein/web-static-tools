@@ -345,6 +345,40 @@ export class MonthlyWorkbook {
       return row > 2 && typeof account === 'string' && account.trim() && !['Sub Total', 'Grand Total', 'Account', 'Exchange Rate:'].includes(account.trim());
     }).map(row => ({ sheet: 'Liabilities', row, account: String(this.value('Liabilities', `C${row}`)), balance: this.number('Liabilities', `D${row}`), previous: this.number('Liabilities', `H${row}`), repayment: this.value('Liabilities', `G${row}`) }));
   }
+  addLiability(values: { account: string; balance: number; repayment: string }): Liability {
+    const account = values.account.trim(), rows = this.liabilities();
+    if (!account) throw new Error('请填写负债账户名称');
+    validateProductNames(account, account);
+    if (rows.some(row => row.account.toLocaleLowerCase() === account.toLocaleLowerCase())) throw new Error('负债账户名称已存在，请使用其他名称');
+    if (!Number.isFinite(values.balance) || values.balance < 0) throw new Error('负债余额须为有效的非负金额');
+    const last = Math.max(2, ...rows.map(row => row.row));
+    const candidates = [...new Set([...this.sheet('Liabilities').cells.keys()].map(address => +address.replace(/[A-Z]/g, '')))].filter(row => row > last).sort((a, b) => a - b);
+    let total = candidates.find(row => ['Sub Total', 'Grand Total'].some(label => this.value('Liabilities', `C${row}`) === label || this.value('Liabilities', `B${row}`) === label));
+    if (!total) {
+      const direct = this.cell('Liabilities', 'D1')?.formula?.match(/^\$?D\$?(\d+)$/);
+      if (direct && +direct[1] > last) total = +direct[1];
+    }
+    if (!total) total = candidates.find(row => /SUM\(/i.test(this.cell('Liabilities', `D${row}`)?.formula || ''));
+    if (!total) {
+      if (rows.length || this.number('Liabilities', 'D1') !== 0) throw new Error('无法识别负债合计行，请使用包含负债合计公式的模板');
+      total = 4;
+      this.set('Liabilities', 'C4', 'Sub Total'); this.formula('Liabilities', 'D4', 'SUM(D3:D3)'); this.formula('Liabilities', 'H4', 'SUM(H3:H3)'); this.formula('Liabilities', 'D1', 'D4');
+    }
+    const at = total;
+    this.shiftRows('Liabilities', at, 1);
+    // Inserting just before a total needs its adjacent SUM ranges expanded explicitly.
+    for (const sheet of this.sheets) for (const address of [...sheet.cells.keys()]) {
+      const formula = this.cell(sheet.name, address)?.formula;
+      if (!formula) continue;
+      const expanded = formula.split(/("(?:[^"]|"")*")/g).map((part, index) => index % 2 ? part : part.replace(/((?:(?:'([^']+)'|([A-Za-z_][\w-]*))!)?)(\$?[A-Z]{1,3}\$?(\d+)):(\$?[A-Z]{1,3}\$?)(\d+)/g,
+        (all, qualifier, quoted, bare, start, startRow, end, endRow) => (quoted || bare || sheet.name) === 'Liabilities' && +startRow >= 3 && +startRow <= at - 1 && +endRow === at - 1 ? `${qualifier}${start}:${end}${at}` : all)).join('');
+      if (expanded !== formula) this.formula(sheet.name, address, expanded);
+    }
+    if (rows.length) this.copyStyle('Liabilities', rows[rows.length - 1].row, at, 8);
+    this.set('Liabilities', `C${at}`, account); this.set('Liabilities', `D${at}`, values.balance);
+    this.set('Liabilities', `G${at}`, values.repayment.trim() || null); this.set('Liabilities', `H${at}`, 0);
+    return this.liabilities().find(row => row.row === at)!;
+  }
   updateLiability(liability: Liability, values: { balance: number; repayment: string }) {
     const current = this.liabilities().find(row => row.row === liability.row && row.account === liability.account);
     if (!current) throw new Error('负债账户位置已变化，请重新选择');
@@ -504,6 +538,11 @@ export class MonthlyWorkbook {
     for (const { product, trades } of snapshots) { this.set(product.sheet, `K${product.row}`, null); this.saveTransactions({ ...product, block: undefined }, trades); }
     this.shiftRows(shared.sheet, shared.start, shared.summary - shared.start + 1, true);
     return this.products().find(x => x.sheet === p.sheet && x.row === p.row)!;
+  }
+  updateProductNote(p: Product, note: string) {
+    const current = this.products().find(row => row.sheet === p.sheet && row.row === p.row);
+    if (!current || current.name !== p.name || current.account !== p.account) throw new Error('产品位置已变化，请重新打开备注后编辑');
+    this.set(current.sheet, `N${current.row}`, note);
   }
   updateProduct(p: Product, values: { name: string; account: string; balance: number; previous: number; flow: number | string; due: string; note: string }) {
     validateProductNames(values.name, values.account);

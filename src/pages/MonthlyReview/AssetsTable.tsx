@@ -1,3 +1,4 @@
+import NoteCell from './NoteCell';
 import { Benchmarks, benchmarkRating } from './benchmarks';
 import type { ReviewState } from './storage';
 import AmountInput from './AmountInput';
@@ -17,6 +18,7 @@ const gainClass = (value: Scalar) => typeof value === 'number' && value > 0 ? 'm
 const selectAmount = (event: React.SyntheticEvent<HTMLInputElement>) => event.currentTarget.select();
 
 interface Props {
+  onSaveNote?: (p: Product, note: string) => Promise<void>;
   benchmarks?: Benchmarks;
   reviewState?: ReviewState;
   notes?: boolean; book: MonthlyWorkbook; products: Product[]; batch: MonthlyBatch | null; busy: boolean;
@@ -24,7 +26,7 @@ interface Props {
   onBatch: (batch: MonthlyBatch) => void; onError: (message: string) => void;
   onEdit: (p: Product) => void; onTransactions: (p: Product) => void; onDelete: (p: Product) => void;
 }
-export default function AssetsTable({ benchmarks, reviewState, notes = false, book, products, batch, busy, categoryNames, money, pct, onBatch, onError, onEdit, onTransactions, onDelete }: Props) {
+export default function AssetsTable({ onSaveNote, benchmarks, reviewState, notes = false, book, products, batch, busy, categoryNames, money, pct, onBatch, onError, onEdit, onTransactions, onDelete }: Props) {
   const table = useRef<HTMLDivElement>(null);
   const reviewOnBlur = useRef<string | null>(null);
   const allProducts = useMemo(() => book.products(), [book]);
@@ -91,7 +93,7 @@ export default function AssetsTable({ benchmarks, reviewState, notes = false, bo
         try { onBatch(batch.stageBalances(balancePaste(displayed, key, text))); onError(''); } catch (error) { onError(error.message); }
       }} />{bad && <small id={`balance-error-${key}`} className="mr-input-error">请输入有效的非负余额</small>}</> : currencyMoney(p, p.balance)}</td>
 
-      {notes && <td className="mr-note-cell">{p.note}</td>}
+      {notes && <td className="mr-note-cell">{onSaveNote ? <NoteCell key={JSON.stringify([key, p.name, p.account])} name={p.name} note={p.note} busy={busy} onSave={note => onSaveNote(p, note)} /> : p.note}</td>}
     </tr>;
   })}</tbody><tfoot>{[...new Set(displayed.map(p => p.currency))].map(code => {
     const rows = displayed.filter(p => p.currency === code);
