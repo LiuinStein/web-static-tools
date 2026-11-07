@@ -1,3 +1,4 @@
+import { formatAmount, rawAmount } from './amount';
 import React from 'react';
 import { Transaction } from './workbook';
 
@@ -13,9 +14,9 @@ export default function TransactionsTable({ rows, onChange, date, disabled = fal
       return <tr key={i}>
         <td><input aria-label={`${label}日期`} disabled={disabled} type="date" value={row.date} onChange={e => update({ date: e.target.value })} /></td>
         <td><select aria-label={`${label}类型`} disabled={disabled} value={row.kind} onChange={e => update({ kind: e.target.value as Transaction['kind'], shares: e.target.value === 'dividend' ? 0 : row.shares })}><option value="buy">买入</option><option value="sell">卖出</option><option value="dividend">分红</option></select></td>
-        <td><input aria-label={`${label}金额`} disabled={disabled} onFocus={selectAmount} onClick={selectAmount} type="number" step="any" min="0" value={row.amount} onChange={e => { const amount = Number(e.target.value); update({ amount, price: row.shares ? amount / row.shares : row.price }); }} /></td>
-        <td><input aria-label={`${label}份额`} disabled={disabled || row.kind === 'dividend'} onFocus={selectAmount} onClick={selectAmount} type="number" step="any" min="0" value={row.shares} onChange={e => { const shares = Number(e.target.value); update({ shares, price: shares ? row.amount / shares : row.price }); }} /></td>
-        <td><input aria-label={`${label}价格`} disabled={disabled} onFocus={selectAmount} onClick={selectAmount} type="number" step="any" min="0" value={row.price} onChange={e => update({ price: Number(e.target.value) })} /></td>
+        <td><input aria-label={`${label}金额`} disabled={disabled} onFocus={selectAmount} onClick={selectAmount} type="text" inputMode="decimal" step="any" min="0" value={formatAmount(row.amount)} onChange={e => { const amount = Number(rawAmount(e.target.value)); update({ amount, price: row.shares ? amount / row.shares : row.price }); }} /></td>
+        <td><input aria-label={`${label}份额`} disabled={disabled || row.kind === 'dividend'} onFocus={selectAmount} onClick={selectAmount} type="text" inputMode="decimal" step="any" min="0" value={formatAmount(row.shares)} onChange={e => { const shares = Number(rawAmount(e.target.value)); update({ shares, price: shares ? row.amount / shares : row.price }); }} /></td>
+        <td><input aria-label={`${label}价格`} disabled={disabled} onFocus={selectAmount} onClick={selectAmount} type="text" inputMode="decimal" step="any" min="0" value={formatAmount(row.price)} onChange={e => update({ price: Number(rawAmount(e.target.value)) })} /></td>
         <td><button type="button" className="danger" disabled={disabled} onClick={() => onChange(rows.filter((_, j) => j !== i))}>删除</button></td>
       </tr>;
     })}</tbody></table>{!rows.length && <p>尚未登记交易，可添加记录，或直接填写净投入。</p>}</div>

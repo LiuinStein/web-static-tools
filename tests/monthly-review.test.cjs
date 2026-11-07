@@ -466,3 +466,46 @@ test('product balance validation rejects blanks and invalid amounts while accept
     assert.equal(productBalance('1234.56', label), 1234.56);
   }
 });
+
+test('amount grouping preserves decimal editing and strips separators before parsing', () => {
+  const { formatAmount, rawAmount, currencyCode } = require('../src/pages/MonthlyReview/amount.ts');
+  for (const [raw, display] of [['1234567.80', '1,234,567.80'], ['-1234.', '-1,234.'], ['', ''], ['-', '-'], ['0.01', '0.01']]) {
+    assert.equal(formatAmount(raw), display);
+    assert.equal(rawAmount(display), raw);
+  }
+  assert.equal(currencyCode('CNY'), 'RMB');
+});
+test('product name sort compares account, then category, then product name', () => {
+  const { sortedProducts } = require('../src/pages/MonthlyReview/sorting.ts');
+  const rows = [
+    { account: 'B', category: 'A', name: 'A' },
+    { account: 'A', category: 'B', name: 'A' },
+    { account: 'A', category: 'A', name: 'B' },
+    { account: 'A', category: 'A', name: 'A' },
+  ];
+  assert.deepEqual(sortedProducts(rows, {}, { field: 'name', direction: 'asc' }), [...rows].reverse());
+  assert.deepEqual(sortedProducts(rows, {}, { field: 'name', direction: 'desc' }), rows);
+});
+test('product numeric display uses two decimals without changing raw precision', () => {
+  const { formatFixedAmount } = require('../src/pages/MonthlyReview/amount.ts');
+  assert.equal(formatFixedAmount('1234'), '1,234.00');
+  assert.equal(formatFixedAmount('-1234.5'), '-1,234.50');
+  assert.equal(formatFixedAmount('1.236'), '1.24');
+  assert.equal(formatFixedAmount('0'), '0.00');
+  assert.equal(formatFixedAmount(''), '');
+  assert.equal(formatFixedAmount('invalid'), 'invalid');
+});
+test('gain totals add each currency independently and retain valid gains alongside missing results', () => {
+  const { sumAvailableAmounts } = require('../src/pages/MonthlyReview/totals.ts');
+  const rows = [
+    { currency: 'RMB', gain: 100.1 }, { currency: 'USD', gain: 12.2 },
+    { currency: 'RMB', gain: -20.2 }, { currency: 'RMB', gain: 'N/A' },
+    { currency: 'USD', gain: 0 }, { currency: 'HKD', gain: -3.3 },
+  ];
+  const total = code => sumAvailableAmounts(rows.filter(row => row.currency === code).map(row => row.gain));
+  assert.equal(total('RMB'), 79.9);
+  assert.equal(total('USD'), 12.2);
+  assert.equal(total('HKD'), -3.3);
+  assert.equal(sumAvailableAmounts([0, null, 'N/A']), 0);
+  assert.equal(sumAvailableAmounts([null, 'N/A', NaN, Infinity]), null);
+});

@@ -82,3 +82,15 @@
 
 .mr-product-flow[disabled] { opacity: .55; }
 .mr-product-flow[disabled] input, .mr-product-flow[disabled] label { cursor: default; }
+
+.mr-note-field { grid-column: 1 / -1; }
+.mr-note-field textarea { width: 100%; min-height: 130px; padding: 10px; border: 1px solid #dce3ed; border-radius: 6px; resize: vertical; font: inherit; }
+.mr-amount-field { display: flex; align-items: center; gap: 8px; }
+.mr-amount-field input { min-width: 0; flex: 1; }
+.mr-note-cell { white-space: pre-wrap; min-width: 240px; max-width: 420px; overflow-wrap: anywhere; }
+.mr-assets-table tfoot { background: #f3f6fb; font-weight: 600; }
+.mr-assets-table tfoot td, .mr-assets-table tfoot th { padding: 14px 12px; white-space: nowrap; }
+.mr-currency-prefix { margin-right: 6px; }
+
+.mr-assets-table td.mr-gain-positive { color: #16845b; }
+.mr-assets-table td.mr-gain-negative { color: #d14343; }

@@ -1,3 +1,4 @@
+import { formatAmount, rawAmount } from './amount';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Dialog } from '@alifd/next';
 import { MonthlyWorkbook } from './workbook';
@@ -35,11 +36,11 @@ export default function AssetGroupDialog({ visible, busy, book, error, categoryN
       onSave({ member: value('member'), currency, category, account: value('account'), name: form.name, balance: form.balance.trim() === '' ? NaN : Number(form.balance), rate: needsRate ? Number(form.rate) : undefined });
     }}><div className="mr-grid">
       {choice('成员', 'member', '新成员名称')}{choice('币种', 'currency', '新币种代码')}
-      {needsRate && <label className="mr-field"><span>{currency} → RMB</span><input aria-label="新币种兑人民币汇率" required disabled={busy} type="number" min="0.00000001" step="any" value={form.rate} onFocus={selectAll} onClick={selectAll} onChange={e => update('rate', e.target.value)} /></label>}
+      {needsRate && <label className="mr-field"><span>{currency} → RMB</span><input aria-label="新币种兑人民币汇率" required disabled={busy} type="text" inputMode="decimal" min="0.00000001" step="any" value={form.rate} onFocus={selectAll} onClick={selectAll} onChange={e => update('rate', e.target.value)} /></label>}
       {choice('账户', 'account', '新账户名称')}{choice('产品类型', 'category', '新产品类型')}
       <label className="mr-field"><span>产品名称（留空使用账户名）</span><input aria-label="分组产品名称" disabled={busy} value={form.name} placeholder={value('account') || '默认使用账户名'} onChange={e => update('name', e.target.value)} /></label>
-      <label className="mr-field"><span>上期余额</span><input aria-label="分组上期余额" readOnly value="0" /></label>
-      <label className="mr-field"><span>本期余额</span><input aria-label="分组本期余额" required disabled={busy} type="number" min="0" step="any" value={form.balance} onFocus={selectAll} onClick={selectAll} onChange={e => update('balance', e.target.value)} /></label>
+      <label className="mr-field"><span>上期余额</span><span>{currency}</span><input aria-label="分组上期余额" readOnly value="0" /></label>
+      <label className="mr-field"><span>本期余额</span><span>{currency}</span><input aria-label="分组本期余额" required disabled={busy} type="text" inputMode="decimal" min="0" step="any" value={formatAmount(form.balance)} onFocus={selectAll} onClick={selectAll} onChange={e => update('balance', rawAmount(e.target.value))} /></label>
     </div><p className="mr-footnote">上期余额固定为 0，初始净投入按本期余额建立。保存后可继续编辑净投入及买卖记录。新成员会增加资产与 XIRR 工作表，新币种按原样式增加分区，并参与家庭资产合计。</p>
     <div className="mr-actions"><button type="button" disabled={busy} onClick={onClose}>取消</button><button className="primary" disabled={busy || !book}>创建分组与资产</button></div></form>
   </Dialog>;

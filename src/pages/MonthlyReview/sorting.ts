@@ -16,7 +16,7 @@ export function sortedProducts(products: Product[], book: MonthlyWorkbook, sort:
   };
   return products.map((product, index) => ({ product, index, value: value(product) })).sort((a, b) => {
     let compare: number;
-    if (sort.field === 'name') compare = String(a.value).localeCompare(String(b.value), 'zh-CN', { numeric: true });
+    if (sort.field === 'name') compare = ['account', 'category', 'name'].reduce((result, field) => result || String(a.product[field]).localeCompare(String(b.product[field]), 'zh-CN', { numeric: true }), 0);
     else {
       const validA = typeof a.value === 'number' && Number.isFinite(a.value), validB = typeof b.value === 'number' && Number.isFinite(b.value);
       if (!validA || !validB) return validA ? -1 : validB ? 1 : a.index - b.index;
