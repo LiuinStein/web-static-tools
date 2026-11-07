@@ -611,3 +611,46 @@ test('settings modification marks persist only in local review metadata', async 
   assert.deepEqual(MonthlyBatch.restore(reopened).reviewState().settingsChanged, []);
   assert.deepEqual(batch.apply(next => next.addProduct(book.products()[0], 'New settings test product', 'New account')).reviewState().settingsChanged, state.settingsChanged);
 });
+
+test('performance benchmarks apply four exact boundary bands only to the selected metric', () => {
+  const { benchmarkRating, parseBenchmarks } = require('../src/pages/MonthlyReview/benchmarks.ts');
+  const config = parseBenchmarks(null);
+  const band = value => benchmarkRating(config, 'Stock', 'xirr', value).className;
+  assert.equal(band(0.2), 'mr-performance-high');
+  assert.equal(band(0.19999), 'mr-performance-middle');
+  assert.equal(band(0.1), 'mr-performance-middle');
+  assert.equal(band(0.09999), 'mr-performance-low');
+  assert.equal(band(0.05), 'mr-performance-low');
+  assert.equal(band(0.04999), 'mr-performance-below');
+  assert.equal(band(0), 'mr-performance-below');
+  assert.equal(band(-0.1), 'mr-performance-below');
+  for (const value of [null, '', 'N/A', '#NUM!', NaN, Infinity]) assert.equal(band(value), undefined);
+  assert.equal(benchmarkRating(config, 'Stock', 'twr', 0.2).className, undefined);
+  const switched = { ...config, Stock: { ...config.Stock, metric: 'twr' } };
+  assert.equal(benchmarkRating(switched, 'Stock', 'xirr', 0.2).className, undefined);
+  assert.equal(benchmarkRating(switched, 'Stock', 'twr', 0.2).className, 'mr-performance-high');
+  assert.equal(benchmarkRating(undefined, 'Stock', 'xirr', 0.2).className, undefined);
+});
+
+test('benchmark defaults, disabled types, custom categories and persisted configuration are validated', () => {
+  const { benchmarkFor, benchmarkRating, parseBenchmarks, validBenchmark } = require('../src/pages/MonthlyReview/benchmarks.ts');
+  const config = parseBenchmarks(null);
+  assert.deepEqual(config['Debt Fund'], { metric: 'xirr', high: 5, middle: 3, low: 2 });
+  for (const category of ['Stock', 'Equity Fund']) assert.deepEqual(config[category], { metric: 'xirr', high: 20, middle: 10, low: 5 });
+  for (const category of ['Time Deposit', 'Current Account', 'Monetary Fund', 'Custom']) {
+    assert.equal(benchmarkFor(config, category).metric, 'none');
+    assert.equal(benchmarkRating(config, category, 'xirr', 1).className, undefined);
+  }
+  assert.equal(benchmarkRating(config, 'Debt Fund', 'xirr', 0.03).className, 'mr-performance-middle');
+  const saved = parseBenchmarks(JSON.stringify({ Stock: { metric: 'none', high: 20, middle: 10, low: 5 }, 'Debt Fund': { metric: 'twr', high: 4.5, middle: 3.25, low: -1 } }));
+  assert.equal(saved.Stock.metric, 'none');
+  assert.equal(benchmarkRating(saved, 'Debt Fund', 'twr', -0.01).className, 'mr-performance-low');
+  assert.equal(parseBenchmarks('bad json').Stock.high, 20);
+  for (const rule of [
+    { metric: 'xirr', high: 10, middle: 10, low: 5 },
+    { metric: 'xirr', high: 5, middle: 10, low: 2 },
+    { metric: 'both', high: 20, middle: 10, low: 5 },
+    { metric: 'xirr', high: '20', middle: 10, low: 5 },
+    { metric: 'xirr', high: Infinity, middle: 10, low: 5 },
+  ]) assert.equal(validBenchmark(rule), false);
+});

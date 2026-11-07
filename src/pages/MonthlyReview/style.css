@@ -106,3 +106,16 @@
 .mr-setting-modified { margin-left: 8px; font-size: 11px; font-weight: 400; color: #3577eb; }
 .mr-rate-up { color: #16845b; }
 .mr-rate-down { color: #d14343; }
+
+.mr-benchmark-metrics { display: flex; gap: 14px; flex-wrap: wrap; min-width: 220px; }
+.mr-benchmark-metrics label { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.mr-benchmark-dialog .mr-benchmark-metrics input[type=radio] { min-width: auto; width: auto; margin: 0; padding: 0; }
+.mr-benchmark-percent { display: flex; align-items: center; gap: 6px; min-width: 100px; }
+.mr-benchmark-dialog .mr-benchmark-percent input { min-width: 70px; width: 85px; }
+.mr-benchmark-percent input:disabled { background: #f5f7fa; color: #98a3b3; }
+.mr-benchmark-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; font-size: 12px; }
+.mr-benchmark-legend span { padding: 6px 10px; border-radius: 4px; }
+.mr-performance-high { background: #e3f4e8; color: #13763b; }
+.mr-performance-middle { background: #f0f8e7; color: #568c28; }
+.mr-performance-low { background: #fff7d6; color: #986b00; }
+.mr-performance-below { background: #ffeded; color: #c53737; }

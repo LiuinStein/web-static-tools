@@ -1,3 +1,4 @@
+import { Benchmarks, benchmarkRating } from './benchmarks';
 import type { ReviewState } from './storage';
 import AmountInput from './AmountInput';
 import { sumAvailableAmounts } from './totals';
@@ -16,13 +17,14 @@ const gainClass = (value: Scalar) => typeof value === 'number' && value > 0 ? 'm
 const selectAmount = (event: React.SyntheticEvent<HTMLInputElement>) => event.currentTarget.select();
 
 interface Props {
+  benchmarks?: Benchmarks;
   reviewState?: ReviewState;
   notes?: boolean; book: MonthlyWorkbook; products: Product[]; batch: MonthlyBatch | null; busy: boolean;
   categoryNames: Record<string, string>; money: (n: Scalar) => string; pct: (n: Scalar) => string;
   onBatch: (batch: MonthlyBatch) => void; onError: (message: string) => void;
   onEdit: (p: Product) => void; onTransactions: (p: Product) => void; onDelete: (p: Product) => void;
 }
-export default function AssetsTable({ reviewState, notes = false, book, products, batch, busy, categoryNames, money, pct, onBatch, onError, onEdit, onTransactions, onDelete }: Props) {
+export default function AssetsTable({ benchmarks, reviewState, notes = false, book, products, batch, busy, categoryNames, money, pct, onBatch, onError, onEdit, onTransactions, onDelete }: Props) {
   const table = useRef<HTMLDivElement>(null);
   const reviewOnBlur = useRef<string | null>(null);
   const allProducts = useMemo(() => book.products(), [book]);
@@ -79,7 +81,7 @@ export default function AssetsTable({ reviewState, notes = false, book, products
       <td><strong className="mr-product-name"><span>{displayValue(p.name)}</span>{(batch || reviewState) && <span className={`mr-change-tag ${(batch ? batch.reviewed.has(key) : reviewState?.reviewed.includes(key)) ? 'reviewed' : ''}`}>{(batch ? batch.reviewed.has(key) : reviewState?.reviewed.includes(key)) ? '已核对' : changed.has(key) ? '已修改' : ''}</span>}</strong><small>{displayValue(p.account)} · {displayValue(categoryNames[p.category] || p.category)}</small></td>
       <td>{displayValue(p.member)}<small>{displayValue(p.currency)}</small></td>
       <td>{currencyMoney(p, p.previous)}</td>
-      <td className={gainClass(value(p, 'J'))}>{money(value(p, 'J'))}</td><td title={displayValue(value(p, 'K'))}>{pct(value(p, 'K'))}</td><td>{pct(value(p, 'L'))}</td>
+      <td className={gainClass(value(p, 'J'))}>{money(value(p, 'J'))}</td><td {...benchmarkRating(benchmarks, p.category, 'xirr', value(p, 'K'))} title={benchmarkRating(benchmarks, p.category, 'xirr', value(p, 'K')).title || displayValue(value(p, 'K'))}>{pct(value(p, 'K'))}</td><td {...benchmarkRating(benchmarks, p.category, 'twr', value(p, 'L'))}>{pct(value(p, 'L'))}</td>
       {!notes && <td><div className="mr-row-actions"><button disabled={busy} onClick={() => onEdit(p)}>编辑</button><button disabled={busy} onClick={() => onTransactions(p)}>买卖记录</button><button className="danger" disabled={busy} onClick={() => onDelete(p)}>删除</button></div></td>}
       <td>{batch ? <><AmountInput onFocus={selectAmount} onClick={selectAmount} data-flow-input={key} tabIndex={-1} aria-label={`${p.name} 净投入`} aria-invalid={badFlow} aria-describedby={badFlow ? `flow-error-${key}` : undefined} type="text" inputMode="decimal" autoComplete="off" readOnly={isCashAccount(p.category)} title={isCashAccount(p.category) ? '活期账户净投入 = 本期余额 − 上期余额，自动计算' : '投入为正，回款为负；保存买卖记录后会按流水重新汇总'} value={(batch.flows.get(key) ?? (typeof p.flow === 'number' ? String(p.flow) : ''))} placeholder={typeof p.flow === 'string' ? displayValue(p.flow) : '0'} disabled={busy} onChange={e => { if (!isCashAccount(p.category)) onBatch(batch.stageFlows([[key, rawAmount(e.target.value)]])); }} onBlur={() => finishInput(key)} onKeyDown={e => move(e, key)} />{badFlow && <small id={`flow-error-${key}`} className="mr-input-error">请输入有效的净投入金额</small>}</> : money(p.flow)}</td>
       <td>{batch ? <><span className="mr-currency-prefix">{currencyCode(p.currency)}</span><AmountInput onFocus={selectAmount} onClick={selectAmount} data-balance-input={key} aria-label={`${p.name} 本期余额`} aria-invalid={bad} aria-describedby={bad ? `balance-error-${key}` : undefined} type="text" inputMode="decimal" autoComplete="off" value={(batch.inputs.get(key) ?? String(p.balance))} disabled={busy} onChange={e => onBatch(batch.stageBalances([[key, rawAmount(e.target.value)]]))} onBlur={() => finishInput(key)} onKeyDown={e => move(e, key)} onPaste={e => {
