@@ -32,12 +32,26 @@ export function parseBenchmarks(text: string | null): Benchmarks {
   } catch { /* Fall back to defaults when local configuration is unreadable. */ }
   return result;
 }
-export function benchmarkRating(config: Benchmarks | undefined, category: string, metric: 'xirr' | 'twr', value: unknown): { className?: string; title?: string } {
-  if (!config || typeof value !== 'number' || !Number.isFinite(value)) return {};
+export const BENCHMARK_BANDS = ['high', 'middle', 'low', 'below'] as const;
+export type BenchmarkBand = typeof BENCHMARK_BANDS[number];
+export function benchmarkIntervalLabel(band: BenchmarkBand, metric = 'XIRR（或年化 TWR）'): string {
+  return { high: metric + ' ≥ 高档', middle: '中档 ≤ ' + metric + ' < 高档', low: '低档 ≤ ' + metric + ' < 中档', below: metric + '＜低档' }[band];
+}
+export function benchmarkBand(config: Benchmarks | undefined, category: string, metric: 'xirr' | 'twr', value: unknown): BenchmarkBand | undefined {
+  if (!config || typeof value !== 'number' || !Number.isFinite(value)) return undefined;
   const benchmark = benchmarkFor(config, category);
-  if (benchmark.metric !== metric) return {};
+  if (benchmark.metric !== metric) return undefined;
   const percentage = new Decimal(value).times(100);
-  const tier = percentage.greaterThanOrEqualTo(benchmark.high) ? 'high' : percentage.greaterThanOrEqualTo(benchmark.middle) ? 'middle' : percentage.greaterThanOrEqualTo(benchmark.low) ? 'low' : 'below';
-  const labels = { high: '达到高档', middle: '达到中档，低于高档', low: '达到低档，低于中档', below: '低于低档' };
-  return { className: 'mr-performance-' + tier, title: labels[tier] + '（高 ' + benchmark.high + '% / 中 ' + benchmark.middle + '% / 低 ' + benchmark.low + '%）' };
+  return percentage.greaterThanOrEqualTo(benchmark.high) ? 'high' : percentage.greaterThanOrEqualTo(benchmark.middle) ? 'middle' : percentage.greaterThanOrEqualTo(benchmark.low) ? 'low' : 'below';
+}
+export function matchesBenchmarkBand(config: Benchmarks, category: string, xirr: unknown, twr: unknown, band: BenchmarkBand | 'all'): boolean {
+  if (band === 'all') return true;
+  const rule = benchmarkFor(config, category);
+  return rule.metric !== 'none' && benchmarkBand(config, category, rule.metric, rule.metric === 'xirr' ? xirr : twr) === band;
+}
+export function benchmarkRating(config: Benchmarks | undefined, category: string, metric: 'xirr' | 'twr', value: unknown): { className?: string; title?: string } {
+  const tier = benchmarkBand(config, category, metric, value);
+  if (!tier || !config) return {};
+  const benchmark = benchmarkFor(config, category);
+  return { className: 'mr-performance-' + tier, title: benchmarkIntervalLabel(tier, metric === 'xirr' ? 'XIRR' : '年化 TWR') + '（高档 ' + benchmark.high + '% / 中档 ' + benchmark.middle + '% / 低档 ' + benchmark.low + '%）' };
 }

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Dialog } from '@alifd/next';
 import AmountInput from './AmountInput';
 import { rawAmount } from './amount';
-import { BenchmarkMetric, Benchmarks, benchmarkFor, validBenchmark } from './benchmarks';
+import { BenchmarkMetric, Benchmarks, benchmarkFor, validBenchmark, BENCHMARK_BANDS, benchmarkIntervalLabel } from './benchmarks';
 interface Props { visible: boolean; categories: string[]; categoryNames: Record<string, string>; config: Benchmarks; onClose: () => void; onSave: (config: Benchmarks) => void; }
 interface Entry { metric: BenchmarkMetric; high: string; middle: string; low: string; }
 export default function BenchmarkDialog({ visible, categories, categoryNames, config, onClose, onSave }: Props) {
@@ -39,7 +39,7 @@ export default function BenchmarkDialog({ visible, categories, categoryNames, co
         const name = categoryNames[category] || category;
         return <tr key={category}><th scope="row">{name}</th><td><div className="mr-benchmark-metrics" role="radiogroup" aria-label={name + ' 业绩基准指标'}>{([['none', '不配置'], ['xirr', 'XIRR'], ['twr', '年化 TWR']] as const).map(([metric, label]) => <label key={metric}><input type="radio" name={'benchmark-' + category} value={metric} checked={entry.metric === metric} onChange={() => update(category, { metric })} />{label}</label>)}</div></td>{(['high', 'middle', 'low'] as const).map((tier, index) => <td key={tier}><div className="mr-benchmark-percent"><AmountInput aria-label={name + ' ' + ['高档', '中档', '低档'][index] + '百分比'} disabled={entry.metric === 'none'} value={entry.metric === 'none' ? '' : entry[tier]} placeholder="—" onFocus={event => event.currentTarget.select()} onChange={event => update(category, { [tier]: rawAmount(event.target.value) })} /><span>%</span></div></td>)}</tr>;
       })}</tbody></table></div>
-      <div className="mr-benchmark-legend"><span className="mr-performance-high">≥ 高档</span><span className="mr-performance-middle">≥ 中档且 ＜ 高档</span><span className="mr-performance-low">≥ 低档且 ＜ 中档</span><span className="mr-performance-below">＜ 低档</span></div>
+      <div className="mr-benchmark-legend">{BENCHMARK_BANDS.map(band => <span key={band} className={'mr-performance-' + band}>{benchmarkIntervalLabel(band)}</span>)}</div>
       <p>配置保存在当前浏览器，应用于资产表对应的收益率列；缺失或待核实的收益率不着色。</p>
       <div className="mr-actions"><button type="button" onClick={onClose}>取消</button><button className="primary" type="submit">保存并生效</button></div>
     </form>

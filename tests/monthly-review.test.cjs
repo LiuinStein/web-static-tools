@@ -812,3 +812,37 @@ test('one-time payoff dates validate, parse legacy dates and preserve numeric Ex
   assert.equal(encodeRepayment({ ...repaymentForm(saved.repayment), mode: 'recurring', day: '22', months: '2' }), '22nd Day Every 2 Months');
   assert.equal(encodeRepayment({ ...repaymentForm(saved.repayment), mode: 'none' }), '');
 });
+
+test('performance band filter uses each type and selected metric with consistent inclusive boundaries', () => {
+  const { parseBenchmarks, matchesBenchmarkBand } = require('../src/pages/MonthlyReview/benchmarks.ts');
+  const config = parseBenchmarks(null);
+  config['Equity Fund'] = { metric: 'twr', high: 20, middle: 10, low: 5 };
+  const rows = [
+    ['stock-high', 'Stock', 0.2, -0.2],
+    ['stock-middle', 'Stock', 0.1, 0.9],
+    ['stock-low', 'Stock', 0.05, 0.9],
+    ['stock-below', 'Stock', 0.04999, 0.9],
+    ['bond-high', 'Debt Fund', 0.15, null],
+    ['twr-middle', 'Equity Fund', 0.9, 0.1],
+    ['unconfigured', 'Time Deposit', 0.9, 0.9],
+    ['missing', 'Stock', 'N/A', 0.9],
+    ['invalid', 'Stock', NaN, 0.9],
+  ];
+  const match = band => rows.filter(([, category, xirr, twr]) => matchesBenchmarkBand(config, category, xirr, twr, band)).map(row => row[0]);
+  assert.deepEqual(match('high'), ['stock-high', 'bond-high']);
+  assert.deepEqual(match('middle'), ['stock-middle', 'twr-middle']);
+  assert.deepEqual(match('low'), ['stock-low']);
+  assert.deepEqual(match('below'), ['stock-below']);
+  assert.equal(match('all').length, rows.length);
+  assert.equal(matchesBenchmarkBand({ ...config, Stock: { ...config.Stock, metric: 'none' } }, 'Stock', 0.9, 0.9, 'high'), false);
+});
+
+test('benchmark dropdown, legend and cell tooltip share inequality interval descriptions', () => {
+  const { benchmarkIntervalLabel, benchmarkRating, parseBenchmarks } = require('../src/pages/MonthlyReview/benchmarks.ts');
+  assert.equal(benchmarkIntervalLabel('high', 'XIRR'), 'XIRR ≥ 高档');
+  assert.equal(benchmarkIntervalLabel('middle', 'XIRR'), '中档 ≤ XIRR < 高档');
+  assert.equal(benchmarkIntervalLabel('low', '年化 TWR'), '低档 ≤ 年化 TWR < 中档');
+  assert.equal(benchmarkIntervalLabel('below', 'XIRR'), 'XIRR＜低档');
+  assert.equal(benchmarkIntervalLabel('low'), '低档 ≤ XIRR（或年化 TWR） < 中档');
+  assert.ok(benchmarkRating(parseBenchmarks(null), 'Stock', 'xirr', 0.05).title.startsWith('低档 ≤ XIRR < 中档'));
+});
