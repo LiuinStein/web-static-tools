@@ -5,6 +5,7 @@ import { repaymentForm, encodeRepayment } from './repayment';
 import BenchmarkDialog from './BenchmarkDialog';
 import { Benchmarks, BENCHMARK_STORAGE_KEY, DEFAULT_BENCHMARKS, parseBenchmarks, BenchmarkBand, BENCHMARK_BANDS, benchmarkFor, benchmarkIntervalLabel, matchesBenchmarkBand } from './benchmarks';
 import AmountInput from './AmountInput';
+import { ReviewAccount, reviewAccounts, nextReviewAccount } from './account-navigation';
 import { linkedOptions } from './filters';
 import { rawAmount, currencyCode } from './amount';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -84,7 +85,9 @@ export default function MonthlyReview() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [modal, setModal] = useState<null | 'product' | 'transactions' | 'newMonth' | 'liability' | 'cancelBatch' | 'group'>(null);
+  const [modal, setModal] = useState<null | 'product' | 'transactions' | 'newMonth' | 'liability' | 'cancelBatch' | 'group' | 'nextMember' | 'accountsComplete' | 'unreviewedAccount'>(null);
+  const [pendingAccount, setPendingAccount] = useState<ReviewAccount | null>(null);
+  const [unreviewedCount, setUnreviewedCount] = useState(0);
   const [selectedLiability, setSelectedLiability] = useState<Liability | null>(null);
   const [liabilityForm, setLiabilityForm] = useState({ account: '', balance: '', repayment: repaymentForm(null) });
   const [selected, setSelected] = useState<Product | null>(null);
@@ -98,6 +101,7 @@ export default function MonthlyReview() {
   const [extraRates, setExtraRates] = useState<Record<string, string>>({});
   const [finance, setFinance] = useState({ date: '', usd: '', hkd: '', salary: '', wthSalary: '' });
   const input = useRef<HTMLInputElement>(null);
+  const nextAccountButton = useRef<HTMLButtonElement>(null);
   const lock = useRef(false);
   const mounted = useRef(true);
   const backgroundRevision = useRef(0);
@@ -159,7 +163,7 @@ export default function MonthlyReview() {
     return () => window.removeEventListener('beforeunload', warn);
   }, [batch?.dirty]);
   useEffect(() => {
-    if (modal !== 'cancelBatch') return;
+    if (!['cancelBatch', 'nextMember', 'accountsComplete', 'unreviewedAccount'].includes(modal || '')) return;
     const closeConfirmation = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.preventDefault(); event.stopPropagation(); setModal(null);
@@ -201,6 +205,32 @@ export default function MonthlyReview() {
   function startBatch(source = book, target = '资产') {
     if (!source) return;
     setBatch(MonthlyBatch.restore(source, source === book ? draft?.reviewState : undefined)); setOnlyUnchecked(false); setTab(target); setError(''); setNotice('');
+    selectReviewAccount(reviewAccounts(source.products())[0]);
+  }
+  function selectReviewAccount(account?: ReviewAccount) {
+    setMember(account?.member || '全部'); setAccountFilter(account?.account || '');
+    setCurrency('全部'); setCategoryFilter(''); setBenchmarkFilter('all'); setQuery('');
+  }
+  function advanceAccount() {
+    if (!batch) return;
+    const committed = batch.commitInputs();
+    setBatch(committed);
+    const currentKeys = new Set(filtered.map(productKey));
+    if (committed.invalid.some(key => currentKeys.has(key))) {
+      setError('当前账户有无效金额，请修正后再进入下个账户。'); return;
+    }
+    setError(''); setNotice('');
+    const unchecked = [...currentKeys].filter(key => !committed.reviewed.has(key));
+    setUnreviewedCount(unchecked.length);
+    const next = nextReviewAccount(reviewAccounts(committed.book.products()), { member, account: accountFilter });
+    setPendingAccount(next.target || null);
+    if (unchecked.length) { setModal('unreviewedAccount'); return; }
+    continueAccountNavigation(next.target || null);
+  }
+  function continueAccountNavigation(target: ReviewAccount | null) {
+    if (!target) { setModal('accountsComplete'); return; }
+    if (member !== '全部' && target.member !== member) { setModal('nextMember'); return; }
+    selectReviewAccount(target); setPendingAccount(null); setModal(null);
   }
   async function saveBatch() {
     if (!batch || !draft) return;
@@ -220,6 +250,8 @@ export default function MonthlyReview() {
     else discardBatch();
   }
   const products = useMemo(() => book?.products() || [], [book]);
+  const accountOrder = useMemo(() => reviewAccounts(products), [products]);
+  const accountPosition = accountOrder.findIndex(a => a.member === member && a.account === accountFilter);
   const liabilities = useMemo(() => book?.liabilities() || [], [book]);
   const previousDebtTotal = liabilities.reduce((total, row) => total.plus(row.previous), new Decimal(0)).toNumber();
   const reviewRows = tab === '负债' ? liabilities : tab === '资产' ? products : [...products, ...liabilities];
@@ -374,7 +406,7 @@ export default function MonthlyReview() {
         <LiquidityAnalysis book={book} products={products} invalidKeys={batch?.invalid || []} templateSummary={liquidity} categoryNames={categoryNames} onViewProduct={viewAssetProduct} />
       </>}
       {tab === '资产' && <section className="mr-panel"><div className="mr-section-heading"><div><h2>资产</h2><p>更新余额，管理产品与现金流。金额均以产品原币显示。</p></div><div className="mr-toolbar-group">{!batch && <button disabled={busy || !products.length} onClick={() => startBatch()}>批量记账</button>}<button disabled={busy} onClick={() => { setError(''); setModal('group'); }}>＋ 新增分组</button><button className="primary" disabled={busy} onClick={newProduct}>＋ 新增产品</button></div></div><div className="mr-filters"><input aria-label="搜索产品" placeholder="搜索产品、账户或备注" value={query} onChange={e => setQuery(e.target.value)} /><select aria-label="筛选成员" value={member} onChange={e => setMember(e.target.value)}><option value="全部">全部成员</option>{memberOptions.map(v => <option key={v} value={v}>{v}</option>)}</select><select aria-label="筛选币种" value={currency} onChange={e => setCurrency(e.target.value)}><option value="全部">全部币种</option>{currencyOptions.map(v => <option key={v} value={v}>{v}</option>)}</select><select aria-label="筛选账户" value={accountFilter} onChange={e => setAccountFilter(e.target.value)}><option value="">全部账户</option>{filterOptions.accounts.map(v => <option key={v} value={v}>{v}</option>)}</select><select aria-label="筛选产品类型" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}><option value="">全部产品类型</option>{categories.map(v => <option key={v} value={v}>{categoryNames[v] || v}</option>)}</select><select aria-label="筛选业绩基准区间" title="按各产品类型配置的指标和阈值筛选；未配置或收益率无效的产品不纳入区间" value={benchmarkFilter} onChange={event => setBenchmarkFilter(event.target.value as BenchmarkBand | 'all')}><option value="all">全部业绩基准区间</option>{BENCHMARK_BANDS.map(band => <option key={band} value={band}>{benchmarkIntervalLabel(band, filterMetricLabel)}</option>)}</select><button disabled={busy} onClick={() => setBenchmarkDialog(true)}>业绩基准</button></div>{batch && <div className="mr-batch-help"><p>金额输入在失去焦点后重算。直接填写本期余额，按 Tab / 回车核对并跳至下一行，Esc 退出连续录入；可从 Excel 粘贴一列余额，按当前可见顺序从所选行开始填入。可点击产品名称、余额或收益表头排序，录入时行顺序保持不变。活期账户净投入自动计算且不可编辑；其他产品净投入可直接填写，投入为正、回款为负，保存买卖记录后会按流水重算。上期余额只读，其他信息仍可通过「编辑」修改。</p><div className="mr-toolbar-group"><label><input type="checkbox" checked={onlyUnchecked} onChange={e => setOnlyUnchecked(e.target.checked)} />仅看未核对</label><button disabled={busy || !visibleProducts.length} onClick={() => setBatch(batch.check(visibleProducts.map(productKey), true))}>将当前可见项标为已核对</button><button disabled={busy || !batch.reviewed.size} onClick={() => setBatch(batch.check(products.map(productKey), false))}>清除核对标记</button></div></div>}
-        <AssetsTable benchmarks={benchmarks} reviewState={draft?.reviewState} book={book} products={visibleProducts} batch={batch} busy={busy} categoryNames={categoryNames} money={money} pct={pct} onBatch={next => { setBatch(next); setError(''); setNotice(''); }} onError={setError} onEdit={editProduct} onTransactions={p => { setSelected(p); setTransactions(p.block ? book.transactions(p.block) : []); setError(''); setModal('transactions'); }} onDelete={p => { if (window.confirm(`删除“${p.name}”及其关联交易？这会更新本期汇总，历史月份不受影响。清仓请记录卖出。`)) run(() => mutate(next => next.deleteProduct(p))); }} /></section>}
+        <AssetsTable onExitForward={() => nextAccountButton.current?.focus()} benchmarks={benchmarks} reviewState={draft?.reviewState} book={book} products={visibleProducts} batch={batch} busy={busy} categoryNames={categoryNames} money={money} pct={pct} onBatch={next => { setBatch(next); setError(''); setNotice(''); }} onError={setError} onEdit={editProduct} onTransactions={p => { setSelected(p); setTransactions(p.block ? book.transactions(p.block) : []); setError(''); setModal('transactions'); }} onDelete={p => { if (window.confirm(`删除“${p.name}”及其关联交易？这会更新本期汇总，历史月份不受影响。清仓请记录卖出。`)) run(() => mutate(next => next.deleteProduct(p))); }} />{batch && <div className="mr-account-navigation"><span aria-live="polite">{accountPosition >= 0 ? `${member} · ${accountFilter}（${accountPosition + 1} / ${accountOrder.length} 个账户）` : '选择账户后可依次记账'}</span><button className="primary" disabled={busy || !accountOrder.length} ref={nextAccountButton} onClick={advanceAccount}>下个账户</button></div>}</section>}
       {tab === '备注事项' && <section className="mr-panel"><h2>备注事项</h2><AssetsTable notes onSaveNote={saveNote} book={book} products={notedProducts} batch={null} busy={busy} categoryNames={categoryNames} money={money} pct={pct} onBatch={next => { setBatch(next); setError(''); setNotice(''); }} onError={setError} onEdit={editProduct} onTransactions={p => { setSelected(p); setTransactions(p.block ? book.transactions(p.block) : []); setError(''); setModal('transactions'); }} onDelete={p => { if (window.confirm(`删除“${p.name}”及其关联交易？这会更新本期汇总，历史月份不受影响。清仓请记录卖出。`)) run(() => mutate(next => next.deleteProduct(p))); }} /></section>}
       {tab === '负债' && <LiabilitiesTable onAdd={() => { setSelectedLiability(null); setLiabilityForm({ account: '', balance: '0', repayment: repaymentForm(null) }); setError(''); setModal('liability'); }} reviewState={draft?.reviewState} book={book} batch={batch} busy={busy} money={money} onStart={() => startBatch(book, '负债')} onBatch={next => { setBatch(next); setError(''); setNotice(''); }} onError={setError} onEdit={editLiability} onZero={row => {
         if (batch) { setBatch(batch.balances([[productKey(row), '0']])); setError(''); setNotice(''); }
@@ -436,6 +468,20 @@ export default function MonthlyReview() {
         <p className="mr-footnote">上期余额 RMB {money(selectedLiability?.previous ?? 0)} 元（只读）。按月还款可设置 1–31 日及月份间隔，保存为英文规则；一次性还清请选择具体日期，保存后可再次编辑。</p>
         <div className="mr-actions"><button type="button" disabled={busy} onClick={() => setModal(null)}>取消</button><button className="primary" disabled={busy}>{batch ? '应用到批量记账' : selectedLiability ? '保存负债' : '新增账户'}</button></div>
       </form>
+    </Dialog>
+    <Dialog visible={modal === 'unreviewedAccount'} title="仍有未核对项目" footer={false} onClose={() => setModal(null)} className="mr-dialog mr-record-dialog mr-review-warning-dialog">
+      <p role="alert">当前筛选结果仍有 {unreviewedCount} 项未核对。</p>
+      <p>{pendingAccount ? `是否继续切换到「${pendingAccount.member} · ${pendingAccount.account}」？` : '是否继续查看账户遍历完成提示？'}已输入的金额会保留，未核对项目将继续保持未核对状态。</p>
+      <div className="mr-actions"><button disabled={busy} onClick={() => setModal(null)}>返回核对</button><button className="primary" disabled={busy || !batch} onClick={() => continueAccountNavigation(pendingAccount)}>{pendingAccount ? '仍然进入下个账户' : '仍然继续'}</button></div>
+    </Dialog>
+    <Dialog visible={modal === 'nextMember'} title="跨成员提醒" footer={false} onClose={() => setModal(null)} className="mr-dialog mr-record-dialog">
+      <p>「{member}」的账户已到末尾，接下来进入「{pendingAccount?.member}」的账户进行记账。</p>
+      <p>确认后将切换到「{pendingAccount?.account}」，本次已输入的金额会继续保留。</p>
+      <div className="mr-actions"><button disabled={busy} onClick={() => setModal(null)}>暂不切换</button><button className="primary" disabled={busy || !batch || !pendingAccount} onClick={() => { if (pendingAccount) selectReviewAccount(pendingAccount); setPendingAccount(null); setModal(null); }}>确认，进入下个成员</button></div>
+    </Dialog>
+    <Dialog visible={modal === 'accountsComplete'} title="已到达最后一个账户" footer={false} onClose={() => setModal(null)} className="mr-dialog mr-record-dialog">
+      <p>已到达所有成员账户列表的末尾。你可以继续检查资产和负债，完成后点击「保存本机草稿」保存本次记账。</p>
+      <div className="mr-actions"><button className="primary" onClick={() => setModal(null)}>继续检查</button></div>
     </Dialog>
     <Dialog visible={modal === 'cancelBatch'} title="取消批量记账" footer={false} onClose={() => setModal(null)} className="mr-dialog">
       <p>确定取消本次批量记账的全部修改？已保存的本机草稿不受影响。</p>

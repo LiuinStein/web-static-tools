@@ -233,3 +233,10 @@
 .mr-return-median-group { margin: 16px 0; }
 .mr-return-median-group h3 { font-size: 14px; margin: 0 0 10px; }
 .mr-return-details .mr-return-median-group .mr-table-wrap { max-height: none; }
+
+.mr-account-navigation { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
+.mr-account-navigation > span { color: #778499; font-size: 12px; }
+
+/* Equal space above the title and between the title and the first paragraph. */
+.mr-review-warning-dialog .next-dialog-header { padding-top: 16px; }
+.mr-review-warning-dialog .next-dialog-close { top: 12px; }

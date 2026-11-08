@@ -1391,3 +1391,27 @@ test('new product defaults follow the filtered account across members and curren
   const unfiltered = productEntryDefaults(rows, groups, '');
   assert.equal(unfiltered.group.category, 'Debt Fund'); assert.equal(unfiltered.account, '人民币账户');
 });
+
+test('batch account navigation starts with 本人, groups currencies and advances across members with confirmation', () => {
+  const { reviewAccounts, nextReviewAccount } = require('../src/pages/MonthlyReview/account-navigation.ts');
+  const rows = [
+    { member: 'WTH', account: '共同账户' },
+    { member: '本人', account: '账户10' },
+    { member: '本人', account: '账户2' },
+    { member: '本人', account: '账户2' },
+    { member: '父母', account: '共同账户' },
+  ];
+  const accounts = reviewAccounts(rows);
+  assert.deepEqual(accounts.slice(0, 2), [{ member: '本人', account: '账户2' }, { member: '本人', account: '账户10' }]);
+  assert.equal(accounts.length, 4);
+  assert.deepEqual(nextReviewAccount(accounts, accounts[0]), { target: accounts[1], changesMember: false });
+  assert.deepEqual(nextReviewAccount(accounts, accounts[1]), { target: accounts[2], changesMember: true });
+  assert.deepEqual(nextReviewAccount(accounts, accounts[2]), { target: accounts[3], changesMember: true });
+  assert.deepEqual(nextReviewAccount(accounts, accounts[3]), { target: undefined, changesMember: false });
+  assert.equal(nextReviewAccount(accounts, { member: '本人', account: '' }).target, accounts[0]);
+  assert.equal(nextReviewAccount(accounts, { member: '全部', account: '' }).target, accounts[0]);
+  assert.equal(nextReviewAccount(accounts, { member: '本人', account: '已删除账户' }).target, accounts[0]);
+  assert.deepEqual(reviewAccounts([]), []);
+  assert.equal(nextReviewAccount([], { member: '全部', account: '' }).target, undefined);
+  assert.equal(reviewAccounts([{ member: '父母', account: '账户' }])[0].member, '父母');
+});

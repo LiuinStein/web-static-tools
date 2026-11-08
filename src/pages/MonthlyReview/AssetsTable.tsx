@@ -18,6 +18,7 @@ const gainClass = (value: Scalar) => typeof value === 'number' && value > 0 ? 'm
 const selectAmount = (event: React.SyntheticEvent<HTMLInputElement>) => event.currentTarget.select();
 
 interface Props {
+  onExitForward?: () => void;
   onSaveNote?: (p: Product, note: string) => Promise<void>;
   benchmarks?: Benchmarks;
   reviewState?: ReviewState;
@@ -26,7 +27,7 @@ interface Props {
   onBatch: (batch: MonthlyBatch) => void; onError: (message: string) => void;
   onEdit: (p: Product) => void; onTransactions: (p: Product) => void; onDelete: (p: Product) => void;
 }
-export default function AssetsTable({ onSaveNote, benchmarks, reviewState, notes = false, book, products, batch, busy, categoryNames, money, pct, onBatch, onError, onEdit, onTransactions, onDelete }: Props) {
+export default function AssetsTable({ onExitForward, onSaveNote, benchmarks, reviewState, notes = false, book, products, batch, busy, categoryNames, money, pct, onBatch, onError, onEdit, onTransactions, onDelete }: Props) {
   const table = useRef<HTMLDivElement>(null);
   const reviewOnBlur = useRef<string | null>(null);
   const allProducts = useMemo(() => book.products(), [book]);
@@ -67,6 +68,11 @@ export default function AssetsTable({ onSaveNote, benchmarks, reviewState, notes
     if (!inputs.length) return;
     event.preventDefault();
     const index = inputs.indexOf(event.currentTarget);
+    if (index === inputs.length - 1 && !event.shiftKey && onExitForward) {
+      reviewOnBlur.current = key;
+      onExitForward();
+      return;
+    }
     // Clicking a net-investment input does not add that column to the Tab sequence.
     const next = index < 0 ? inputs.find(input => input.dataset.balanceInput === key) : inputs[(index + (event.shiftKey ? -1 : 1) + inputs.length) % inputs.length];
     if (index >= 0) reviewOnBlur.current = key;
