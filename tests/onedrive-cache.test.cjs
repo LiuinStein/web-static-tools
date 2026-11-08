@@ -31,7 +31,7 @@ async function bytes(id = 'trade-a') {
 function transport(service, initial) {
   const state = { data: initial, eTag: 'v1', downloads: 0, metadata: 0, uploads: 0, beforeContent: undefined, mutateAfterContent: false };
   service.client = { api(endpoint) {
-    const q = { select() { return q; }, responseType() { return q; }, header() { return q; },
+    const q = { select() { return q; }, query() { return q; }, responseType() { return q; }, header() { return q; },
       async get() {
         await service.accessToken();
         if (endpoint.endsWith('/content')) {
@@ -76,7 +76,7 @@ test('a download finishing after account switch cannot poison the next account c
   state.beforeContent = undefined; state.data = await bytes('trade-b');
   assert.equal((await service.read())[0].id, 'trade-b');
 });
-test('monthly transport shares login, checks eTags, isolates bytes, and preserves publish conflicts', async () => {
+test('monthly transport shares login, checks eTags, isolates bytes, and invalidates upload caches', async () => {
   const f = await fixture(); const service = monthlyDrive(clientId, f.path); await service.restore();
   assert.equal(monthlyDrive(clientId, `/${f.path}/`), service);
   const state = transport(service, new Uint8Array([1, 2, 3]).buffer);
@@ -84,9 +84,9 @@ test('monthly transport shares login, checks eTags, isolates bytes, and preserve
   const first = await service.download(file); new Uint8Array(first.data)[0] = 99;
   assert.equal(new Uint8Array((await service.download(file)).data)[0], 1); assert.equal(state.downloads, 1);
   state.eTag = 'v2'; await service.download(file); assert.equal(state.downloads, 2);
-  await assert.rejects(service.publish(file.name, new Uint8Array(), file), /云端文件已修改/); assert.equal(state.uploads, 0);
-  await assert.rejects(service.publish(file.name, new Uint8Array(), { ...file, eTag: undefined }), /云端文件已修改/);
-  assert.equal(state.uploads, 0);
+  service.ensureFolder = async () => {};
+  await service.publish(file.name, new Uint8Array([4,5,6])); assert.equal(state.uploads,1);
+  assert.equal(service.downloads.size,0); assert.equal(service.fileList,undefined);
   state.mutateAfterContent = true;
   await assert.rejects(service.download(file), /文件在读取期间发生变化/);
 });

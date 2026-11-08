@@ -117,14 +117,27 @@ test('new product rows keep FX lookup, settings writes and next-period FX snapsh
   b.set('Assets', b.rateAddress('USD'), 7.1); b.rollover('2026-11-30');
   assert.equal(b.value('Assets', b.rateAddress('USD', true)), 7.1); assert.equal(b.value('Assets', b.rateAddress('HKD', true)), 0.9);
 });
-test('OneDrive rejects conflicts, creates without replacement and propagates failures', async () => {
+test('OneDrive publishes Blob bytes, replaces the same filename and propagates failures', async () => {
   assert.equal(normalizeFolder('/月度复盘/'), '月度复盘'); assert.throws(() => normalizeFolder('../private'));
-  const service = Object.create(MonthlyDrive.prototype); service.folder = '月度复盘';
-  service.client = { api: () => { const q = { select: () => q, get: async () => ({ eTag: 'new' }), put: async () => { throw new Error('must not upload'); } }; return q; } };
-  await assert.rejects(service.publish('2026-10.xlsx', new Uint8Array(), { id: 'id', eTag: 'old' }), /云端文件已修改/);
-  const headers = []; service.ensureFolder = async () => {};
-  service.client = { api: () => { const q = { query(v) { assert.equal(v['@microsoft.graph.conflictBehavior'], 'fail'); return q; }, header(k, v) { headers.push([k, v]); return q; }, async put() { throw new Error('upload denied'); } }; return q; } };
-  await assert.rejects(service.publish('2026-10.xlsx', new Uint8Array()), /upload denied/); assert.ok(headers.some(([k, v]) => k === 'If-None-Match' && v === '*'));
+  const service = Object.create(MonthlyDrive.prototype); service.folder = '月度复盘'; service.ensureFolder = async () => {};
+  const headers = [], uploads = [];
+  const { serializeContent } = require('@microsoft/microsoft-graph-client/lib/src/GraphRequestUtil.js');
+  service.client = { api(endpoint) {
+    assert.equal(endpoint, '/me/drive/root:/%E6%9C%88%E5%BA%A6%E5%A4%8D%E7%9B%98/2026-10.xlsx:/content');
+    const q = { query(v) { assert.equal(v['@microsoft.graph.conflictBehavior'], 'replace'); return q; }, header(k, v) { headers.push([k, v]); return q; }, async put(body) {
+      assert.ok(body instanceof Blob); assert.equal(serializeContent(body), body);
+      uploads.push([...new Uint8Array(await body.arrayBuffer())]);
+      return { id:'existing-file', name:'2026-10.xlsx', eTag:'v' + uploads.length };
+    } }; return q;
+  } };
+  const source = new Uint8Array([99,1,2,3,88]);
+  const first = await service.publish('2026-10.xlsx', source.subarray(1,4));
+  const second = await service.publish('2026-10.xlsx', new Uint8Array([4,5]));
+  assert.deepEqual(uploads, [[1,2,3],[4,5]]); assert.equal(first.id,second.id); assert.notEqual(first.eTag,second.eTag);
+  assert.ok(!headers.some(([k]) => k === 'If-None-Match' || k === 'If-Match'));
+  service.client = { api() { const q = { query() { return q; }, header() { return q; }, async put() { throw new Error('upload denied'); } }; return q; } };
+  await assert.rejects(service.publish('2026-10.xlsx', new Uint8Array()), /upload denied/);
+  await assert.rejects(service.publish('../private.xlsx', new Uint8Array()), /文件名无效/);
 });
 const template = process.env.MONTHLY_TEMPLATE;
 test('reference formula evaluator still matches Excel caches with original reference cash inputs', { skip: !template }, async () => {
@@ -216,7 +229,7 @@ test('batch retains full product editing, transaction edits and additions/deleti
   assert.ok(typeof session.book.value(p.sheet, `K${p.row}`) === 'number');
   const reviewed = session.check([key], true);
   session = reviewed.apply(next => next.addProduct(next.products()[0], '批量新增', '新增账户'));
-  assert.equal(session.book.products().length, 3); assert.equal(session.reviewed.size, 0);
+  assert.equal(session.book.products().length, 3); assert.equal(session.reviewed.size, 1);
   const originalProduct = session.book.products().find(x => x.name === '已修改名称'); assert.equal(originalProduct.balance, 1300);
   session = session.apply(next => next.deleteProduct(next.products().find(x => x.name === '批量新增')));
   const reopened = await MonthlyWorkbook.open(await session.book.export()); assert.equal(reopened.products()[0].name, '已修改名称'); assert.equal(reopened.products()[0].balance, 1300);
@@ -688,7 +701,7 @@ test('inline note edits preserve financial cells, support multiline clearing and
   const batch = new MonthlyBatch(original).check([key], true).apply(next => next.updateProductNote(product, note), key);
   assert.equal(original.products()[0].note, '');
   assert.equal(batch.book.products()[0].note, note);
-  assert.ok(!batch.reviewed.has(key));
+  assert.ok(batch.reviewed.has(key), 'note changes keep the product review mark');
   assert.ok(batch.changedKeys().has(key));
   assert.deepEqual(addresses.map(address => batch.book.cell(product.sheet, address)), before);
   const reopened = await MonthlyWorkbook.open(await batch.book.export());
@@ -1414,4 +1427,83 @@ test('batch account navigation starts with 本人, groups currencies and advance
   assert.deepEqual(reviewAccounts([]), []);
   assert.equal(nextReviewAccount([], { member: '全部', account: '' }).target, undefined);
   assert.equal(reviewAccounts([{ member: '父母', account: '账户' }])[0].member, '父母');
+});
+
+test('deleting the last account/category product removes orphan subtotals but keeps zero-balance details and supports adding again', async () => {
+  const b = await fixture();
+  b.set('Assets', 'C3', 'Account A'); b.set('Assets', 'D3', 'Product A');
+  b.set('Assets', 'H1', 9876);
+  for (const [row, values] of [
+    [6, { C: 'Account B', D: 'Zero balance product', E: 0, H: 0, I: 0 }],
+    [7, { C: 'Sub Total' }], [9, { B: 'Sub Total' }],
+    [11, { B: 'Stock', C: 'Account C', D: 'Stock product', E: 25, H: 20, I: 0 }],
+    [12, { C: 'Sub Total' }], [14, { B: 'Sub Total' }], [16, { A: 'Grand Total' }],
+  ]) for (const [col, value] of Object.entries(values)) b.set('Assets', col + row, value);
+  for (const [address, formula] of Object.entries({ E1:'E16', D1:'E16', E4:'SUM(E3)', E7:'SUM(E6)', E9:'SUM(E4,E7)', E12:'SUM(E11)', E14:'SUM(E12)', E16:'SUM(E9,E14)' })) b.formula('Assets', address, formula);
+  const summaries = () => [...b.sheet('Assets').cells.keys()].filter(a => /^[BC]\d+$/.test(a) && b.value('Assets', a) === 'Sub Total');
+  b.deleteProduct(b.products().find(p => p.name === 'Product A'));
+  assert.equal(summaries().length, 4, 'empty account subtotal is removed; zero-balance account subtotal remains');
+  assert.ok(b.products().some(p => p.name === 'Zero balance product' && p.balance === 0 && p.account === 'Account B'));
+  assert.equal(b.number('Assets','D1'),25); assert.equal(b.number('Assets','H1'),9876);
+  b.deleteProduct(b.products().find(p => p.name === 'Zero balance product'));
+  assert.equal(summaries().length, 2, 'empty category subtotal is removed with its last account');
+  assert.equal(b.products().find(p => p.name === 'Stock product').category, 'Stock');
+  assert.equal(b.number('Assets','D1'),25);
+  b.deleteProduct(b.products().find(p => p.name === 'Stock product'));
+  assert.equal(summaries().length, 0); assert.equal(b.number('Assets','D1'),0);
+  assert.equal(b.cleanupEmptySubtotals(),0, 'deletion leaves no legacy cleanup for export');
+  const group = productGroups(b).find(g => g.sheet === 'Assets' && g.currency === 'RMB' && g.category === 'Debt Fund');
+  createProductEntry(b, group.key, { name:'Recreated', account:'Account A', balance:10, flow:10, due:'', note:'' }, 'manual');
+  assert.equal(b.number('Assets','D1'),10);
+  const loaded = await MonthlyWorkbook.open(await b.export());
+  assert.equal(loaded.number('Assets','D1'),10); assert.equal(loaded.products().find(p => p.name === 'Recreated').balance,10);
+});
+
+test('export sets Liabilities and Analyze row heights to 16.5 without modifying source rows or styles', async () => {
+  const b = await fixture();
+  for (const name of ['Liabilities','Analyze']) {
+    const doc = b.sheet(name).doc;
+    for (const row of Array.from(doc.getElementsByTagName('row'))) { row.setAttribute('ht','9.4'); row.setAttribute('customHeight','1'); }
+  }
+  const output = await MonthlyWorkbook.open(await b.export());
+  for (const name of ['Liabilities','Analyze']) {
+    const doc = output.sheet(name).doc;
+    assert.equal(doc.getElementsByTagName('sheetFormatPr')[0].getAttribute('defaultRowHeight'),'16.5');
+    for (const row of Array.from(doc.getElementsByTagName('row'))) { assert.equal(row.getAttribute('ht'),'16.5'); assert.equal(row.getAttribute('customHeight'),'1'); }
+    for (const row of Array.from(b.sheet(name).doc.getElementsByTagName('row'))) assert.equal(row.getAttribute('ht'),'9.4');
+  }
+});
+
+test('saved review marks follow unchanged products across row insertion, deletion and restored drafts', async () => {
+  const source = await fixture();
+  source.set('Liabilities','D1',0);
+  source.addLiability({ account: 'Credit', balance: 100, repayment: '' });
+  const originalRows = [...source.products(), ...source.liabilities()];
+  const asset = source.products().find(p => p.sheet === 'Assets');
+  let session = new MonthlyBatch(source).check(originalRows.map(productKey), true).markSettings(['salary:本人']);
+  session = session.apply(next => next.addProduct(next.products().find(p => p.name === asset.name), 'New product', 'New account'));
+  assert.equal(session.reviewed.size, originalRows.length);
+  for (const row of originalRows) {
+    const current = row.sheet === 'Liabilities' ? session.book.liabilities().find(p => p.account === row.account) : session.book.products().find(p => p.sheet === row.sheet && p.name === row.name);
+    assert.ok(session.reviewed.has(productKey(current)));
+  }
+  const added = session.book.products().find(p => p.name === 'New product');
+  assert.ok(!session.reviewed.has(productKey(added)));
+  const state = session.reviewState(), reopened = await MonthlyWorkbook.open(await session.book.export());
+  session = MonthlyBatch.restore(reopened, state);
+  assert.equal(session.reviewed.size, originalRows.length);
+  assert.deepEqual(session.reviewState().settingsChanged, ['salary:本人']);
+  session = session.apply(next => next.deleteProduct(next.products().find(p => p.name === 'New product')));
+  assert.equal(session.reviewed.size, originalRows.length);
+  const originalAsset = session.book.products().find(p => p.name === asset.name);
+  const id = session.book.reviewIdentity(originalAsset);
+  session = session.apply(next => next.updateProduct(originalAsset, { ...originalAsset, name: 'Renamed product', account: 'Renamed account', note: 'Updated note' }), productKey(originalAsset));
+  const renamed = session.book.products().find(p => p.name === 'Renamed product');
+  assert.equal(session.book.reviewIdentity(renamed),id);
+  assert.ok(session.reviewed.has(productKey(renamed)), 'renaming preserves the same product review');
+  const nextAsset = session.book.products().find(p => p.name === 'Renamed product');
+  session = session.apply(next => next.updateProduct(nextAsset, { ...nextAsset, balance: nextAsset.balance + 1 }), productKey(nextAsset));
+  assert.equal(session.reviewed.size, originalRows.length - 1);
+  assert.ok(!session.reviewed.has(productKey(nextAsset)));
+  assert.ok(session.reviewed.has(productKey(session.book.products().find(p => p.sheet === 'WTH'))));
 });

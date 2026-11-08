@@ -10,6 +10,7 @@ const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const REL_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
 const DOCUMENT_REL_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const CONFIG_SHEET = '_MR_Config';
+let rowIdentitySequence = 0;
 const children = (node: any, name: string): any[] => Array.from(node.childNodes || []).filter((x: any) => x.localName === name);
 const first = (node: any, name: string): any => children(node, name)[0];
 const descendants = (node: any, name: string): any[] => Array.from(node.getElementsByTagNameNS('*', name));
@@ -45,11 +46,18 @@ export class MonthlyWorkbook {
   engine: FormulaEngine;
   private shared: string[] = [];
   private extras = new Map<string, any>();
+  private rowIds = new Map<string, string>();
+  reviewIdentity(row: Pick<Product, 'sheet' | 'row'>): string {
+    const key = `${row.sheet}:${row.row}`;
+    if (!this.rowIds.has(key)) this.rowIds.set(key, `row-${++rowIdentitySequence}`);
+    return this.rowIds.get(key)!;
+  }
   private constructor(private zip: JSZip) { this.engine = new FormulaEngine((s, a) => this.cell(s, a)); }
   clone(): MonthlyWorkbook {
     // The archive is immutable; edits and export use separate XML documents/archives.
     const next = new MonthlyWorkbook(this.zip);
     next.shared = [...this.shared];
+    next.rowIds = new Map(this.rowIds);
     next.sheets = this.sheets.map(s => ({ ...s, doc: s.doc.cloneNode(true), cells: new Map() }));
     next.extras = new Map([...this.extras].map(([path, doc]) => [path, doc.cloneNode(true)]));
     next.reindex(); next.engine = this.engine.fork((sheet, address) => next.cell(sheet, address)); return next;
@@ -432,6 +440,14 @@ export class MonthlyWorkbook {
       if (remove && r >= at && r < at + count) { data.removeChild(row); continue; }
       if (r >= at + (remove ? count : 0)) { const nr = r + (remove ? -count : count); row.setAttribute('r', String(nr)); for (const c of children(row, 'c')) c.setAttribute('r', c.getAttribute('r').replace(/\d+/, String(nr))); }
     }
+    const identities = [...this.rowIds].filter(([key]) => key.startsWith(sheet + ':'));
+    for (const [key] of identities) this.rowIds.delete(key);
+    for (const [key, id] of identities) {
+      const row = Number(key.slice(sheet.length + 1));
+      if (remove && row >= at && row < at + count) continue;
+      const next = row >= at + (remove ? count : 0) ? row + (remove ? -count : count) : row;
+      this.rowIds.set(`${sheet}:${next}`, id);
+    }
     for (const name of ['mergeCell', 'dimension', 'autoFilter', 'conditionalFormatting', 'dataValidation', 'hyperlink']) for (const n of descendants(s.doc, name)) {
       for (const attr of ['ref', 'sqref']) if (n.hasAttribute(attr)) { const ref = rewriteReferences(n.getAttribute(attr), sheet, sheet, at, count, remove); if (ref === '0') n.parentNode.removeChild(n); else n.setAttribute(attr, ref); }
     }
@@ -439,6 +455,44 @@ export class MonthlyWorkbook {
   }
   private copyStyle(sheet: string, sourceRow: number, targetRow: number, width: number) {
     for (let i = 1; i <= width; i++) { const c = this.sheet(sheet).cells.get(`${letters(i)}${sourceRow}`), target = this.node(sheet, `${letters(i)}${targetRow}`); if (c?.hasAttribute('s')) target.setAttribute('s', c.getAttribute('s')); }
+  }
+  cleanupEmptySubtotals(): number {
+    const products = this.products(); let removed = 0;
+    for (const { sheet } of this.members()) {
+      const productRows = new Set(products.filter(p => p.sheet === sheet).map(p => p.row));
+      const rows = children(descendants(this.sheet(sheet).doc, 'sheetData')[0], 'row');
+      const contentRows = new Set<number>();
+      for (const row of rows) if (children(row, 'c').some(c => {
+        const cell = this.cell(sheet, c.getAttribute('r'));
+        return cell?.formula || (cell?.value !== null && cell?.value !== undefined && cell?.value !== '');
+      })) contentRows.add(Number(row.getAttribute('r')));
+      const empty = new Set<number>(); let accountProducts = 0, categoryProducts = 0;
+      const last = Math.max(0, ...contentRows);
+      for (const row of rows) {
+        const r = Number(row.getAttribute('r')), a = this.value(sheet, `A${r}`);
+        if (a === 'Assets' || a === 'Grand Total') { accountProducts = 0; categoryProducts = 0; continue; }
+        if (productRows.has(r)) { accountProducts++; categoryProducts++; }
+        const accountTotal = this.value(sheet, `C${r}`) === 'Sub Total';
+        const categoryTotal = this.value(sheet, `B${r}`) === 'Sub Total';
+        if ((accountTotal && !accountProducts) || (categoryTotal && !categoryProducts)) {
+          // Preserve user notes and summaries of products whose balance happens to be zero.
+          if (!this.value(sheet, `N${r}`)) {
+            empty.add(r);
+            for (let blank = r + 1; blank < last && !contentRows.has(blank); blank++) empty.add(blank);
+          }
+        }
+        if (accountTotal) accountProducts = 0;
+        if (categoryTotal) { categoryProducts = 0; accountProducts = 0; }
+      }
+      // Remove bottom-up, using the same reference rewrite as product deletion.
+      const sorted = [...empty].sort((a, b) => b - a);
+      for (let i = 0; i < sorted.length;) {
+        const end = sorted[i]; let start = end; i++;
+        while (i < sorted.length && sorted[i] === start - 1) start = sorted[i++];
+        this.shiftRows(sheet, start, end - start + 1, true); removed += end - start + 1;
+      }
+    }
+    return removed;
   }
   addProductGroup(group: { sheet: string; currency: string; category: string }, name: string, account: string): Product {
     validateProductNames(name, account);
@@ -564,6 +618,7 @@ export class MonthlyWorkbook {
     if (next) { this.set(next.sheet, `B${next.row}`, next.sourceCategory || next.category); this.set(next.sheet, `C${next.row}`, next.account); }
     if (block) this.shiftRows(block.sheet, block.start, block.summary - block.start + 1, true);
     this.shiftRows(p.sheet, p.row, 1, true);
+    this.cleanupEmptySubtotals();
   }
   saveTransactions(p: Product, transactions: Transaction[]) {
     const endDate = this.number('Assets', 'L1');
@@ -615,6 +670,7 @@ export class MonthlyWorkbook {
     for (const { sheet: s } of this.members()) for (const a of this.sheet(s).cells.keys()) if (/^I\d+$/.test(a) && !this.cell(s, a)?.formula && typeof this.cell(s, a)?.value === 'number') this.set(s, a, 0);
     for (const currency of this.currencyCodes().filter(c => c !== 'RMB')) this.set('Assets', this.rateAddress(currency, true), this.value('Assets', this.rateAddress(currency)));
     this.set('Liabilities', 'F1', liabilities); this.set('Assets', 'N1', current); this.set('Assets', 'L1', next); this.set('Analyze', 'C5', 0); this.set('Analyze', 'I5', 0);
+    this.cleanupEmptySubtotals();
   }
   private cashAccountFlow(p: Product) {
     if (!isCashAccount(p.category)) return;
@@ -630,6 +686,12 @@ export class MonthlyWorkbook {
     const serializer = new XMLSerializer();
     for (const s of this.sheets) {
       const doc = parse(serializer.serializeToString(s.doc));
+      if (s.name === 'Liabilities' || s.name === 'Analyze') {
+        let format = descendants(doc, 'sheetFormatPr')[0];
+        if (!format) { format = this.element(doc, 'sheetFormatPr'); doc.documentElement.insertBefore(format, descendants(doc, 'cols')[0] || descendants(doc, 'sheetData')[0]); }
+        format.setAttribute('defaultRowHeight', '16.5');
+        for (const row of descendants(doc, 'row')) { row.setAttribute('ht', '16.5'); row.setAttribute('customHeight', '1'); }
+      }
       let dimension = descendants(doc, 'dimension')[0];
       if (!dimension) { dimension = this.element(doc, 'dimension'); const views = descendants(doc, 'sheetViews')[0] || descendants(doc, 'sheetFormatPr')[0] || descendants(doc, 'cols')[0] || descendants(doc, 'sheetData')[0]; doc.documentElement.insertBefore(dimension, views); }
       const addresses = [...s.cells.keys()];

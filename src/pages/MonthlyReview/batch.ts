@@ -105,16 +105,28 @@ export class MonthlyBatch {
   }
   apply(action: (next: MonthlyWorkbook) => void, touchedKey?: string): MonthlyBatch {
     if (this.invalid.length) throw new Error('请先修正表格中的无效余额或净投入，再编辑账户或买卖记录');
-    const next = this.commitInputs().book.clone(); action(next);
-    const before = this.book.products(), after = next.products();
-    const structural = before.length !== after.length || before.some((p, i) => productKey(p) !== productKey(after[i]));
-    const debtsBefore = this.book.liabilities(), debtsAfter = next.liabilities();
-    const debtsStructural = debtsBefore.some(p => !debtsAfter.some(row => productKey(row) === productKey(p) && row.account === p.account));
-    const keep = (key: string) => (!structural || key.startsWith('Liabilities:') || key.startsWith('__settings:')) && (!debtsStructural || !key.startsWith('Liabilities:'));
-    // Row insertion/deletion shifts Excel addresses; require a fresh review instead of reusing stale marks.
-    const reviewed = new Set([...this.reviewed].filter(keep));
-    const touched = new Set([...this.touched].filter(keep));
-    if (touchedKey && !structural && !debtsStructural) { touched.add(touchedKey); reviewed.delete(touchedKey); }
+    const current = this.commitInputs(), before = [...batchRows(current.book).values()];
+    // Identity follows the actual workbook row through insertions/deletions, never its name.
+    for (const row of before) current.book.reviewIdentity(row);
+    const next = current.book.clone(); action(next);
+    const after = new Map([...batchRows(next).values()].map(row => [next.reviewIdentity(row), row]));
+    const moved = new Map<string, string>();
+    for (const row of before) {
+      const match = after.get(current.book.reviewIdentity(row));
+      if (match) moved.set(productKey(row), productKey(match));
+    }
+    const remap = (keys: Set<string>) => new Set([...keys].map(key => key.startsWith('__settings:') ? key : moved.get(key)).filter((key): key is string => Boolean(key)));
+    const reviewed = remap(current.reviewed), touched = remap(current.touched);
+    for (const row of before) {
+      if (!current.reviewed.has(productKey(row))) continue;
+      const match = after.get(current.book.reviewIdentity(row));
+      if (!match) continue;
+      const amountsChanged = row.balance !== match.balance || row.previous !== match.previous ||
+        ('category' in row && 'category' in match ? row.flow !== match.flow : 'repayment' in row && 'repayment' in match && row.repayment !== match.repayment);
+      const trades = (book: MonthlyWorkbook, p: typeof row) => 'category' in p && p.block ? JSON.stringify(book.transactions(p.block).map(({ row: _row, ...trade }) => trade)) : '';
+      if (amountsChanged || trades(current.book, row) !== trades(next, match)) reviewed.delete(productKey(match));
+    }
+    if (touchedKey && moved.has(touchedKey)) touched.add(moved.get(touchedKey)!);
     return new MonthlyBatch(this.original, next, new Map(), reviewed, touched, true);
   }
   changedKeys(): Set<string> {

@@ -69,20 +69,18 @@ export class MonthlyDrive extends OneDriveConnection {
       if (!item.folder) throw new Error('目标路径包含同名文件'); parent = `/me/drive/items/${item.id}`;
     }
   }
-  async publish(name: string, data: Uint8Array, baseline?: DriveFile): Promise<DriveFile> {
-    return this.operation(true, () => this.publishFile(name, data, baseline));
+  async publish(name: string, data: Uint8Array): Promise<DriveFile> {
+    return this.operation(true, () => this.publishFile(name, data));
   }
-  private async publishFile(name: string, data: Uint8Array, baseline?: DriveFile): Promise<DriveFile> {
+  private async publishFile(name: string, data: Uint8Array): Promise<DriveFile> {
     if (!/^[^/\\:*?"<>|]+\.xlsx$/i.test(name)) throw new Error('文件名无效');
     this.fileList = undefined;
     this.downloads?.clear();
-    if (baseline) {
-      const current = await this.client.api(`/me/drive/items/${baseline.id}`).select('eTag').get();
-      if (!baseline.eTag || !current.eTag || current.eTag !== baseline.eTag) throw new Error('云端文件已修改。请先下载本机副本，再重新打开云端文件核对；本次未覆盖。');
-      return this.client.api(`/me/drive/items/${baseline.id}/content`).header('If-Match', baseline.eTag).header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').put(data);
-    }
     await this.ensureFolder();
-    return this.client.api(`${this.folderEndpoint()}/${encodeURIComponent(name)}:/content`).query({ '@microsoft.graph.conflictBehavior': 'fail' }).header('If-None-Match', '*').header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').put(data);
+    const type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    // The SDK converts typed arrays to Node Buffer; Blob passes through in browsers.
+    const content = new Blob([data as BlobPart], { type });
+    return this.client.api(`${this.folderEndpoint()}/${encodeURIComponent(name)}:/content`).query({ '@microsoft.graph.conflictBehavior': 'replace' }).header('Content-Type', type).put(content);
   }
 }
 
