@@ -1261,3 +1261,31 @@ test('liquidity maturity uses local today independently of workbook accounting d
   assert.equal(row.bucket, 'matured'); assert.equal(row.days, 0);
   assert.equal(liquidityBounds().asOf, serialDate(today));
 });
+
+test('monthly dialogs use CSS positioning from first paint and preserve cached mask closing', () => {
+  const extension = require.extensions['.tsx'];
+  require.extensions['.tsx'] = (m, f) => m._compile(ts.transpileModule(fs.readFileSync(f, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React, esModuleInterop: true } }).outputText, f);
+  try {
+    const MonthlyDialog = require('../src/pages/MonthlyReview/MonthlyDialog.tsx').default;
+    const DialogImpl = require('@alifd/next/lib/dialog/dialog').default;
+    const OverlayImpl = require('@alifd/next/lib/overlay/overlay').default;
+    let closed = 0;
+    const element = MonthlyDialog({ visible: true, title: '产品明细', className: 'mr-dialog', closeMode: ['close', 'mask', 'esc'], overlayProps: { cache: true, wrapperClassName: 'custom-overlay' }, onClose: () => { closed++; } });
+    assert.equal(element.props.animation, false);
+    assert.equal(element.props.overlayProps.cache, true);
+    assert.equal(element.props.overlayProps.wrapperClassName, 'mr-dialog-overlay custom-overlay');
+    const impl = new DialogImpl({ ...DialogImpl.defaultProps, ...element.props });
+    const overlay = impl.render();
+    assert.equal(overlay.props.align, false); // No JS measurement or repositioning.
+    assert.equal(overlay.props.onPosition, undefined);
+    assert.equal(overlay.props.isChildrenInMask, true);
+    assert.equal(overlay.props.canCloseByEsc, true);
+    const mask = {}, content = {};
+    OverlayImpl.prototype.handleMaskClick.call({ props: overlay.props }, { target: content, currentTarget: mask });
+    assert.equal(closed, 0);
+    OverlayImpl.prototype.handleMaskClick.call({ props: overlay.props }, { target: mask, currentTarget: mask });
+    assert.equal(closed, 1);
+  } finally {
+    if (extension) require.extensions['.tsx'] = extension; else delete require.extensions['.tsx'];
+  }
+});

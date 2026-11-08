@@ -207,3 +207,20 @@
 .mr-liquidity-details .mr-profit-negative { color: #d14343; }
 @media (max-width: 1000px) { .mr-liquidity-buckets { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 600px) { .mr-liquidity-buckets { grid-template-columns: 1fr; } }
+
+/* Center at first paint without measuring and moving an already visible dialog.
+   Auto margins center short dialogs and let tall dialogs scroll from the top. */
+.mr-dialog-overlay .next-dialog-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 14px;
+  overflow: auto;
+}
+.mr-dialog-overlay .next-dialog-container::before { display: none; }
+.mr-dialog-overlay .next-dialog-container .mr-dialog {
+  flex: none;
+  margin: auto;
+  max-width: 100%;
+  text-align: left;
+}

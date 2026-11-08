@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Dialog } from '@alifd/next';
+import Dialog from './MonthlyDialog';
 import AmountInput from './AmountInput';
 import { rawAmount } from './amount';
 import { BenchmarkMetric, Benchmarks, benchmarkFor, validBenchmark, BENCHMARK_BANDS, benchmarkIntervalLabel } from './benchmarks';

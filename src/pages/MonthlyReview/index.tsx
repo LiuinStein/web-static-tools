@@ -8,7 +8,7 @@ import AmountInput from './AmountInput';
 import { linkedOptions } from './filters';
 import { rawAmount, currencyCode } from './amount';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Dialog } from '@alifd/next';
+import Dialog from './MonthlyDialog';
 import { Prompt } from 'react-router-dom';
 import Decimal from 'decimal.js';
 import AssetsTable from './AssetsTable';

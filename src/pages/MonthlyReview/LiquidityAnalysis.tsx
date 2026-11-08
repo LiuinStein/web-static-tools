@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Dialog } from '@alifd/next';
+import Dialog from './MonthlyDialog';
 import type { MonthlyWorkbook, Product } from './workbook';
 import { isoDate } from './formula';
 import { currencyCode } from './amount';

@@ -1,4 +1,4 @@
-import { Dialog } from '@alifd/next';
+import Dialog from './MonthlyDialog';
 import { sumAvailableAmounts } from './totals';
 import React, { useEffect, useMemo, useState } from 'react';
 import type { MonthlyWorkbook, Product } from './workbook';

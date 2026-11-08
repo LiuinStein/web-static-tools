@@ -1,7 +1,7 @@
 import AmountInput from './AmountInput';
 import { rawAmount } from './amount';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Dialog } from '@alifd/next';
+import Dialog from './MonthlyDialog';
 import { MonthlyWorkbook } from './workbook';
 import { NewAssetGroupValues } from './product-entry';
 
