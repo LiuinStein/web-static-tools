@@ -1584,3 +1584,33 @@ test('asset labels merge repeated category/account cells through their detail gr
   for(const row of Array.from(loaded.sheet('WTH').doc.getElementsByTagName('row')))assert.equal(row.getAttribute('ht'),'16.5');
   assert.equal(loaded.sheet('WTH').doc.getElementsByTagName('sheetFormatPr')[0].getAttribute('defaultRowHeight'),'16.5');
 });
+
+test('merged cells are centered in both directions and cash regions contain the fixed export message', async () => {
+  const { DOMParser } = require('@xmldom/xmldom');
+  const book=await fixture();book.set('Assets','B3','Current Account');
+  for(const [col,value]of Object.entries({B:'Current Account',C:'示例账户',D:'Second cash',E:200,H:100}))book.set('Assets',col+'4',value);
+  book.set('Assets','C5','Sub Total');book.formula('Assets','E5','SUM(E3:E4)');book.formula('Assets','H5','SUM(H3:H4)');book.formula('Assets','I5','SUM(I3:I4)');book.formula('Assets','J5','SUM(J3:J4)');book.formula('Assets','D1','E5');book.formula('Assets','E1','E5');book.applyCashAccountRules();
+  book.set('WTH','B3','Monetary Fund');book.formula('WTH','I4','SUM(0)');book.applyCashAccountRules();
+  const flow=book.number('Assets','I3'),output=await book.export(),zip=await JSZip.loadAsync(output);
+  const parse=s=>new DOMParser().parseFromString(s,'application/xml');
+  const styles=parse(await zip.file('xl/styles.xml').async('string')),formats=Array.from(styles.getElementsByTagName('cellXfs')[0].childNodes).filter(n=>n.localName==='xf');
+  const originalZip=await JSZip.loadAsync(await book.zip.generateAsync({type:'uint8array'})),originalStyles=parse(await originalZip.file('xl/styles.xml').async('string'));
+  const originalFormats=Array.from(originalStyles.getElementsByTagName('cellXfs')[0].childNodes).filter(n=>n.localName==='xf');
+  for(let i=0;i<originalFormats.length;i++)assert.equal(formats[i].toString(),originalFormats[i].toString(),'unmerged-cell style definitions stay unchanged');
+  let assets;
+  for(const sheet of book.sheets){
+    const doc=parse(await zip.file(sheet.path).async('string')),cells=new Map(Array.from(doc.getElementsByTagName('c')).map(c=>[c.getAttribute('r'),c]));
+    for(const merge of Array.from(doc.getElementsByTagName('mergeCell'))){const cell=cells.get(merge.getAttribute('ref').split(':')[0]),alignment=formats[Number(cell.getAttribute('s')||0)].getElementsByTagName('alignment')[0];assert.equal(alignment.getAttribute('horizontal'),'center');assert.equal(alignment.getAttribute('vertical'),'center');}
+    if(sheet.name==='Assets')assets=doc;
+  }
+  const cells=new Map(Array.from(assets.getElementsByTagName('c')).map(c=>[c.getAttribute('r'),c])),merges=Array.from(assets.getElementsByTagName('mergeCell')).map(n=>n.getAttribute('ref'));
+  assert.ok(merges.includes('I3:M4'));assert.equal(cells.get('I3').getElementsByTagName('t')[0].textContent,'too many transactions to calculate');
+  for(let r=3;r<=4;r++)for(const col of ['I','J','K','L','M']){const cell=cells.get(col+r);if(cell)assert.equal(cell.getElementsByTagName('f').length,0);if(cell&&!(col==='I'&&r===3))assert.equal(cell.textContent,'');}
+  assert.equal(book.number('Assets','I3'),flow,'display changes do not mutate the editable workbook');
+  const loaded=await MonthlyWorkbook.open(output);loaded.sheet('Assets').doc=assets;loaded.reindex();
+  assert.equal(loaded.number('Assets','I5'),200,'Excel can recalculate subtotal without reading merged-away cells');
+  assert.equal(loaded.number('WTH','I4'),0,'fixed existing totals are not replaced with new calculations');
+  const reopened=await MonthlyWorkbook.open(output),again=await JSZip.loadAsync(await reopened.export());
+  const secondStyles=parse(await again.file('xl/styles.xml').async('string'));
+  assert.equal(secondStyles.getElementsByTagName('cellXfs')[0].getAttribute('count'),styles.getElementsByTagName('cellXfs')[0].getAttribute('count'),'repeated exports reuse centered styles');
+});

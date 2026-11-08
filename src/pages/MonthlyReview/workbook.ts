@@ -10,6 +10,7 @@ const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const REL_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
 const DOCUMENT_REL_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const CONFIG_SHEET = '_MR_Config';
+const CASH_RETURN_MESSAGE = 'too many transactions to calculate';
 let rowIdentitySequence = 0;
 const children = (node: any, name: string): any[] => Array.from(node.childNodes || []).filter((x: any) => x.localName === name);
 const first = (node: any, name: string): any => children(node, name)[0];
@@ -762,15 +763,85 @@ export class MonthlyWorkbook {
     prepared.cleanupEmptySubtotals();
     return prepared.serialize();
   }
+  private prepareCashSummaries() {
+    const products = this.products();
+    for (const { sheet } of this.members()) {
+      const byRow = new Map(products.filter(p => p.sheet === sheet).map(p => [p.row, p]));
+      let account: Product[] = [], category: Product[] = [];
+      for (const row of children(descendants(this.sheet(sheet).doc, 'sheetData')[0], 'row')) {
+        const r = Number(row.getAttribute('r')), a = this.value(sheet, `A${r}`), b = this.value(sheet, `B${r}`), c = this.value(sheet, `C${r}`), product = byRow.get(r);
+        if (a === 'Assets' || a === 'Grand Total') { account = []; category = []; continue; }
+        if (product) { account.push(product); category.push(product); }
+        const details = b === 'Sub Total' ? category : c === 'Sub Total' ? account : [];
+        if (details.length && details.every(p => isCashAccount(p.category))) {
+          // Display cells become text/blank in Excel; totals must read balances directly.
+          if (/I\$?\d/.test(this.cell(sheet, `I${r}`)?.formula || '')) this.formula(sheet, `I${r}`, `SUM(${details.map(p => 'E' + p.row).join(',')})-SUM(${details.map(p => 'H' + p.row).join(',')})`);
+          if (/J\$?\d/.test(this.cell(sheet, `J${r}`)?.formula || '')) this.formula(sheet, `J${r}`, String(details.reduce((total, p) => total + this.number(sheet, `J${p.row}`), 0)));
+        }
+        if (c === 'Sub Total') account = [];
+        if (b === 'Sub Total') { category = []; account = []; }
+      }
+    }
+  }
   private async serialize(): Promise<Uint8Array> {
     this.applyCashAccountRules();
+    this.prepareCashSummaries();
     this.mergeAssetLabels();
     // Patch only XML parts we understand. Original styles, drawings and package relationships stay intact.
     const Zip = (await import('jszip')).default;
     const result = await Zip.loadAsync(await this.zip.generateAsync({ type: 'uint8array' }));
     const serializer = new XMLSerializer();
+    const stylesFile = result.file('xl/styles.xml');
+    if (!stylesFile) throw new Error('模板缺少单元格样式，无法生成合并居中格式');
+    const styles = parse(await stylesFile.async('string')), xfs = descendants(styles, 'cellXfs')[0];
+    if (!xfs) throw new Error('模板缺少单元格样式定义');
+    const centeredStyles = new Map<number, number>();
+    const centered = (index: number): number => {
+      const cached = centeredStyles.get(index); if (cached !== undefined) return cached;
+      const formats = children(xfs, 'xf'), base = formats[index] || formats[0];
+      const oldAlignment = first(base, 'alignment');
+      if (oldAlignment?.getAttribute('horizontal') === 'center' && oldAlignment?.getAttribute('vertical') === 'center') { centeredStyles.set(index, index); return index; }
+      const format = base.cloneNode(true); let alignment = first(format, 'alignment');
+      if (!alignment) { alignment = this.element(styles, 'alignment'); format.insertBefore(alignment, first(format, 'protection') || first(format, 'extLst') || null); }
+      alignment.setAttribute('horizontal', 'center'); alignment.setAttribute('vertical', 'center'); format.setAttribute('applyAlignment', '1');
+      const next = formats.length; xfs.appendChild(format); centeredStyles.set(index, next); return next;
+    };
+    const cash = this.products().filter(p => isCashAccount(p.category));
     for (const s of this.sheets) {
       const doc = parse(serializer.serializeToString(s.doc));
+      const outputCells = new Map<string, any>(descendants(doc, 'c').map(c => [c.getAttribute('r'), c]));
+      const outputCell = (address: string) => {
+        let cell = outputCells.get(address); if (cell) return cell;
+        const data = descendants(doc, 'sheetData')[0], r = Number(address.replace(/[A-Z]+/, ''));
+        let row = children(data, 'row').find(row => Number(row.getAttribute('r')) === r);
+        if (!row) { row = this.element(doc, 'row'); row.setAttribute('r', String(r)); data.insertBefore(row, children(data, 'row').find(row => Number(row.getAttribute('r')) > r) || null); }
+        cell = this.element(doc, 'c'); cell.setAttribute('r', address);
+        row.insertBefore(cell, children(row, 'c').find(c => column(c.getAttribute('r').replace(/\d+/, '')) > column(address.replace(/\d+/, ''))) || null); outputCells.set(address, cell); return cell;
+      };
+      const groups: Array<{ start: number; end: number; category: string }> = [];
+      for (const p of cash.filter(p => p.sheet === s.name)) {
+        const previous = groups[groups.length - 1], category = p.sourceCategory || p.category;
+        if (previous && previous.end + 1 === p.row && previous.category === category) previous.end = p.row;
+        else groups.push({ start: p.row, end: p.row, category });
+      }
+      const merges = descendants(doc, 'mergeCells')[0];
+      for (const group of groups) {
+        for (const merge of children(merges, 'mergeCell')) {
+          const match = merge.getAttribute('ref').match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
+          if (match && column(match[1]) <= 13 && column(match[3]) >= 9 && +match[2] <= group.end && +match[4] >= group.start) merges.removeChild(merge);
+        }
+        for (let r = group.start; r <= group.end; r++) for (const col of ['I', 'J', 'K', 'L', 'M']) {
+          const cell = outputCells.get(col + r); if (!cell) continue;
+          while (cell.firstChild) cell.removeChild(cell.firstChild); cell.removeAttribute('t');
+        }
+        const anchor = outputCell('I' + group.start); anchor.setAttribute('t', 'inlineStr');
+        const text = this.element(doc, 'is'); text.appendChild(this.element(doc, 't', CASH_RETURN_MESSAGE)); anchor.appendChild(text);
+        const merge = this.element(doc, 'mergeCell'); merge.setAttribute('ref', `I${group.start}:M${group.end}`); merges.appendChild(merge);
+      }
+      for (const merge of merges ? children(merges, 'mergeCell') : []) {
+        const anchor = outputCell(merge.getAttribute('ref').split(':')[0]); anchor.setAttribute('s', String(centered(Number(anchor.getAttribute('s') || 0))));
+      }
+      if (merges) { const count = children(merges, 'mergeCell').length; if (count) merges.setAttribute('count', String(count)); else merges.parentNode.removeChild(merges); }
       if (s.name === 'Liabilities' || s.name === 'Analyze' || this.members().some(m => m.sheet === s.name)) {
         let format = descendants(doc, 'sheetFormatPr')[0];
         if (!format) { format = this.element(doc, 'sheetFormatPr'); doc.documentElement.insertBefore(format, descendants(doc, 'cols')[0] || descendants(doc, 'sheetData')[0]); }
@@ -779,7 +850,7 @@ export class MonthlyWorkbook {
       }
       let dimension = descendants(doc, 'dimension')[0];
       if (!dimension) { dimension = this.element(doc, 'dimension'); const views = descendants(doc, 'sheetViews')[0] || descendants(doc, 'sheetFormatPr')[0] || descendants(doc, 'cols')[0] || descendants(doc, 'sheetData')[0]; doc.documentElement.insertBefore(dimension, views); }
-      const addresses = [...s.cells.keys()];
+      const addresses = [...outputCells.keys()];
       const lastRow = Math.max(1, ...addresses.map(a => +a.replace(/[A-Z]+/, ''))), lastColumn = Math.max(1, ...addresses.map(a => column(a.replace(/\d+/, ''))));
       dimension.setAttribute('ref', `A1:${letters(lastColumn)}${lastRow}`);
       for (const c of descendants(doc, 'c')) if (first(c, 'f')) {
@@ -791,6 +862,7 @@ export class MonthlyWorkbook {
       }
       result.file(s.path, xml(doc));
     }
+    xfs.setAttribute('count', String(children(xfs, 'xf').length)); result.file('xl/styles.xml', xml(styles));
     for (const [path, original] of this.extras) {
       const doc = parse(xml(original));
       if (path === 'xl/workbook.xml') { let calc = descendants(doc, 'calcPr')[0]; if (!calc) { calc = this.element(doc, 'calcPr'); doc.documentElement.appendChild(calc); } calc.setAttribute('calcMode', 'auto'); calc.setAttribute('fullCalcOnLoad', '1'); calc.setAttribute('forceFullCalc', '1'); }
