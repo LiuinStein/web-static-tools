@@ -49,7 +49,10 @@
     "@types/react": "^17.0.2",
     "@types/react-dom": "^17.0.2",
     "typescript": "5.9.3",
-    "@types/node": "^24.0.0"
+    "@types/node": "^24.0.0",
+    "cos-nodejs-sdk-v5": "^3.0.0",
+    "mime-types": "^3.0.2",
+    "js-yaml": "^4.3.2"
   },
   "scripts": {
     "start": "icejs start",
@@ -64,7 +67,9 @@
     "test:onedrive": "node --test tests/onedrive-session.test.cjs tests/onedrive-cache.test.cjs",
     "typecheck": "tsc --noEmit",
     "test:stock": "node --test tests/stock-fees.test.cjs",
-    "test:bond": "node --test tests/bond-calculator.test.cjs"
+    "test:bond": "node --test tests/bond-calculator.test.cjs",
+    "deploy": "node scripts/deploy-cos.cjs",
+    "test:deploy": "node --test tests/deploy-cos.test.cjs"
   },
   "publishConfig": {
     "access": "public"

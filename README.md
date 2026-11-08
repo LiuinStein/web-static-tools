@@ -27,6 +27,42 @@ $ npm run build
 
 [More docs](https://ice.work/docs/guide/about).
 
+## 部署到腾讯云 COS
+
+COS SDK 只作为开发依赖供 Node.js 部署脚本使用，不导入网页源码，不进入前端打包，也不改变页面行为。
+
+1. 安装依赖后，在项目根目录复制 `config.example.yaml` 为 `config.yaml`。
+2. 在 `deploy:` 下填写 `secretId`、`secretKey`、`bucket` 和 `region`（使用空格缩进）：
+
+   ```yaml
+   deploy:
+     secretId: "你的 SecretId"
+     secretKey: "你的 SecretKey"
+     bucket: "my-site-1250000000"
+     region: "ap-guangzhou"
+     prefix: ""
+   ```
+
+   `bucket` 是带 APPID 的完整存储桶名；`region` 使用地域标识。`prefix` 留空表示部署到桶根目录，也可设置为 `tools` 等子目录名。当前构建使用相对资源路径，子目录部署请通过以 `/` 结尾的网址访问。
+
+3. 执行部署：
+
+   ```bash
+   npm run deploy
+   ```
+
+   脚本先校验配置，再执行 `npm run build`，成功后递归上传 `build/` 内的文件，保留目录结构并设置 MIME 类型和 `Cache-Control: no-cache`。资源文件先于 HTML 上传；构建或上传失败时命令以非零状态退出。相同对象名会被覆盖，桶中的其他文件和旧资源不会被删除。上传过程不是原子发布，中途失败后可重新执行。
+
+可先预览文件清单（同样会重新构建，但不会连接 COS 或上传文件；预览时可留空密钥）：
+
+```bash
+npm run deploy -- --dry-run
+```
+
+`config.yaml` 已加入 Git 忽略列表，请保留在项目根目录，不要放入 `src/`、`public/` 或 `build/`。仓库只提交空密钥的示例配置。建议使用权限限定在目标桶/目录的 CAM 子账号密钥；分块上传需要相应的分块上传权限。
+
+请提前在腾讯云控制台为存储桶配置静态网站托管（索引文档为 `index.html`）及适合的读取权限或自定义域名。脚本不修改存储桶权限、网站设置或 CDN 缓存；使用 CDN 时如需立即生效，应另外刷新 CDN 缓存。
+
 ## 目录
 
 ```md

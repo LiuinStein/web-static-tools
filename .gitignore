@@ -23,3 +23,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 index.module.scss.d.ts
+
+# Local COS deployment credentials
+cos.config.json
+cos.config.yaml
+cos.config.yml
+config.yaml
