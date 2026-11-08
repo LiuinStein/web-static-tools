@@ -22,7 +22,7 @@ import { MonthlyBatch, productKey, balanceNumber } from './batch';
 import PageHeader from '@/components/PageHeader';
 import { monthlyOneDriveConfig } from './config';
 import { MonthlyWorkbook, Product, Transaction, Liability } from './workbook';
-import { createAssetGroup, createProductEntry, productGroups } from './product-entry';
+import { createAssetGroup, createProductEntry, productGroups, productEntryDefaults } from './product-entry';
 import { cashFlowSummary } from './transactions';
 import TransactionsTable, { blankTransaction } from './TransactionsTable';
 import { Scalar, isoDate, serialDate } from './formula';
@@ -270,8 +270,7 @@ export default function MonthlyReview() {
     setModal('product');
   }
   function newProduct() {
-    const group = groupOptions.find(g => g.sheet === 'Assets' && g.currency === 'RMB' && g.category === 'Debt Fund') || groupOptions[0];
-    const accountName = products.find(p => p.member === group?.member && p.currency === group?.currency && p.account === accountFilter)?.account || products.find(p => p.member === group?.member && p.currency === group?.currency)?.account || '';
+    const { group, account: accountName } = productEntryDefaults(products, groupOptions, accountFilter, member, currency);
     setSelected(null); setAnchorKey(group?.key || ''); setAccountChoice(accountName || '__new__'); setError('');
     setProductForm({ ...blankProduct, account: accountName }); setEntryMode('manual');
     setInitialTransactions(group && isCashAccount(group.category) ? [] : [blankTransaction(isoDate(val('Assets', 'L1')))]); setModal('product');

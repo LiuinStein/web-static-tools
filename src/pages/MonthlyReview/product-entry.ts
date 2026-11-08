@@ -3,6 +3,16 @@ import { validateTransactions } from './transactions';
 import { isCashAccount, normalizeProductCategory } from './categories';
 
 export interface ProductGroup { key: string; sheet: string; member: string; currency: string; category: string; }
+export function productEntryDefaults(products: Product[], groups: ProductGroup[], accountFilter: string, member = '全部', currency = '全部') {
+  const matching = accountFilter ? groups.filter(g =>
+    (member === '全部' || g.member === member) && (currency === '全部' || g.currency === currency) &&
+    products.some(p => p.sheet === g.sheet && p.currency === g.currency && p.category === g.category && p.account === accountFilter)) : groups;
+  const candidates = matching.length ? matching : groups;
+  const group = candidates.find(g => g.sheet === 'Assets' && g.currency === 'RMB' && g.category === 'Debt Fund') || candidates[0];
+  const accounts = products.filter(p => p.member === group?.member && p.currency === group?.currency);
+  const account = accounts.find(p => p.account === accountFilter)?.account || accounts[0]?.account || '';
+  return { group, account };
+}
 const groupKey = (p: Product) => JSON.stringify([p.sheet, p.currency, normalizeProductCategory(p.category)]);
 // Stable UI groups: existing supported member/currency combinations plus USD equity funds.
 const groupConfiguration: Array<[string, string, string, string[]]> = [

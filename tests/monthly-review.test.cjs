@@ -551,7 +551,7 @@ test('saved review metadata restores assets and debts without appearing in Excel
   assert.equal(nextMonth.changedKeys().size, 0);
 });
 
-test('amount input retains a typed decimal point across numeric parent updates and formats after blur', () => {
+test('amount input groups while editing, retains decimal text and preserves the caret', () => {
   const React = require('react');
   const originalHook = React.useState, originalEffect = React.useEffect;
   React.useEffect = () => {};
@@ -566,15 +566,20 @@ test('amount input retains a typed decimal point across numeric parent updates a
   try {
     const AmountInput = require('../src/pages/MonthlyReview/AmountInput.tsx').default;
     let value = 1;
-    const render = () => { cursor = 0; return AmountInput({ value, onChange: e => { value = Number(e.target.value); } }); };
+    const render = () => { cursor = 0; return AmountInput({ value, onChange: e => { value = Number(e.target.value.replace(/,/g, '')); } }); };
+    const change = (text, caret = text.length) => {
+      const node = { value: text, selectionStart: caret, selectionEnd: caret, selectionDirection: 'none', setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; } };
+      render().props.onChange({ target: node, currentTarget: node });
+      return node;
+    };
     let input = render();
     assert.equal(input.props.value, '1.00');
     input.props.onFocus({ currentTarget: { value: '1.00' } });
     input = render();
-    input.props.onChange({ target: { value: '1.' } });
+    change('1.');
     input = render();
     assert.equal(input.props.value, '1.');
-    input.props.onChange({ target: { value: '1.25' } });
+    change('1.25');
     assert.equal(value, 1.25);
     input = render();
     assert.equal(input.props.value, '1.25');
@@ -582,6 +587,25 @@ test('amount input retains a typed decimal point across numeric parent updates a
     assert.equal(render().props.value, '1.25');
     value = 1234.5;
     assert.equal(render().props.value, '1,234.50');
+    render().props.onFocus({ currentTarget: { value: '1,234.50' } });
+    assert.equal(render().props.value, '1,234.5');
+    let node = change('12345.');
+    assert.equal(render().props.value, '12,345.');
+    assert.equal(node.selectionStart, 7);
+    assert.equal(value, 12345);
+    node = change('129,345.67', 3);
+    assert.equal(render().props.value, '129,345.67');
+    assert.equal(node.selectionStart, 3);
+    node = change('-1234567.00');
+    assert.equal(render().props.value, '-1,234,567.00');
+    assert.equal(value, -1234567);
+    node = change('');
+    assert.equal(render().props.value, '');
+    node = change('1,234', 2);
+    render().props.onKeyDown({ currentTarget: node, key: 'Backspace' });
+    assert.equal(node.selectionStart, 1);
+    render().props.onKeyDown({ currentTarget: node, key: 'Delete' });
+    assert.equal(node.selectionStart, 2);
   } finally {
     React.useState = originalHook;
     React.useEffect = originalEffect;
@@ -1343,4 +1367,27 @@ test('comparison details partition every scoped product at its group median for 
   assert.equal(splitReturnsAtMedian([], 'xirr').median, null);
   for (const [dimension, key] of [['category', 'Stock'], ['currency', 'RMB']]) assert.equal(returnDetailRows(rows, {}, { kind: 'comparison', dimension, key, metric: 'xirr' }).length, rows.length);
   assert.deepEqual(rows.map(r => r.id), ['a', 'b', 'c', 'd', 'e', 'other']);
+});
+
+test('new product defaults follow the filtered account across members and currencies', async () => {
+  const { productEntryDefaults } = require('../src/pages/MonthlyReview/product-entry.ts');
+  const book = await fixture();
+  const base = book.products()[0];
+  const rows = [
+    { ...base, sheet: 'Assets', member: '本人', currency: 'RMB', category: 'Debt Fund', account: '人民币账户' },
+    { ...base, sheet: 'Assets', member: '本人', currency: 'USD', category: 'Stock', account: '美元账户' },
+    { ...base, sheet: 'WTH', member: 'WTH', currency: 'RMB', category: 'Time Deposit', account: '家人账户' },
+    { ...base, sheet: 'Assets', member: '本人', currency: 'HKD', category: 'Stock', account: '美元账户' },
+  ];
+  const groups = productGroups(book);
+  for (const row of rows.slice(0, 3)) {
+    const result = productEntryDefaults(rows, groups, row.account);
+    assert.equal(result.account, row.account);
+    assert.equal(result.group.member, row.member);
+    assert.equal(result.group.currency, row.currency);
+  }
+  const scoped = productEntryDefaults(rows, groups, '美元账户', '本人', 'HKD');
+  assert.equal(scoped.account, '美元账户'); assert.equal(scoped.group.currency, 'HKD');
+  const unfiltered = productEntryDefaults(rows, groups, '');
+  assert.equal(unfiltered.group.category, 'Debt Fund'); assert.equal(unfiltered.account, '人民币账户');
 });
