@@ -294,8 +294,8 @@ test('cash accounts merge legacy categories and enforce formula net flows across
   assert.throws(() => batch.cashFlows([[key, '999']]), /不能手动修改/);
   book.updateProduct(p, { ...p, balance: 1200.01, previous: 1000, flow: 999 }); assert.equal(book.products()[0].flow, 200.01);
   const buy = { kind:'buy', date:'2026-10-01', amount:500, shares:50, price:10 };
-  book.saveTransactions(book.products()[0], [buy]); assert.equal(book.products()[0].flow, 200.01);
-  book.saveTransactions(book.products()[0], [buy, { ...buy, kind:'sell', date:'2026-10-02', amount:500 }]);
+  assert.throws(() => book.saveTransactions(book.products()[0], [buy]), /不记录买卖流水/);
+  assert.throws(() => book.saveTransactions(book.products()[0], [buy, { ...buy, kind:'sell', date:'2026-10-02', amount:500 }]), /不记录买卖流水/);
   assert.equal(book.products()[0].balance, 1200.01); assert.equal(book.products()[0].flow, 200.01);
   book.rollover('2026-11-30'); assert.equal(book.products()[0].previous, 1200.01); assert.equal(book.products()[0].flow, 0);
   book.set(p.sheet, `E${p.row}`, 1300.02); assert.equal(book.products()[0].flow, 100.01);
@@ -1550,4 +1550,37 @@ test('export repairs cached legacy subtotals on a copy and saved review metadata
   assert.equal(restored.reviewed.size,keys.length);
   assert.equal(restored.book.products().find(p=>p.name==='Other product').balance,25);
   assert.equal(loaded.number('Assets','D1'),source.number('Assets','D1'));
+});
+
+test('cash and time deposits have no XIRR blocks or return formulas, including legacy blocks', async () => {
+  const { isBalanceOnly } = require('../src/pages/MonthlyReview/categories.ts');
+  for (const category of ['Current Account','Monetary Fund','活期账户','Time Deposit','定期存款']) {
+    const book = await fixture();
+    let p = book.products().find(p=>p.sheet==='Assets');
+    const trade = {kind:'buy',date:'2026-10-01',amount:1000,shares:100,price:10};
+    book.saveTransactions(p,[trade]);
+    const other = book.products().find(p=>p.sheet==='WTH');book.saveTransactions(other,[trade]);
+    const otherBefore = book.transactions(book.products().find(p=>p.sheet==='WTH').block).map(({row,...t})=>t);
+    book.set('Assets','B'+p.row,category);book.applyCashAccountRules();
+    p=book.products().find(p=>p.sheet==='Assets');assert.ok(isBalanceOnly(p.category));assert.equal(p.block,undefined);assert.equal(book.blocks('XIRR').length,0);
+    for(const col of ['K','L','M'])assert.equal(book.value('Assets',col+p.row),null);
+    assert.throws(()=>book.saveTransactions(p,[trade]),/不记录买卖流水/);
+    assert.deepEqual(book.transactions(book.products().find(p=>p.sheet==='WTH').block).map(({row,...t})=>t),otherBefore);
+    const created=book.addProduct(p,'Another deposit','Other account');assert.equal(created.block,undefined);assert.equal(book.blocks('XIRR').length,0);
+    const loaded=await MonthlyWorkbook.open(await book.export());
+    assert.equal(loaded.products().filter(p=>p.sheet==='Assets'&&p.block).length,0);
+  }
+});
+
+test('asset labels merge repeated category/account cells through their detail groups and WTH rows use 16.5', async () => {
+  const book=await fixture();
+  book.set('Assets','B3','Monetary Fund');
+  for(const [c,v]of Object.entries({B:'Monetary Fund',C:'示例账户',D:'Second cash product',E:100,H:0,I:0}))book.set('Assets',c+'4',v);
+  book.set('Assets','C5','Sub Total');book.formula('Assets','E5','SUM(E3:E4)');book.formula('Assets','D1','E5');book.formula('Assets','E1','E5');
+  const loaded=await MonthlyWorkbook.open(await book.export());
+  const merges=Array.from(loaded.sheet('Assets').doc.getElementsByTagName('mergeCell')).map(n=>n.getAttribute('ref'));
+  assert.ok(merges.includes('B3:B5'));assert.ok(merges.includes('C3:C4'));assert.equal(loaded.value('Assets','B4'),null);assert.equal(loaded.value('Assets','C4'),null);
+  assert.deepEqual(loaded.products().filter(p=>p.sheet==='Assets').map(p=>p.account),['示例账户','示例账户']);
+  for(const row of Array.from(loaded.sheet('WTH').doc.getElementsByTagName('row')))assert.equal(row.getAttribute('ht'),'16.5');
+  assert.equal(loaded.sheet('WTH').doc.getElementsByTagName('sheetFormatPr')[0].getAttribute('defaultRowHeight'),'16.5');
 });

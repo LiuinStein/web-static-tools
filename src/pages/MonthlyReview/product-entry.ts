@@ -1,6 +1,6 @@
 import { MonthlyWorkbook, Product, Transaction } from './workbook';
 import { validateTransactions } from './transactions';
-import { isCashAccount, normalizeProductCategory } from './categories';
+import { isCashAccount, isBalanceOnly, normalizeProductCategory } from './categories';
 
 export interface ProductGroup { key: string; sheet: string; member: string; currency: string; category: string; }
 export function productEntryDefaults(products: Product[], groups: ProductGroup[], accountFilter: string, member = '全部', currency = '全部') {
@@ -38,12 +38,13 @@ export function createProductEntry(book: MonthlyWorkbook, key: string, values: N
   const group = productGroups(book).find(item => item.key === key);
   if (!group) throw new Error('请选择有效的所属分组');
   const cash = isCashAccount(group.category);
-  const trades = cash ? rows.filter(t => t.amount !== 0 || t.shares !== 0 || t.price !== 0) : rows;
-  if (!cash && mode === 'manual' && !Number.isFinite(values.flow)) throw new Error('请填写有效的净投入金额');
-  if (mode === 'transactions' && (!cash || trades.length)) validateTransactions(trades, book.number('Assets', 'L1'), book.number('Assets', 'N1'));
+  const balanceOnly = isBalanceOnly(group.category), trades = rows.filter(t => t.amount !== 0 || t.shares !== 0 || t.price !== 0);
+  if (balanceOnly && mode === 'transactions' && trades.length) throw new Error('活期账户和定期存款不记录买卖流水，请直接填写净投入');
+  if (!cash && (mode === 'manual' || balanceOnly) && !Number.isFinite(values.flow)) throw new Error('请填写有效的净投入金额');
+  if (!balanceOnly && mode === 'transactions') validateTransactions(rows, book.number('Assets', 'L1'), book.number('Assets', 'N1'));
   const created = anchor ? book.addProduct(anchor, name, account) : book.addProductGroup(group, name, account);
-  book.updateProduct(created, { ...values, name, account, previous: 0, flow: mode === 'manual' ? values.flow : 0 });
-  if (mode === 'transactions' && (!cash || trades.length)) book.saveTransactions(created, trades);
+  book.updateProduct(created, { ...values, name, account, previous: 0, flow: mode === 'manual' || balanceOnly ? values.flow : 0 });
+  if (mode === 'transactions' && !balanceOnly) book.saveTransactions(created, rows);
   return book.products().find(p => p.sheet === created.sheet && p.row === created.row)!;
 }
 

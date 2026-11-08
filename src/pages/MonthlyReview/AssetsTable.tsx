@@ -8,7 +8,7 @@ import { rawAmount, currencyCode } from './amount';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { MonthlyWorkbook, Product } from './workbook';
 import { Scalar } from './formula';
-import { isCashAccount } from './categories';
+import { isCashAccount, isBalanceOnly } from './categories';
 import { displayValue } from './display';
 import { MonthlyBatch, productKey, balancePaste } from './batch';
 import { ProductSort, ProductSortField, nextProductSort, sortedProducts } from './sorting';
@@ -45,7 +45,7 @@ export default function AssetsTable({ onExitForward, onSaveNote, benchmarks, rev
     ? [...products].sort((a, b) => (ranks.get(productKey(a)) ?? Infinity) - (ranks.get(productKey(b)) ?? Infinity))
     : sortedProducts(products, book, sort, invalid);
   const currencyMoney = (p: Product, n: Scalar) => `${currencyCode(p.currency)} ${money(n)}`;
-  const value = (p: Product, column: string) => invalid.has(productKey(p)) ? null : book.value(p.sheet, `${column}${p.row}`);
+  const value = (p: Product, column: string) => invalid.has(productKey(p)) || (isBalanceOnly(p.category) && ['K', 'L', 'M'].includes(column)) ? null : book.value(p.sheet, `${column}${p.row}`);
   function toggleSort(field: ProductSortField) {
     const next = nextProductSort(sort, field); setSort(next);
     if (batch) setBatchOrder(sortedProducts(allProducts, book, next, invalid).map(productKey));
@@ -90,7 +90,7 @@ export default function AssetsTable({ onExitForward, onSaveNote, benchmarks, rev
       <td>{displayValue(p.member)}<small>{displayValue(p.currency)}</small></td>
       <td>{currencyMoney(p, p.previous)}</td>
       <td className={gainClass(value(p, 'J'))}>{money(value(p, 'J'))}</td><td {...benchmarkRating(benchmarks, p.category, 'xirr', value(p, 'K'))} title={benchmarkRating(benchmarks, p.category, 'xirr', value(p, 'K')).title || displayValue(value(p, 'K'))}>{pct(value(p, 'K'))}</td><td {...benchmarkRating(benchmarks, p.category, 'twr', value(p, 'L'))}>{pct(value(p, 'L'))}</td>
-      {!notes && <td><div className="mr-row-actions"><button disabled={busy} onClick={() => onEdit(p)}>编辑</button><button disabled={busy} onClick={() => onTransactions(p)}>买卖记录</button><button className="danger" disabled={busy} onClick={() => onDelete(p)}>删除</button></div></td>}
+      {!notes && <td><div className="mr-row-actions"><button disabled={busy} onClick={() => onEdit(p)}>编辑</button><button disabled={busy || isBalanceOnly(p.category)} title={isBalanceOnly(p.category) ? '活期账户和定期存款不记录买卖流水，也不计算 XIRR / TWR' : undefined} onClick={() => onTransactions(p)}>买卖记录</button><button className="danger" disabled={busy} onClick={() => onDelete(p)}>删除</button></div></td>}
       <td>{batch ? <><AmountInput onFocus={selectAmount} onClick={selectAmount} data-flow-input={key} tabIndex={-1} aria-label={`${p.name} 净投入`} aria-invalid={badFlow} aria-describedby={badFlow ? `flow-error-${key}` : undefined} type="text" inputMode="decimal" autoComplete="off" readOnly={isCashAccount(p.category)} title={isCashAccount(p.category) ? '活期账户净投入 = 本期余额 − 上期余额，自动计算' : '投入为正，回款为负；保存买卖记录后会按流水重新汇总'} value={(batch.flows.get(key) ?? (typeof p.flow === 'number' ? String(p.flow) : ''))} placeholder={typeof p.flow === 'string' ? displayValue(p.flow) : '0'} disabled={busy} onChange={e => { if (!isCashAccount(p.category)) onBatch(batch.stageFlows([[key, rawAmount(e.target.value)]])); }} onBlur={() => finishInput(key)} onKeyDown={e => move(e, key)} />{badFlow && <small id={`flow-error-${key}`} className="mr-input-error">请输入有效的净投入金额</small>}</> : money(p.flow)}</td>
       <td>{batch ? <><span className="mr-currency-prefix">{currencyCode(p.currency)}</span><AmountInput onFocus={selectAmount} onClick={selectAmount} data-balance-input={key} aria-label={`${p.name} 本期余额`} aria-invalid={bad} aria-describedby={bad ? `balance-error-${key}` : undefined} type="text" inputMode="decimal" autoComplete="off" value={(batch.inputs.get(key) ?? String(p.balance))} disabled={busy} onChange={e => onBatch(batch.stageBalances([[key, rawAmount(e.target.value)]]))} onBlur={() => finishInput(key)} onKeyDown={e => move(e, key)} onPaste={e => {
         const text = e.clipboardData.getData('text');

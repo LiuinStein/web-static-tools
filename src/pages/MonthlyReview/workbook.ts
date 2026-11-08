@@ -1,6 +1,6 @@
 import type JSZip from 'jszip';
 import { validateProductNames } from './validation';
-import { isCashAccount, normalizeProductCategory } from './categories';
+import { isCashAccount, isBalanceOnly, normalizeProductCategory } from './categories';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { FormulaEngine, Scalar, letters, column, serialDate, isoDate } from './formula';
 import { cashFlowSummary, validateTransactions } from './transactions';
@@ -515,7 +515,7 @@ export class MonthlyWorkbook {
     for (const [row, source] of [[subtotal, at], [categoryTotal, subtotal]]) {
       this.set(group.sheet, `H${row}`, 0);
       for (const col of ['E', 'I', 'J']) this.formula(group.sheet, `${col}${row}`, `SUM(${col}${source})`);
-      for (const col of ['K', 'L', 'M']) this.formula(group.sheet, `${col}${row}`, `IF(COUNT(${col}${source})=COUNTA(${col}${source}),AVERAGE(${col}${source}),"Check inputs")`);
+      if (!isBalanceOnly(group.category)) for (const col of ['K', 'L', 'M']) this.formula(group.sheet, `${col}${row}`, `IF(COUNT(${col}${source})=COUNTA(${col}${source}),AVERAGE(${col}${source}),"Check inputs")`);
     }
     for (const row of [at, subtotal, categoryTotal]) this.formula(group.sheet, `F${row}`, `E${row}/E${grandTotal}`);
     for (const col of ['E', 'I', 'J']) {
@@ -554,6 +554,7 @@ export class MonthlyWorkbook {
     return this.products().find(p => p.sheet === anchor.sheet && p.row === at)!;
   }
   private createEmptyBlock(p: Product, reference?: Product) {
+    if (isBalanceOnly(p.category)) return;
     const xs = this.xirrSheet(p.sheet);
     const anchor = reference?.block && !reference.block.shared ? reference : this.products().find(x => x.sheet === p.sheet && x.row !== p.row && x.currency === p.currency && x.category === p.category && x.account === p.account && x.block && !x.block.shared);
     let start: number;
@@ -586,8 +587,10 @@ export class MonthlyWorkbook {
   }
   private splitShared(p: Product): Product {
     const shared = p.block; if (!shared?.shared) return p;
-    const related = this.products().filter(x => x.block?.shared && x.block.sheet === shared.sheet && x.block.summary === shared.summary);
-    const snapshots = related.map(x => ({ product: x, trades: this.transactions(x.block!) }));
+    const related = this.products().filter(x => x.block?.sheet === shared.sheet && x.block.summary === shared.summary);
+    if (related.some(x => !x.block?.shared)) throw new Error('此共享流水包含无法独立识别的产品，请先拆分关联区块，原账本未修改');
+    const snapshots = related.filter(x => !isBalanceOnly(x.category)).map(x => ({ product: x, trades: this.transactions(x.block!) }));
+    for (const product of related) for (const col of ['K', 'L', 'M']) this.set(product.sheet, col + product.row, null);
     // Split the known account-specific purchase ranges into independent product blocks.
     for (const { product, trades } of snapshots) { this.set(product.sheet, `K${product.row}`, null); this.saveTransactions({ ...product, block: undefined }, trades); }
     this.shiftRows(shared.sheet, shared.start, shared.summary - shared.start + 1, true);
@@ -621,6 +624,7 @@ export class MonthlyWorkbook {
     this.cleanupEmptySubtotals();
   }
   saveTransactions(p: Product, transactions: Transaction[]) {
+    if (isBalanceOnly(p.category)) throw new Error('活期账户和定期存款不记录买卖流水，也不计算 XIRR / TWR');
     const endDate = this.number('Assets', 'L1');
     const remaining = validateTransactions(transactions, endDate);
     if (p.block?.shared) p = this.splitShared(p);
@@ -677,7 +681,80 @@ export class MonthlyWorkbook {
     const formula = `E${p.row}-H${p.row}`;
     if (this.cell(p.sheet, `I${p.row}`)?.formula !== formula) this.formula(p.sheet, `I${p.row}`, formula);
   }
-  applyCashAccountRules() { for (const p of this.products()) this.cashAccountFlow(p); }
+  applyCashAccountRules() {
+    this.removeBalanceOnlyReturns();
+    for (const p of this.products()) this.cashAccountFlow(p);
+  }
+  private removeBalanceOnlyReturns() {
+    let products = this.products();
+    // Known shared purchase ranges can be split without dropping investment trades.
+    for (const p of products.filter(p => isBalanceOnly(p.category) && p.block?.shared)) {
+      const current = this.products().find(row => row.sheet === p.sheet && row.row === p.row)!;
+      if (current.block?.shared) this.splitShared(current);
+    }
+    products = this.products();
+    const protectedBlocks = new Set(products.filter(p => !isBalanceOnly(p.category) && p.block).map(p => `${p.block!.sheet}:${p.block!.summary}`));
+    const remove = new Map<string, Block>();
+    for (const p of products.filter(p => isBalanceOnly(p.category))) if (p.block && !protectedBlocks.has(`${p.block.sheet}:${p.block.summary}`)) remove.set(`${p.block.sheet}:${p.block.summary}`, p.block);
+    // Also remove unreferenced legacy blocks identified by member, currency, account and product.
+    for (const { sheet, xirr } of this.members()) {
+      let account = '';
+      for (const block of this.blocks(xirr)) {
+        account = String(this.value(xirr, `B${block.start}`) || account);
+        let currency = 'RMB', header = 0;
+        for (const a of this.sheet(xirr).cells.keys()) if (/^A\d+$/.test(a) && +a.slice(1) <= block.start && +a.slice(1) >= header && this.value(xirr, a) === 'Assets') { header = +a.slice(1); currency = String(this.value(xirr, `B${header}`)).replace(/^in /, ''); }
+        if (!protectedBlocks.has(`${xirr}:${block.summary}`) && products.some(p => p.sheet === sheet && p.currency === currency && p.account === account && p.name === this.value(xirr, `C${block.start}`) && isBalanceOnly(p.category))) remove.set(`${xirr}:${block.summary}`, block);
+      }
+    }
+    for (const { sheet } of this.members()) {
+      let category = '';
+      for (const row of children(descendants(this.sheet(sheet).doc, 'sheetData')[0], 'row')) {
+        const r = Number(row.getAttribute('r')), a = this.value(sheet, `A${r}`), b = this.value(sheet, `B${r}`);
+        if (a === 'Assets' || a === 'Grand Total') { category = ''; continue; }
+        if (b && b !== 'Sub Total' && b !== 'Category') category = String(b).trim();
+        if (isBalanceOnly(category)) for (const col of ['K', 'L', 'M']) if (this.sheet(sheet).cells.has(col + r)) this.set(sheet, col + r, null);
+        if (b === 'Sub Total') category = '';
+      }
+    }
+    for (const block of [...remove.values()].sort((a, b) => a.sheet.localeCompare(b.sheet) || b.start - a.start)) this.shiftRows(block.sheet, block.start, block.summary - block.start + 1, true);
+  }
+  private mergeAssetLabels() {
+    const products = this.products();
+    for (const { sheet } of this.members()) {
+      const s = this.sheet(sheet), rows = children(descendants(s.doc, 'sheetData')[0], 'row');
+      const byRow = new Map(products.filter(p => p.sheet === sheet).map(p => [p.row, p]));
+      let merges = descendants(s.doc, 'mergeCells')[0];
+      if (!merges) {
+        merges = this.element(s.doc, 'mergeCells');
+        const later = ['phoneticPr', 'conditionalFormatting', 'dataValidations', 'hyperlinks', 'printOptions', 'pageMargins', 'pageSetup', 'headerFooter', 'rowBreaks', 'colBreaks', 'drawing', 'legacyDrawing', 'extLst'];
+        s.doc.documentElement.insertBefore(merges, Array.from(s.doc.documentElement.childNodes).find((n: any) => later.includes(n.localName)) || null);
+      }
+      for (const merge of children(merges, 'mergeCell')) if (/^([BC])\d+:\1\d+$/.test(merge.getAttribute('ref'))) merges.removeChild(merge);
+      let category: { start: number; end: number; label: string } | undefined;
+      let account: { start: number; end: number; label: string } | undefined;
+      const merge = (col: string, group?: { start: number; end: number; label: string }) => {
+        if (!group) return;
+        this.set(sheet, col + group.start, group.label);
+        if (group.end <= group.start) return;
+        for (let row = group.start + 1; row <= group.end; row++) this.set(sheet, col + row, null);
+        const node = this.element(s.doc, 'mergeCell'); node.setAttribute('ref', `${col}${group.start}:${col}${group.end}`); merges.appendChild(node);
+      };
+      const flush = () => { merge('C', account); merge('B', category); account = undefined; category = undefined; };
+      for (const row of rows) {
+        const r = Number(row.getAttribute('r')), a = this.value(sheet, `A${r}`), b = this.value(sheet, `B${r}`), c = this.value(sheet, `C${r}`);
+        if (a === 'Assets' || a === 'Grand Total' || b === 'Sub Total') { flush(); continue; }
+        const p = byRow.get(r);
+        if (p) {
+          const label = p.sourceCategory || p.category;
+          if (category && category.label !== label) flush();
+          if (!category) category = { start: r, end: r, label }; else category.end = r;
+          if (account && account.label !== p.account) { merge('C', account); account = undefined; }
+          if (!account) account = { start: r, end: r, label: p.account }; else account.end = r;
+        } else if (c === 'Sub Total') { merge('C', account); account = undefined; if (category) category.end = r; }
+      }
+      flush(); merges.setAttribute('count', String(children(merges, 'mergeCell').length));
+    }
+  }
   async export(): Promise<Uint8Array> {
     // Cached legacy drafts must take the same cleanup path as newly imported books.
     // Export a copy so existing draft/review row positions are never silently changed.
@@ -687,13 +764,14 @@ export class MonthlyWorkbook {
   }
   private async serialize(): Promise<Uint8Array> {
     this.applyCashAccountRules();
+    this.mergeAssetLabels();
     // Patch only XML parts we understand. Original styles, drawings and package relationships stay intact.
     const Zip = (await import('jszip')).default;
     const result = await Zip.loadAsync(await this.zip.generateAsync({ type: 'uint8array' }));
     const serializer = new XMLSerializer();
     for (const s of this.sheets) {
       const doc = parse(serializer.serializeToString(s.doc));
-      if (s.name === 'Liabilities' || s.name === 'Analyze') {
+      if (s.name === 'Liabilities' || s.name === 'Analyze' || this.members().some(m => m.sheet === s.name)) {
         let format = descendants(doc, 'sheetFormatPr')[0];
         if (!format) { format = this.element(doc, 'sheetFormatPr'); doc.documentElement.insertBefore(format, descendants(doc, 'cols')[0] || descendants(doc, 'sheetData')[0]); }
         format.setAttribute('defaultRowHeight', '16.5');

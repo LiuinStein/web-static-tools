@@ -16,7 +16,7 @@ import Decimal from 'decimal.js';
 import AssetsTable from './AssetsTable';
 import AssetGroupDialog from './AssetGroupDialog';
 import LiabilitiesTable from './LiabilitiesTable';
-import { isCashAccount } from './categories';
+import { isCashAccount, isBalanceOnly } from './categories';
 import { productBalance } from './validation';
 import { isUnavailable } from './display';
 import { matchesSearch } from './search';
@@ -282,7 +282,8 @@ export default function MonthlyReview() {
   const filterOptions = linkedOptions(products, { member, currency, account: accountFilter });
   const memberOptions = filterOptions.members, currencyOptions = filterOptions.currencies;
   const liquidity = useMemo(() => book?.liquiditySummary() || [], [book]);
-  const automaticFlow = isCashAccount(selected?.category || groupOptions.find(g => g.key === anchorKey)?.category || '');
+  const selectedCategory = selected?.category || groupOptions.find(g => g.key === anchorKey)?.category || '';
+  const automaticFlow = isCashAccount(selectedCategory), balanceOnly = isBalanceOnly(selectedCategory);
   const formAutomaticFlow = [productForm.balance, ...(selected ? [productForm.previous] : [])].every(v => v.trim() !== '' && Number.isFinite(Number(v))) ? new Decimal(productForm.balance).minus(selected ? productForm.previous : 0).toNumber() : NaN;
   const categories = useMemo(() => [...new Set(products.map(p => p.category))].sort((a, b) => (categoryNames[a] || a).localeCompare(categoryNames[b] || b, 'zh-CN')), [products]);
   useEffect(() => {
@@ -311,7 +312,7 @@ export default function MonthlyReview() {
     const { group, account: accountName } = productEntryDefaults(products, groupOptions, accountFilter, member, currency);
     setSelected(null); setAnchorKey(group?.key || ''); setAccountChoice(accountName || '__new__'); setError('');
     setProductForm({ ...blankProduct, account: accountName }); setEntryMode('manual');
-    setInitialTransactions(group && isCashAccount(group.category) ? [] : [blankTransaction(isoDate(val('Assets', 'L1')))]); setModal('product');
+    setInitialTransactions(group && isBalanceOnly(group.category) ? [] : [blankTransaction(isoDate(val('Assets', 'L1')))]); setModal('product');
   }
   function saveProduct(event: React.FormEvent) {
     event.preventDefault();
@@ -432,7 +433,7 @@ export default function MonthlyReview() {
     <Dialog visible={modal === 'product'} title={selected ? '编辑产品' : '新增产品'} footer={false} onClose={() => setModal(null)} className={`mr-dialog mr-record-dialog ${selected ? '' : 'mr-wide-dialog mr-product-dialog'}`}>
       {error && <div className="mr-message error" role="alert">{error}</div>}
       <form onSubmit={saveProduct}>
-        {!selected && <label className="mr-field"><span>所属分组</span><select aria-label="所属分组" disabled={busy} value={anchorKey} onChange={e => { const group = groupOptions.find(g => g.key === e.target.value); setAnchorKey(e.target.value); const account = products.find(p => p.member === group?.member && p.currency === group?.currency && p.account === productForm.account)?.account || products.find(p => p.member === group?.member && p.currency === group?.currency)?.account || ''; setAccountChoice(account || '__new__'); setProductForm({ ...productForm, account }); }}>{groupOptions.map(g => <option key={g.key} value={g.key}>{g.member} · {g.currency} · {categoryNames[g.category] || g.category}</option>)}</select></label>}
+        {!selected && <label className="mr-field"><span>所属分组</span><select aria-label="所属分组" disabled={busy} value={anchorKey} onChange={e => { const group = groupOptions.find(g => g.key === e.target.value); setAnchorKey(e.target.value); if (group && isBalanceOnly(group.category)) { setEntryMode('manual'); setInitialTransactions([]); } const account = products.find(p => p.member === group?.member && p.currency === group?.currency && p.account === productForm.account)?.account || products.find(p => p.member === group?.member && p.currency === group?.currency)?.account || ''; setAccountChoice(account || '__new__'); setProductForm({ ...productForm, account }); }}>{groupOptions.map(g => <option key={g.key} value={g.key}>{g.member} · {g.currency} · {categoryNames[g.category] || g.category}</option>)}</select></label>}
         <div className="mr-grid">
           {field('产品名称', productForm.name, v => setProductForm({ ...productForm, name: v }))}
           <label className="mr-field"><span>账户</span><select aria-label="账户" disabled={busy} value={accountChoice} onChange={e => { const choice = e.target.value; setAccountChoice(choice); setProductForm({ ...productForm, account: choice === '__new__' ? '' : choice }); }}>{[...new Set(products.filter(p => p.member === (selected?.member || groupOptions.find(g => g.key === anchorKey)?.member) && p.currency === (selected?.currency || groupOptions.find(g => g.key === anchorKey)?.currency)).map(p => p.account))].map(name => <option key={name} value={name}>{name}</option>)}<option value="__new__">＋ 新增账户</option></select></label>
@@ -444,22 +445,22 @@ export default function MonthlyReview() {
           {field('备注', productForm.note, v => setProductForm({ ...productForm, note: v }))}
         </div>
         {!selected && <fieldset disabled={automaticFlow || busy} aria-disabled={automaticFlow} className="mr-product-flow">
-          <h3>本期交易与净投入</h3>
+          <h3>{balanceOnly ? '本期净投入' : '本期交易与净投入'}</h3>
           <div className="mr-flow-options" role="radiogroup" aria-label="净投入录入方式">
             <label><input type="radio" name="product-flow-mode" checked={automaticFlow || entryMode === 'manual'} disabled={busy} onChange={() => { setProductForm({ ...productForm, flow: String(initialSummary.net) }); setEntryMode('manual'); }} />直接填写净投入</label>
-            <label><input type="radio" name="product-flow-mode" checked={!automaticFlow && entryMode === 'transactions'} disabled={busy} onChange={() => setEntryMode('transactions')} />通过买卖记录计算</label>
+            <label><input type="radio" name="product-flow-mode" checked={!balanceOnly && entryMode === 'transactions'} disabled={busy || balanceOnly} onChange={() => setEntryMode('transactions')} />通过买卖记录计算</label>
           </div>
-          {entryMode === 'transactions' && !automaticFlow ? <>
+          {entryMode === 'transactions' && !balanceOnly ? <>
             <p>按日期顺序登记上次记账日期 {previousDate} 之后、至 {accountingDate}（含当日）的交易，支持跨月、多次买入卖出及分红。金额填实际收付金额，份额填正数。</p>
             <TransactionsTable rows={initialTransactions} onChange={setInitialTransactions} date={accountingDate} disabled={busy} labelPrefix="新增交易" />
             <div className="mr-entry-summary"><div><span>买入合计</span><strong>{money(initialSummary.buys)}</strong></div><div><span>卖出回款</span><strong>{money(initialSummary.sales)}</strong></div><div><span>现金分红</span><strong>{money(initialSummary.dividends)}</strong></div><div><span>本期净投入</span><strong>{money(initialSummary.net)}</strong></div></div>
             <p className="mr-footnote">净投入 = 买入 − 卖出回款 − 现金分红。本期余额请填写记账日实际余额；全部卖出时会自动归零。分红需填写除息后净值。</p>
           </> : <>
             {field('期间净投入（投入为正，回款为负）', automaticFlow ? Number.isFinite(formAutomaticFlow) ? String(formAutomaticFlow) : '' : productForm.flow, v => setProductForm({ ...productForm, flow: v }), 'number')}
-            <p className="mr-footnote">{automaticFlow ? '活期账户净投入自动计算，此处不可修改。' : '直接填写模式仅保存净投入，不保存逐笔交易。以后补齐交易日期与明细后，才能计算 XIRR、TWR。'}</p>
+            <p className="mr-footnote">{automaticFlow ? '活期账户净投入自动计算，此处不可修改；不记录买卖流水，不计算 XIRR / TWR。' : balanceOnly ? '定期存款直接填写净投入，不记录买卖流水，不计算 XIRR / TWR。' : '直接填写模式仅保存净投入，不保存逐笔交易。以后补齐交易日期与明细后，才能计算 XIRR、TWR。'}</p>
           </>}
         </fieldset>}
-        <p className="mr-footnote">{automaticFlow ? '活期账户净投入由本期余额减上期余额自动计算，买卖记录不会改写此规则。' : selected ? '买卖流水保存后，期间净投入按交易日期重新汇总。' : '新增产品不承接上期余额；新账户在保存产品后自动加入账户列表。'}</p>
+        <p className="mr-footnote">{balanceOnly ? (automaticFlow ? '活期账户净投入由本期余额减上期余额自动计算；不记录买卖流水，不计算 XIRR / TWR。' : '定期存款直接填写余额与净投入，不记录买卖流水，不计算 XIRR / TWR。') : selected ? '买卖流水保存后，期间净投入按交易日期重新汇总。' : '新增产品不承接上期余额；新账户在保存产品后自动加入账户列表。'}</p>
         <div className="mr-actions"><button type="button" disabled={busy} onClick={() => setModal(null)}>取消</button><button className="primary" disabled={busy}>{batch ? '应用到批量记账' : '保存产品'}</button></div>
       </form>
     </Dialog>
