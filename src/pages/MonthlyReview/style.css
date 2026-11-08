@@ -224,3 +224,12 @@
   max-width: 100%;
   text-align: left;
 }
+
+.mr-return-comparison-hint { color: #8793a5; font-size: 11px; font-weight: 400; }
+.mr-return-comparison-row { cursor: pointer; }
+.mr-return-comparison-row:hover td { background: #f0f5ff; }
+.mr-return-comparison-row:focus-visible { outline: 2px solid #3577eb; outline-offset: -2px; }
+.mr-return-median-groups { max-height: 60vh; overflow: auto; }
+.mr-return-median-group { margin: 16px 0; }
+.mr-return-median-group h3 { font-size: 14px; margin: 0 0 10px; }
+.mr-return-details .mr-return-median-group .mr-table-wrap { max-height: none; }

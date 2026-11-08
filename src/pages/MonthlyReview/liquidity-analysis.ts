@@ -4,7 +4,7 @@ import { isoDate, serialDate, Scalar } from './formula';
 import { sumAvailableAmounts } from './totals';
 import { isCashAccount } from './categories';
 
-export const LIQUIDITY_BUCKETS = ['matured', 'thisMonth', 'nextThreeMonths', 'later', 'undated', 'unknown'] as const;
+export const LIQUIDITY_BUCKETS = ['undated', 'matured', 'thisMonth', 'nextThreeMonths', 'later', 'unknown'] as const;
 export type LiquidityBucket = typeof LIQUIDITY_BUCKETS[number];
 export type ProfitFilter = 'all' | 'profitable' | 'unprofitable' | 'unknown';
 export interface LiquidityBounds { asOf: number; monthEnd: number; threeMonthEnd: number; }

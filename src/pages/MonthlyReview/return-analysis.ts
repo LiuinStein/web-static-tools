@@ -4,6 +4,7 @@ import { benchmarkBand, benchmarkFor, Benchmarks, BenchmarkBand } from './benchm
 import { sumAvailableAmounts } from './totals';
 
 export type ReturnMetric = 'xirr' | 'twr';
+export type ReturnDimension = 'category' | 'member' | 'currency';
 export type ReturnRange = 'high' | 'middle' | 'low' | 'base' | 'negative' | 'missing';
 export type BenchmarkBucket = BenchmarkBand | 'unconfigured' | 'missing';
 export interface ReturnRow { id: string; product: Product; xirr: number | null; twr: number | null; balanceRmb: number | null; }
@@ -54,7 +55,7 @@ export function distribution<T extends string>(rows: ReturnRow[], keys: T[], get
     return { key, count: group.count, balanceRmb: sumAvailableAmounts(group.amounts) };
   });
 }
-export function compareReturns(rows: ReturnRow[], metric: ReturnMetric, dimension: 'category' | 'member' | 'currency') {
+export function compareReturns(rows: ReturnRow[], metric: ReturnMetric, dimension: ReturnDimension) {
   const groups = new Map<string, ReturnRow[]>();
   for (const row of rows) {
     const key = row.product[dimension];
@@ -75,9 +76,27 @@ export function rankReturns(rows: ReturnRow[], metric: ReturnMetric, direction: 
   });
 }
 
-export type ReturnSelection = { kind: 'range'; key: ReturnRange; metric: ReturnMetric } | { kind: 'benchmark'; key: BenchmarkBucket };
+export type ReturnSelection = { kind: 'range'; key: ReturnRange; metric: ReturnMetric } | { kind: 'benchmark'; key: BenchmarkBucket } | { kind: 'comparison'; key: string; dimension: ReturnDimension; metric: ReturnMetric };
 export function returnDetailRows(rows: ReturnRow[], config: Benchmarks, selection: ReturnSelection): ReturnRow[] {
+  if (selection.kind === 'comparison') return rows.filter(row => row.product[selection.dimension] === selection.key);
   return rows.filter(row => selection.kind === 'range'
     ? rateRange(row[selection.metric]) === selection.key
     : benchmarkBucket(row, config) === selection.key);
+}
+
+
+export function splitReturnsAtMedian(rows: ReturnRow[], metric: ReturnMetric) {
+  const middle = median(rows.map(row => row[metric]));
+  const groups: Array<{ key: 'below' | 'above' | 'equal' | 'missing'; label: string; rows: ReturnRow[] }> = [
+    { key: 'below', label: '低于中位数', rows: [] },
+    { key: 'equal', label: '等于中位数', rows: [] },
+    { key: 'above', label: '高于中位数', rows: [] },
+    { key: 'missing', label: '无有效收益率', rows: [] },
+  ];
+  for (const row of rankReturns(rows, metric, 'asc')) {
+    const value = row[metric];
+    const index = value === null || middle === null ? 3 : value < middle ? 0 : value > middle ? 2 : 1;
+    groups[index].rows.push(row);
+  }
+  return { median: middle, groups };
 }

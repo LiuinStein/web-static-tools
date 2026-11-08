@@ -1002,7 +1002,10 @@ test('clicking return and benchmark distribution entries opens scoped product de
     const dialog = tree => nodes(tree).find(node => node.props?.className?.includes('mr-return-details'));
     const charts = tree => nodes(tree).filter(node => node.type === 'button' && node.props['aria-haspopup'] === 'dialog');
     let tree = render();
+    const rankingFilter = tree => nodes(tree).find(node => node.type === 'select' && node.props['aria-label'] === '产品排行筛选');
+    assert.equal(rankingFilter(tree).props.value, 'all');
     charts(tree)[0].props.onClick();
+    assert.equal(rankingFilter(render()).props.value, 'all', 'opening a return distribution must not filter the ranking');
     let modal = dialog(render());
     assert.equal(modal.props.visible, true);
     assert.ok(modal.props.title.includes('XIRR'));
@@ -1011,6 +1014,7 @@ test('clicking return and benchmark distribution entries opens scoped product de
     assert.ok(text(modal).includes('1,100.00'));
     assert.ok(text(modal).includes('20.00%'));
     charts(render())[6].props.onClick();
+    assert.equal(rankingFilter(render()).props.value, 'all', 'opening the high benchmark bucket must not apply band:high to the ranking');
     modal = dialog(render());
     assert.equal(nodes(modal).find(node => node.type === 'tbody').props.children.length, 2);
     assert.ok(text(modal).includes('基准指标'));
@@ -1050,6 +1054,9 @@ test('clicking return and benchmark distribution entries opens scoped product de
     assert.equal(countRows(render()), 1, 'WTH exceeds its debt-fund benchmark high threshold');
     assert.equal(filter(render()).props.value, 'band:high');
     assert.equal(dialog(render()).props.visible, false, 'dropdown filtering does not open a dialog');
+    charts(render())[1].props.onClick();
+    assert.equal(filter(render()).props.value, 'band:high', 'opening distribution details must preserve a manually selected ranking filter');
+    dialog(render()).props.onClose('maskClick');
     filter(render()).props.onChange({ target: { value: 'range:middle' } });
     assert.equal(countRows(render()), 1);
     filter(render()).props.onChange({ target: { value: 'all' } });
@@ -1059,6 +1066,31 @@ test('clicking return and benchmark distribution entries opens scoped product de
     assert.equal(filter(render()).props.value, 'all', 'changing the metric resets the ranking condition');
     filter(render()).props.onChange({ target: { value: 'range:missing' } });
     assert.equal(countRows(render()), 1, 'TWR missing-rate filtering uses the active metric');
+    nodes(render()).find(node => node.type === 'select' && node.props['aria-label'] === '收益分析成员').props.onChange({ target: { value: '全部' } });
+    nodes(render()).find(node => node.type === 'button' && node.props.children === 'XIRR').props.onClick();
+    filter(render()).props.onChange({ target: { value: 'range:high' } });
+    const comparison = tree => nodes(tree).find(node => node.type === 'tr' && node.props.className === 'mr-return-comparison-row');
+    comparison(render()).props.onClick();
+    modal = dialog(render());
+    assert.ok(modal.props.title.includes('分组比较'));
+    assert.ok(text(modal).includes('15.00%'));
+    const section = label => nodes(modal).find(node => node.type === 'section' && node.props['aria-label'] === label);
+    assert.ok(text(section('低于中位数')).includes('WTH 示例产品'));
+    assert.ok(!text(section('低于中位数')).includes('Assets 示例产品'));
+    assert.ok(text(section('高于中位数')).includes('Assets 示例产品'));
+    assert.equal(filter(render()).props.value, 'range:high');
+    const medianTable = nodes(modal).find(node => node.props?.className === 'mr-return-median-groups');
+    const beforeMedianClose = { ...counters };
+    modal.props.onClose('maskClick');
+    modal = dialog(render());
+    assert.deepEqual(counters, beforeMedianClose);
+    assert.equal(nodes(modal).find(node => node.props?.className === 'mr-return-median-groups'), medianTable);
+    let prevented = false;
+    comparison(render()).props.onKeyDown({ key: 'Enter', preventDefault: () => { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.equal(dialog(render()).props.visible, true);
+    assert.deepEqual(counters, beforeMedianClose);
+
   } finally {
     Object.assign(React, original);
     Object.assign(analysis, functions);
@@ -1121,6 +1153,7 @@ test('liquidity profitability filtering preserves zero and unknown gains and com
   assert.equal(selectLiquidityRows(closed, DEFAULT_LIQUIDITY_FILTERS).length, 0);
   assert.equal(selectLiquidityRows(closed, { ...DEFAULT_LIQUIDITY_FILTERS, holdingOnly: false }).length, 1);
   const groups = liquidityGroups(rows), summary = liquiditySummary(rows);
+  assert.deepEqual(groups.slice(0, 2).map(group => group.key), ['undated', 'matured']);
   assert.equal(groups.reduce((total, group) => total + group.count, 0), rows.length);
   assert.equal(groups.find(group => group.key === 'thisMonth').balanceRmb, 1100);
   assert.equal(summary.balanceRmb, 2200);
@@ -1288,4 +1321,26 @@ test('monthly dialogs use CSS positioning from first paint and preserve cached m
   } finally {
     if (extension) require.extensions['.tsx'] = extension; else delete require.extensions['.tsx'];
   }
+});
+
+
+test('comparison details partition every scoped product at its group median for either return metric', () => {
+  const { splitReturnsAtMedian, returnDetailRows, compareReturns } = require('../src/pages/MonthlyReview/return-analysis.ts');
+  const row = (id, xirr, twr, member = '本人') => ({ id, product: { name: id, member, currency: 'RMB', category: 'Stock' }, xirr, twr, balanceRmb: 100 });
+  const rows = [row('a', -0.1, 0), row('b', 0, 0.2), row('c', 0, 0.4), row('d', 0.2, null), row('e', null, -0.1), row('other', 9, 9, 'WTH')];
+  const scoped = returnDetailRows(rows, {}, { kind: 'comparison', dimension: 'member', key: '本人', metric: 'xirr' });
+  const result = splitReturnsAtMedian(scoped, 'xirr');
+  assert.equal(result.median, 0);
+  assert.deepEqual(result.groups.map(g => g.rows.map(r => r.id)), [['a'], ['b', 'c'], ['d'], ['e']]);
+  assert.equal(compareReturns(scoped, 'xirr', 'member')[0].median, result.median);
+  const twr = splitReturnsAtMedian(scoped, 'twr');
+  assert.equal(twr.median, 0.1);
+  assert.deepEqual(twr.groups.map(g => g.rows.map(r => r.id)), [['e', 'a'], [], ['b', 'c'], ['d']]);
+  assert.equal(splitReturnsAtMedian(scoped.slice(0, 3), 'twr').median, 0.2);
+  const missing = splitReturnsAtMedian([row('missing', null, null)], 'xirr');
+  assert.equal(missing.median, null);
+  assert.deepEqual(missing.groups.map(g => g.rows.length), [0, 0, 0, 1]);
+  assert.equal(splitReturnsAtMedian([], 'xirr').median, null);
+  for (const [dimension, key] of [['category', 'Stock'], ['currency', 'RMB']]) assert.equal(returnDetailRows(rows, {}, { kind: 'comparison', dimension, key, metric: 'xirr' }).length, rows.length);
+  assert.deepEqual(rows.map(r => r.id), ['a', 'b', 'c', 'd', 'e', 'other']);
 });
