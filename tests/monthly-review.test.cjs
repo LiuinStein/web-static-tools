@@ -846,3 +846,232 @@ test('benchmark dropdown, legend and cell tooltip share inequality interval desc
   assert.equal(benchmarkIntervalLabel('low'), '低档 ≤ XIRR（或年化 TWR） < 中档');
   assert.ok(benchmarkRating(parseBenchmarks(null), 'Stock', 'xirr', 0.05).title.startsWith('低档 ≤ XIRR < 中档'));
 });
+
+test('return analysis preserves zero and missing rates and converts current balances without mutating workbook cells', async () => {
+  const { returnRows, returnSummary, median } = require('../src/pages/MonthlyReview/return-analysis.ts');
+  const book = await fixture();
+  book.set('Assets', 'K3', 0); book.set('Assets', 'L3', '#NUM!');
+  book.set('WTH', 'K3', -0.1); book.set('WTH', 'L3', 0.03);
+  const products = book.products(), before = book.cell('Assets', 'E3');
+  const rows = returnRows(book, products);
+  assert.equal(rows[0].xirr, 0);
+  assert.equal(rows[0].twr, null);
+  const summary = returnSummary(rows, 'xirr');
+  assert.equal(summary.median, -0.05);
+  assert.equal(summary.balanceRmb, 2200);
+  assert.deepEqual([summary.valid, summary.flat, summary.negative, summary.positive], [2, 1, 1, 0]);
+  assert.deepEqual([returnSummary(rows, 'twr').valid, returnSummary(rows, 'twr').missing], [1, 1]);
+  assert.equal(median([0.1, 0.2]), 0.15);
+  assert.equal(median([null, NaN, Infinity]), null);
+  assert.equal(returnSummary([], 'xirr').median, null);
+  const invalid = returnRows(book, products, [productKey(products[0])]);
+  assert.equal(invalid[0].xirr, null);
+  assert.equal(invalid[0].balanceRmb, null);
+  assert.equal(returnSummary(invalid, 'xirr').missingBalance, 1);
+  assert.deepEqual(book.cell('Assets', 'E3'), before);
+  const foreign = [{ ...products[0], currency: 'USD', balance: 0.1 }, { ...products[1], currency: 'MISSING', balance: 10 }];
+  const converted = returnRows(book, foreign);
+  assert.equal(converted[0].balanceRmb, 0.7);
+  assert.equal(converted[1].balanceRmb, null);
+  assert.equal(returnSummary(converted, 'xirr').balanceRmb, 0.7);
+});
+
+test('return analysis groups medians rather than aggregating product rates and ranks missing values last', () => {
+  const { compareReturns, rankReturns, rateRange, distribution, RETURN_RANGES } = require('../src/pages/MonthlyReview/return-analysis.ts');
+  const row = (id, member, currency, category, xirr, balanceRmb) => ({ id, product: { name: id, member, currency, category }, xirr, twr: null, balanceRmb });
+  const rows = [
+    row('a', '本人', 'RMB', 'Stock', 0.2, 100),
+    row('b', '本人', 'USD', 'Stock', -0.1, 900),
+    row('c', 'WTH', 'RMB', 'Debt Fund', 0.03, 100),
+    row('d', 'WTH', 'HKD', 'Debt Fund', null, null),
+  ];
+  const groups = compareReturns(rows, 'xirr', 'category');
+  assert.equal(groups[0].key, 'Stock');
+  assert.equal(groups[0].median, 0.05);
+  assert.equal(groups[0].balanceRmb, 1000);
+  assert.equal(groups[1].median, 0.03);
+  assert.equal(groups[1].valid, 1);
+  assert.equal(groups[1].count, 2);
+  assert.equal(compareReturns(rows, 'xirr', 'member').length, 2);
+  assert.equal(compareReturns(rows, 'xirr', 'currency').length, 3);
+  assert.deepEqual(rankReturns(rows, 'xirr', 'desc').map(r => r.id), ['a', 'c', 'b', 'd']);
+  assert.deepEqual(rankReturns(rows, 'xirr', 'asc').map(r => r.id), ['b', 'c', 'a', 'd']);
+  for (const [value, band] of [[0.2, 'high'], [0.1, 'middle'], [0.05, 'low'], [0, 'base'], [-0.01, 'negative'], [null, 'missing']]) assert.equal(rateRange(value), band);
+  const buckets = distribution(rows, RETURN_RANGES, r => rateRange(r.xirr));
+  assert.equal(buckets.reduce((sum, b) => sum + b.count, 0), 4);
+  assert.equal(buckets.find(b => b.key === 'missing').count, 1);
+  assert.equal(rows[0].id, 'a', 'sorting leaves the source array unchanged');
+});
+
+test('benchmark return analysis respects type-specific metrics and keeps unconfigured and missing results separate', () => {
+  const { parseBenchmarks } = require('../src/pages/MonthlyReview/benchmarks.ts');
+  const { benchmarkBucket, distribution, BENCHMARK_BUCKETS } = require('../src/pages/MonthlyReview/return-analysis.ts');
+  const config = parseBenchmarks(null);
+  config['Equity Fund'].metric = 'twr';
+  const rows = [
+    { product: { category: 'Stock' }, xirr: 0.2, twr: -0.3, balanceRmb: 100 },
+    { product: { category: 'Debt Fund' }, xirr: 0.03, twr: 1, balanceRmb: 200 },
+    { product: { category: 'Equity Fund' }, xirr: -0.5, twr: 0.1, balanceRmb: 300 },
+    { product: { category: 'Time Deposit' }, xirr: 1, twr: 1, balanceRmb: 400 },
+    { product: { category: 'Stock' }, xirr: null, twr: 0.3, balanceRmb: 500 },
+  ];
+  assert.deepEqual(rows.map(r => benchmarkBucket(r, config)), ['high', 'middle', 'middle', 'unconfigured', 'missing']);
+  const groups = distribution(rows, BENCHMARK_BUCKETS, r => benchmarkBucket(r, config));
+  assert.equal(groups.find(g => g.key === 'middle').count, 2);
+  assert.equal(groups.find(g => g.key === 'middle').balanceRmb, 500);
+  assert.equal(groups.find(g => g.key === 'unconfigured').count, 1);
+  assert.equal(groups.find(g => g.key === 'missing').count, 1);
+});
+
+test('return analysis overview renders all three analysis views and handles empty and missing data', async () => {
+  const oldExtension = require.extensions['.tsx'];
+  require.extensions['.tsx'] = (m, f) => m._compile(ts.transpileModule(fs.readFileSync(f, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React, esModuleInterop: true } }).outputText, f);
+  try {
+    const React = require('react'), { renderToStaticMarkup } = require('react-dom/server');
+    const ReturnAnalysis = require('../src/pages/MonthlyReview/ReturnAnalysis.tsx').default;
+    const { parseBenchmarks } = require('../src/pages/MonthlyReview/benchmarks.ts');
+    const book = await fixture();
+    book.set('Assets', 'K3', 0.2);
+    const props = { book, products: book.products(), benchmarks: parseBenchmarks(null), categoryNames: { 'Debt Fund': '债券基金 / 理财' }, invalidKeys: [], onViewProduct: () => {} };
+    const html = renderToStaticMarkup(React.createElement(ReturnAnalysis, props));
+    for (const text of ['收益率分析', 'XIRR 分布', '分组比较', '产品排行', '业绩基准达标情况', '收益率分析指标', '查看资产']) assert.ok(html.includes(text), text);
+    assert.ok(!html.includes('NaN'));
+    const empty = renderToStaticMarkup(React.createElement(ReturnAnalysis, { ...props, products: [] }));
+    assert.ok(empty.includes('当前筛选范围没有产品'));
+    assert.ok(empty.includes('没有符合当前筛选条件的产品'));
+    assert.ok(!empty.includes('NaN'));
+  } finally {
+    if (oldExtension) require.extensions['.tsx'] = oldExtension; else delete require.extensions['.tsx'];
+  }
+});
+
+test('distribution detail selection matches the clicked bucket and retains all scoped products', () => {
+  const { returnDetailRows } = require('../src/pages/MonthlyReview/return-analysis.ts');
+  const { parseBenchmarks } = require('../src/pages/MonthlyReview/benchmarks.ts');
+  const config = parseBenchmarks(null);
+  config['Equity Fund'].metric = 'twr';
+  const rows = [
+    { id: 'a', product: { category: 'Stock' }, xirr: 0.2, twr: 0.01 },
+    { id: 'b', product: { category: 'Stock' }, xirr: 0.05, twr: 0.2 },
+    { id: 'c', product: { category: 'Equity Fund' }, xirr: -0.1, twr: 0.2 },
+    { id: 'd', product: { category: 'Time Deposit' }, xirr: 0.2, twr: 0 },
+    { id: 'e', product: { category: 'Stock' }, xirr: null, twr: 0.2 },
+  ];
+  assert.deepEqual(returnDetailRows(rows, config, { kind: 'range', key: 'high', metric: 'xirr' }).map(r => r.id), ['a', 'd']);
+  assert.deepEqual(returnDetailRows(rows, config, { kind: 'range', key: 'high', metric: 'twr' }).map(r => r.id), ['b', 'c', 'e']);
+  assert.deepEqual(returnDetailRows(rows, config, { kind: 'benchmark', key: 'high' }).map(r => r.id), ['a', 'c']);
+  assert.deepEqual(returnDetailRows(rows, config, { kind: 'benchmark', key: 'unconfigured' }).map(r => r.id), ['d']);
+  assert.deepEqual(returnDetailRows(rows, config, { kind: 'benchmark', key: 'missing' }).map(r => r.id), ['e']);
+  assert.deepEqual(returnDetailRows(rows.slice(0, 1), config, { kind: 'benchmark', key: 'high' }).map(r => r.id), ['a']);
+  assert.equal(rows.length, 5);
+});
+
+test('clicking return and benchmark distribution entries opens scoped product details with balances and rates', async () => {
+  const book = await fixture();
+  book.set('Assets', 'K3', 0.2); book.set('WTH', 'K3', 0.1);
+  const React = require('react');
+  const original = { useState: React.useState, useMemo: React.useMemo, useEffect: React.useEffect };
+  const extension = require.extensions['.tsx'];
+  require.extensions['.tsx'] = (m, f) => m._compile(ts.transpileModule(fs.readFileSync(f, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React, esModuleInterop: true } }).outputText, f);
+  let states = [], memos = [], cursor = 0;
+  React.useState = value => {
+    const index = cursor++;
+    if (!(index in states)) states[index] = typeof value === 'function' ? value() : value;
+    return [states[index], next => { states[index] = typeof next === 'function' ? next(states[index]) : next; }];
+  };
+  React.useMemo = (fn, deps) => {
+    const index = cursor++, previous = memos[index];
+    if (!previous || previous.deps.length !== deps.length || deps.some((value, i) => !Object.is(value, previous.deps[i]))) memos[index] = { deps: [...deps], value: fn() };
+    return memos[index].value;
+  };
+  React.useEffect = () => {};
+  const nodes = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(nodes) : [node, ...nodes(node.props?.children)];
+  const text = node => Array.isArray(node) ? node.map(text).join('') : node && typeof node === 'object' ? text(node.props?.children) : node == null || node === false ? '' : String(node);
+  const analysis = require('../src/pages/MonthlyReview/return-analysis.ts');
+  const watched = ['returnRows', 'returnSummary', 'distribution', 'compareReturns', 'rankReturns', 'returnDetailRows'];
+  const counters = {}, functions = {};
+  for (const key of watched) {
+    functions[key] = analysis[key]; counters[key] = 0;
+    analysis[key] = (...args) => { counters[key]++; return functions[key](...args); };
+  }
+  try {
+    const Component = require('../src/pages/MonthlyReview/ReturnAnalysis.tsx').default;
+    const { parseBenchmarks } = require('../src/pages/MonthlyReview/benchmarks.ts');
+    const props = { book, products: book.products(), benchmarks: parseBenchmarks(null), categoryNames: {}, invalidKeys: [], onViewProduct: () => {} };
+    const render = () => { cursor = 0; return Component(props); };
+    const dialog = tree => nodes(tree).find(node => node.props?.className?.includes('mr-return-details'));
+    const charts = tree => nodes(tree).filter(node => node.type === 'button' && node.props['aria-haspopup'] === 'dialog');
+    let tree = render();
+    charts(tree)[0].props.onClick();
+    let modal = dialog(render());
+    assert.equal(modal.props.visible, true);
+    assert.ok(modal.props.title.includes('XIRR'));
+    assert.equal(nodes(modal).find(node => node.type === 'tbody').props.children.length, 1);
+    assert.ok(text(modal).includes('当期金额（原币）'));
+    assert.ok(text(modal).includes('1,100.00'));
+    assert.ok(text(modal).includes('20.00%'));
+    charts(render())[6].props.onClick();
+    modal = dialog(render());
+    assert.equal(nodes(modal).find(node => node.type === 'tbody').props.children.length, 2);
+    assert.ok(text(modal).includes('基准指标'));
+    nodes(render()).find(node => node.type === 'select' && node.props['aria-label'] === '收益分析成员').props.onChange({ target: { value: 'WTH' } });
+    charts(render())[6].props.onClick();
+    modal = dialog(render());
+    assert.equal(nodes(modal).find(node => node.type === 'tbody').props.children.length, 1);
+    assert.ok(text(modal).includes('WTH 示例产品'));
+    const beforeClose = { ...counters };
+    const table = nodes(modal).find(node => node.type === 'div' && node.props.className === 'mr-table-wrap');
+    assert.equal(modal.props.animation, false);
+    assert.equal(modal.props.overlayProps.cache, true);
+    assert.ok(modal.props.closeMode.includes('mask'));
+    modal.props.onClose('maskClick');
+    let closed = dialog(render());
+    assert.equal(closed.props.visible, false);
+    assert.deepEqual(counters, beforeClose, 'closing must not rerun statistics, sorting or detail filtering');
+    assert.equal(nodes(closed).find(node => node.type === 'div' && node.props.className === 'mr-table-wrap'), table, 'retain the exact table subtree while hiding');
+    for (let repeat = 0; repeat < 3; repeat++) {
+      charts(render())[6].props.onClick();
+      const reopened = dialog(render());
+      assert.equal(reopened.props.visible, true);
+      assert.deepEqual(counters, beforeClose, 'reopening unchanged data reuses cached analysis');
+      reopened.props.onClose('maskClick');
+      closed = dialog(render());
+      assert.equal(closed.props.visible, false);
+      assert.deepEqual(counters, beforeClose);
+    }
+    const ranking = tree => nodes(tree).find(node => node.type === 'article' && node.props.className?.includes('mr-return-ranking'));
+    const countRows = tree => nodes(ranking(tree)).find(node => node.type === 'tbody').props.children.length;
+    const filter = tree => nodes(tree).find(node => node.type === 'select' && node.props['aria-label'] === '产品排行筛选');
+    const controls = nodes(ranking(render())).filter(node => node.type === 'select').map(node => node.props['aria-label']);
+    assert.deepEqual(controls, ['产品排行筛选', '收益率排行顺序', '收益率排行显示数量']);
+    filter(render()).props.onChange({ target: { value: 'range:high' } });
+    assert.equal(countRows(render()), 0, 'WTH has 10% XIRR, below the fixed 20% high return band');
+    filter(render()).props.onChange({ target: { value: 'band:high' } });
+    assert.equal(countRows(render()), 1, 'WTH exceeds its debt-fund benchmark high threshold');
+    assert.equal(filter(render()).props.value, 'band:high');
+    assert.equal(dialog(render()).props.visible, false, 'dropdown filtering does not open a dialog');
+    filter(render()).props.onChange({ target: { value: 'range:middle' } });
+    assert.equal(countRows(render()), 1);
+    filter(render()).props.onChange({ target: { value: 'all' } });
+    assert.equal(filter(render()).props.value, 'all');
+    assert.equal(countRows(render()), 1, 'all ranking products still respects the WTH member scope');
+    nodes(render()).find(node => node.type === 'button' && node.props.children === '年化 TWR').props.onClick();
+    assert.equal(filter(render()).props.value, 'all', 'changing the metric resets the ranking condition');
+    filter(render()).props.onChange({ target: { value: 'range:missing' } });
+    assert.equal(countRows(render()), 1, 'TWR missing-rate filtering uses the active metric');
+  } finally {
+    Object.assign(React, original);
+    Object.assign(analysis, functions);
+    if (extension) require.extensions['.tsx'] = extension; else delete require.extensions['.tsx'];
+  }
+});
+
+test('distribution classifies each product once even with multiple benchmark buckets', () => {
+  const { distribution, BENCHMARK_BUCKETS } = require('../src/pages/MonthlyReview/return-analysis.ts');
+  const rows = Array.from({ length: 2000 }, (_, i) => ({ id: String(i), balanceRmb: 0.1, bucket: BENCHMARK_BUCKETS[i % BENCHMARK_BUCKETS.length] }));
+  let classifications = 0;
+  const groups = distribution(rows, BENCHMARK_BUCKETS, row => { classifications++; return row.bucket; });
+  assert.equal(classifications, rows.length);
+  assert.equal(groups.reduce((sum, group) => sum + group.count, 0), rows.length);
+  assert.equal(groups.find(group => group.key === 'high').balanceRmb, 33.4);
+});
