@@ -120,14 +120,18 @@ test('new product rows keep FX lookup, settings writes and next-period FX snapsh
 test('OneDrive publishes Blob bytes, replaces the same filename and propagates failures', async () => {
   assert.equal(normalizeFolder('/月度复盘/'), '月度复盘'); assert.throws(() => normalizeFolder('../private'));
   const service = Object.create(MonthlyDrive.prototype); service.folder = '月度复盘'; service.ensureFolder = async () => {};
-  const headers = [], uploads = [];
+  const headers = [], uploads = []; let stored;
   const { serializeContent } = require('@microsoft/microsoft-graph-client/lib/src/GraphRequestUtil.js');
   service.client = { api(endpoint) {
-    assert.equal(endpoint, '/me/drive/root:/%E6%9C%88%E5%BA%A6%E5%A4%8D%E7%9B%98/2026-10.xlsx:/content');
-    const q = { query(v) { assert.equal(v['@microsoft.graph.conflictBehavior'], 'replace'); return q; }, header(k, v) { headers.push([k, v]); return q; }, async put(body) {
-      assert.ok(body instanceof Blob); assert.equal(serializeContent(body), body);
-      uploads.push([...new Uint8Array(await body.arrayBuffer())]);
+    const path = '/me/drive/root:/%E6%9C%88%E5%BA%A6%E5%A4%8D%E7%9B%98/2026-10.xlsx';
+    const q = { select() { return q; }, responseType() { return q; }, query(v) { assert.equal(v['@microsoft.graph.conflictBehavior'], 'replace'); return q; }, header(k, v) { headers.push([k, v]); return q; }, async put(body) {
+      assert.equal(endpoint,path + ':/content'); assert.ok(body instanceof Blob); assert.equal(serializeContent(body), body);
+      uploads.push([...new Uint8Array(await body.arrayBuffer())]); stored = await body.arrayBuffer();
       return { id:'existing-file', name:'2026-10.xlsx', eTag:'v' + uploads.length };
+    }, async get() {
+      if (endpoint.endsWith('/content')) { assert.equal(endpoint,'/me/drive/items/existing-file/content'); return stored; }
+      assert.equal(endpoint,path);
+      return { id:'existing-file', name:'2026-10.xlsx', eTag:'v' + uploads.length, size:stored.byteLength, webUrl:'https://onedrive.live.com/test-file', file:{} };
     } }; return q;
   } };
   const source = new Uint8Array([99,1,2,3,88]);
@@ -1506,4 +1510,44 @@ test('saved review marks follow unchanged products across row insertion, deletio
   assert.equal(session.reviewed.size, originalRows.length - 1);
   assert.ok(!session.reviewed.has(productKey(nextAsset)));
   assert.ok(session.reviewed.has(productKey(session.book.products().find(p => p.sheet === 'WTH'))));
+});
+
+test('month filenames follow accounting dates without a hyphen', () => {
+  const { monthlyFileName } = require('../src/pages/MonthlyReview/filename.ts');
+  assert.equal(monthlyFileName('2026-11-08'),'202611.xlsx');
+  assert.equal(monthlyFileName('2027-01-31'),'202701.xlsx');
+  assert.equal(monthlyFileName('2026-12'),'202612.xlsx');
+  for (const date of ['', '2026-13-01', '202611', '../2026-11']) assert.throws(() => monthlyFileName(date),/记账日期无效/);
+});
+
+test('OneDrive does not report success until target metadata, URL, bytes and version are verified', async () => {
+  for (const failure of ['missing-id','wrong-id','wrong-name','wrong-size','missing-url','wrong-bytes','version-changed','read-error']) {
+    const service = Object.create(MonthlyDrive.prototype); service.folder='Months'; service.ensureFolder=async()=>{};
+    let reads=0, puts=0;
+    service.client={api(endpoint){const q={query(){return q},header(){return q},select(){return q},responseType(){return q},async put(){puts++;return failure==='missing-id'?{}:{id:'file',eTag:'v1'}},async get(){
+      if(failure==='read-error')throw new Error('metadata unavailable');
+      if(endpoint.endsWith('/content'))return new Uint8Array(failure==='wrong-bytes'?[3,2,1]:[1,2,3]).buffer;
+      reads++;return {id:failure==='wrong-id'?'other':'file',name:failure==='wrong-name'?'2026-11.xlsx':'202611.xlsx',size:failure==='wrong-size'?9:3,webUrl:failure==='missing-url'?undefined:'https://onedrive.live.com/file',eTag:failure==='version-changed'&&reads>1?'v2':'v1',file:{}};
+    }};return q}};
+    await assert.rejects(service.publish('202611.xlsx',new Uint8Array([1,2,3])),/未能确认发布成功/,failure);
+    assert.equal(puts,1);
+  }
+});
+
+test('export repairs cached legacy subtotals on a copy and saved review metadata follows normalized rows', async () => {
+  const source=await fixture();
+  for(const [r,cells]of [[5,{B:'Sub Total'}],[7,{C:'Sub Total'}],[9,{B:'Sub Total'}],[12,{B:'Stock',C:'Other account',D:'Other product',E:25,H:20,I:0}],[13,{C:'Sub Total'}],[15,{B:'Sub Total'}],[17,{A:'Grand Total'}]])for(const [c,v]of Object.entries(cells))source.set('Assets',c+r,v);
+  for(const [a,f]of Object.entries({D1:'E17',E1:'E17',E5:'E4',E7:'0',E9:'E7',E13:'SUM(E12)',E15:'E13',E17:'SUM(E5,E9,E15)'}))source.formula('Assets',a,f);
+  const keys=source.products().map(productKey),checked=new MonthlyBatch(source).check(keys,true);
+  const loaded=await MonthlyWorkbook.open(await source.export());
+  assert.equal(loaded.cleanupEmptySubtotals(),0,'every export removes legacy orphan subtotals');
+  assert.ok(source.sheet('Assets').cells.has('D12'),'export leaves source coordinates and saved metadata intact');
+  assert.equal(source.value('Assets','C7'),'Sub Total');
+  const prepared=checked.apply(next=>next.cleanupEmptySubtotals());
+  assert.equal(prepared.reviewed.size,keys.length);
+  const state=prepared.reviewState(),reopened=await MonthlyWorkbook.open(await prepared.book.export());
+  const restored=MonthlyBatch.restore(reopened,state);
+  assert.equal(restored.reviewed.size,keys.length);
+  assert.equal(restored.book.products().find(p=>p.name==='Other product').balance,25);
+  assert.equal(loaded.number('Assets','D1'),source.number('Assets','D1'));
 });

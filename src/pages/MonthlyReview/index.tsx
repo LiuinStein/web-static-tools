@@ -5,6 +5,7 @@ import { repaymentForm, encodeRepayment } from './repayment';
 import BenchmarkDialog from './BenchmarkDialog';
 import { Benchmarks, BENCHMARK_STORAGE_KEY, DEFAULT_BENCHMARKS, parseBenchmarks, BenchmarkBand, BENCHMARK_BANDS, benchmarkFor, benchmarkIntervalLabel, matchesBenchmarkBand } from './benchmarks';
 import AmountInput from './AmountInput';
+import { monthlyFileName } from './filename';
 import { ReviewAccount, reviewAccounts, nextReviewAccount } from './account-navigation';
 import { linkedOptions } from './filters';
 import { rawAmount, currencyCode } from './amount';
@@ -84,7 +85,7 @@ export default function MonthlyReview() {
   const [settings, setSettings] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [notice, setNotice] = useState<React.ReactNode>('');
   const [modal, setModal] = useState<null | 'product' | 'transactions' | 'newMonth' | 'liability' | 'cancelBatch' | 'group' | 'nextMember' | 'accountsComplete' | 'unreviewedAccount'>(null);
   const [pendingAccount, setPendingAccount] = useState<ReviewAccount | null>(null);
   const [unreviewedCount, setUnreviewedCount] = useState(0);
@@ -190,7 +191,7 @@ export default function MonthlyReview() {
       return;
     }
     // Apply to a copy; a rejected operation leaves both the visible workbook and saved draft intact.
-    const edited = MonthlyBatch.restore(await MonthlyWorkbook.open(draft.data), draft.reviewState).apply(action, touchedKey).markSettings(settingsKeys);
+    const edited = MonthlyBatch.restore(await MonthlyWorkbook.open(draft.data), draft.reviewState).apply(action, touchedKey).markSettings(settingsKeys).apply(next => next.cleanupEmptySubtotals());
     const next = edited.book;
     const data = await next.export(); const updated = { ...draft, data, reviewState: edited.reviewState(), updated: new Date().toISOString(), published: undefined };
     const saved = await saveDraft(updated, draft); setBook(next); setDraft(saved); setDrafts(await listDrafts()); setNotice('已保存本机草稿，页面结果已更新。');
@@ -238,8 +239,9 @@ export default function MonthlyReview() {
   }
   async function saveBatch() {
     if (!batch || !draft) return;
-    const completed = batch.commitInputs();
+    let completed = batch.commitInputs();
     if (completed.invalid.length) throw new Error('仍有 ' + completed.invalid.length + ' 项金额无效，请修正后再保存（包含其他 tab 或被筛选隐藏的账户）');
+    completed = completed.apply(next => next.cleanupEmptySubtotals());
     completed.book.validate();
     const data = await completed.book.export();
     const saved = await saveDraft({ ...draft, data, reviewState: completed.reviewState(), updated: new Date().toISOString(), published: undefined }, draft);
@@ -337,11 +339,14 @@ export default function MonthlyReview() {
   async function publish() {
     if (!drive || !book || !draft) return;
     if (draft.scope && draft.scope !== scope) throw new Error('此账本来自其他账户或目录。请打开当前目录的账本，或先另存为当前目录副本。');
-    if (!window.confirm(`将“${draft.name}”发布到 ${account} 的 /${drive.folder}/。如存在同名文件，将覆盖其内容；不存在则创建新文件。`)) return;
-    const data = await book.export(); const result = await drive.publish(draft.name, data);
-    const updated = { ...draft, data, source: result, scope, sourceLabel: `${account} · /${drive.folder}/`, published: new Date().toISOString() };
+    const name = monthlyFileName(isoDate(book.value('Assets', 'L1')));
+    if (!window.confirm(`将“${name}”发布到 ${account} 的 /${drive.folder}/。如存在同名文件，将覆盖其内容；不存在则创建新文件。`)) return;
+    const prepared = MonthlyBatch.restore(book, draft.reviewState).apply(next => next.cleanupEmptySubtotals());
+    const data = await prepared.book.export(); const result = await drive.publish(name, data);
+    const updated = { ...draft, name: result.name, data, reviewState: prepared.reviewState(), source: result, scope, sourceLabel: `${account} · /${drive.folder}/`, published: new Date().toISOString() };
     // Publication is already successful even if refreshing the folder or persisting cache fails.
-    setDraft(updated); setNotice('已发布到 OneDrive。');
+    setBook(prepared.book); setDraft(updated);
+    setNotice(<>已发布到 OneDrive：/{drive.folder}/{result.name}（内容已核验）。 <a href={result.webUrl} target="_blank" rel="noopener noreferrer">打开文件</a></>);
     try { const saved = await saveDraft(updated, draft); setDraft(saved); setDrafts(await listDrafts()); setFiles(await drive.list()); } catch (e) { setError(`文件已发布，但刷新本机缓存失败：${e.message}`); }
   }
   const accountingDate = isoDate(val('Assets', 'L1'));
@@ -389,7 +394,7 @@ export default function MonthlyReview() {
     <input ref={input} type="file" accept=".xlsx" hidden onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) run(async () => { await activate(new Uint8Array(await file.arrayBuffer()), file.name); setNotice('已导入并保存在本机，尚未发布到 OneDrive。'); }); }} />
     <div className="mr-toolbar">
       <div className="mr-toolbar-group"><button disabled={busy || Boolean(batch)} onClick={() => input.current?.click()}>导入 Excel</button><select aria-label="打开本机账本" disabled={busy || Boolean(batch)} value={draft?.id || ''} onChange={e => { const d = drafts.find(x => x.id === e.target.value); if (d) run(async () => { const opened = await MonthlyWorkbook.open(d.data); setBook(opened); setDraft(d); }); }}><option value="">本机账本</option>{drafts.map(d => <option key={d.id} value={d.id} title={`${d.name} · ${draftSourceTitle(d)}`}>{draftOptionLabel(d, drafts)}</option>)}</select><button disabled={busy || !book || Boolean(batch)} onClick={() => { const today = new Date(); setNewDate(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`); setModal('newMonth'); }}>＋ 新建月份</button></div>
-      <div className="mr-toolbar-group"><button disabled={busy || !book || Boolean(batch)} onClick={() => run(async () => { if (!book || !draft) return; const data = await book.export(); const url = URL.createObjectURL(new Blob([data as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })); const a = document.createElement('a'); a.href = url; a.download = draft.name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); setNotice('Excel 已生成，包含原有公式及当前计算结果。'); })}>↓ 下载 Excel</button><button className="primary" disabled={busy || !book || !drive || Boolean(batch)} onClick={() => run(publish)}>发布到 OneDrive</button><button disabled={busy} onClick={() => setSettings(!settings)}>同步设置</button></div>
+      <div className="mr-toolbar-group"><button disabled={busy || !book || Boolean(batch)} onClick={() => run(async () => { if (!book || !draft) return; const data = await book.export(); const url = URL.createObjectURL(new Blob([data as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })); const a = document.createElement('a'); a.href = url; a.download = monthlyFileName(isoDate(book.value('Assets', 'L1'))); a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); setNotice('Excel 已生成，包含原有公式及当前计算结果。'); })}>↓ 下载 Excel</button><button className="primary" disabled={busy || !book || !drive || Boolean(batch)} onClick={() => run(publish)}>发布到 OneDrive</button><button disabled={busy} onClick={() => setSettings(!settings)}>同步设置</button></div>
     </div>
     {error && !modal && <div className="mr-message error" role="alert">{error}</div>}{notice && <div className="mr-message" role="status">{notice}</div>}
     {settings && <section className="mr-panel"><h2>OneDrive 连接</h2><p>与交易日记共用 Microsoft 登录，账本目录独立。连接后修改目录并应用即可，无需重复登录。请在 Entra 中注册当前站点的重定向网址，并授予 Files.ReadWrite 权限。</p><div className="mr-grid">{field('应用客户端 ID', config.clientId, v => setConfig({ ...config, clientId: v }))}{field('账本文件夹', config.folder, v => setConfig({ ...config, folder: v }))}</div><div className="mr-actions"><button disabled={busy} onClick={() => setConfig({ ...monthlyOneDriveConfig })}>恢复默认配置</button><button className="primary" disabled={busy} onClick={() => run(() => connect())}>{drive ? '应用目录' : '连接 OneDrive'}</button>{drive && <button disabled={busy} onClick={() => run(() => connect(true))}>切换账户</button>}{drive && <button disabled={busy} onClick={() => run(async () => { backgroundRevision.current += 1; await drive.disconnect(); setDrive(null); setFiles([]); setScope(''); setAccount(''); })}>断开共享登录</button>}</div></section>}
@@ -491,6 +496,6 @@ export default function MonthlyReview() {
       <p>确定取消本次批量记账的全部修改？已保存的本机草稿不受影响。</p>
       <div className="mr-actions"><button type="button" disabled={busy} onClick={() => setModal(null)}>继续记账</button><button type="button" className="primary" disabled={busy} onClick={discardBatch}>确定取消</button></div>
     </Dialog>
-    <Dialog visible={modal === 'newMonth'} title="新建月份" footer={false} onClose={() => setModal(null)} className="mr-dialog">{error && <div className="mr-message error" role="alert">{error}</div>}{field('新记账日期', newDate, setNewDate, 'date')}<p>复制当前账本，承接上期余额、保留历史流水，清零当期收入与净投入。已有月份文件不会被覆盖。</p><div className="mr-actions"><button disabled={busy} onClick={() => setModal(null)}>取消</button><button className="primary" disabled={busy} onClick={() => run(async () => { if (!draft) return; const name = `${newDate.slice(0, 7)}.xlsx`; if (drafts.some(d => d.name === name && d.scope === draft.scope)) throw new Error('本机已存在此月份，请从账本列表打开'); const next = await MonthlyWorkbook.open(draft.data); next.rollover(newDate); await activate(await next.export(), name, { scope: draft.scope, sourceLabel: draft.sourceLabel }); startBatch(next); setNotice('新月份已创建，可直接逐行更新余额并补充本期流水。'); })}>创建本机账本</button></div></Dialog>
+    <Dialog visible={modal === 'newMonth'} title="新建月份" footer={false} onClose={() => setModal(null)} className="mr-dialog">{error && <div className="mr-message error" role="alert">{error}</div>}{field('新记账日期', newDate, setNewDate, 'date')}<p>复制当前账本，承接上期余额、保留历史流水，清零当期收入与净投入。已有月份文件不会被覆盖。</p><div className="mr-actions"><button disabled={busy} onClick={() => setModal(null)}>取消</button><button className="primary" disabled={busy} onClick={() => run(async () => { if (!draft) return; const name = monthlyFileName(newDate); if (drafts.some(d => d.name.replace(/^(\d{4})-(\d{2})(\.xlsx)$/i, '$1$2$3').toLowerCase() === name && d.scope === draft.scope)) throw new Error('本机已存在此月份，请从账本列表打开'); const next = await MonthlyWorkbook.open(draft.data); next.rollover(newDate); await activate(await next.export(), name, { scope: draft.scope, sourceLabel: draft.sourceLabel }); startBatch(next); setNotice('新月份已创建，可直接逐行更新余额并补充本期流水。'); })}>创建本机账本</button></div></Dialog>
   </div>;
 }

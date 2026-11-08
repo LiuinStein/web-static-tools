@@ -679,6 +679,13 @@ export class MonthlyWorkbook {
   }
   applyCashAccountRules() { for (const p of this.products()) this.cashAccountFlow(p); }
   async export(): Promise<Uint8Array> {
+    // Cached legacy drafts must take the same cleanup path as newly imported books.
+    // Export a copy so existing draft/review row positions are never silently changed.
+    const prepared = this.clone();
+    prepared.cleanupEmptySubtotals();
+    return prepared.serialize();
+  }
+  private async serialize(): Promise<Uint8Array> {
     this.applyCashAccountRules();
     // Patch only XML parts we understand. Original styles, drawings and package relationships stay intact.
     const Zip = (await import('jszip')).default;

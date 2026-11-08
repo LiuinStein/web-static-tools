@@ -38,9 +38,9 @@ function transport(service, initial) {
           state.downloads++; if (state.beforeContent) await state.beforeContent();
           const data = state.data; if (state.mutateAfterContent) state.eTag = 'changed-during-read'; return data;
         }
-        state.metadata++; return { id: 'file', name: 'month.xlsx', eTag: state.eTag, size: state.data.byteLength };
+        state.metadata++; return { id: 'file', name: 'month.xlsx', eTag: state.eTag, size: state.data.byteLength, webUrl: 'https://onedrive.live.com/test-file', file: {} };
       },
-      async put() { state.uploads++; return { id: 'file', eTag: 'saved' }; },
+      async put(body) { state.uploads++; state.data = await body.arrayBuffer(); state.eTag = 'saved'; return { id: 'file', eTag: 'saved' }; },
     }; return q;
   } };
   return state;

@@ -80,7 +80,24 @@ export class MonthlyDrive extends OneDriveConnection {
     const type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     // The SDK converts typed arrays to Node Buffer; Blob passes through in browsers.
     const content = new Blob([data as BlobPart], { type });
-    return this.client.api(`${this.folderEndpoint()}/${encodeURIComponent(name)}:/content`).query({ '@microsoft.graph.conflictBehavior': 'replace' }).header('Content-Type', type).put(content);
+    const path = `${this.folderEndpoint()}/${encodeURIComponent(name)}`;
+    const uploaded = await this.client.api(`${path}:/content`).query({ '@microsoft.graph.conflictBehavior': 'replace' }).header('Content-Type', type).put(content);
+    try {
+      if (!uploaded?.id) throw new Error('上传响应缺少文件 ID');
+      const readItem = () => this.client.api(path).select('id,name,eTag,size,webUrl,file,folder').get();
+      const current = await readItem();
+      if (current.id !== uploaded.id || current.name !== name || current.size !== data.byteLength || !current.eTag || !current.file || current.folder) throw new Error('目标目录中的文件与本次上传不一致');
+      if (uploaded.eTag && current.eTag !== uploaded.eTag) throw new Error('上传后云端文件版本已变化');
+      const url = new URL(current.webUrl);
+      if (url.protocol !== 'https:') throw new Error('OneDrive 未返回有效的文件链接');
+      const bytes = new Uint8Array(await this.client.api(`/me/drive/items/${encodeURIComponent(current.id)}/content`).responseType(ResponseType.ARRAYBUFFER).get());
+      if (bytes.length !== data.length || bytes.some((byte, index) => byte !== data[index])) throw new Error('回读文件内容与本机账本不一致');
+      const after = await readItem();
+      if (after.id !== current.id || after.name !== name || after.size !== current.size || after.eTag !== current.eTag) throw new Error('文件在核验期间发生变化');
+      return { id: current.id, name: current.name, eTag: current.eTag, size: current.size, webUrl: current.webUrl };
+    } catch (error) {
+      throw new Error(`上传请求已完成，但未能确认发布成功：${error.message || '云端文件核验失败'}。请刷新 OneDrive 核对后重试。`);
+    }
   }
 }
 
