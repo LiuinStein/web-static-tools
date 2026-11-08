@@ -193,3 +193,17 @@
 .mr-return-details td strong, .mr-return-details td small { display: block; }
 .mr-return-details td small { margin-top: 5px; color: #8995a7; font-size: 11px; }
 .mr-return-detail-summary { padding: 10px 12px; border-radius: 6px; background: #f0f5ff; font-size: 12px; margin: 12px 0; }
+
+.mr-liquidity-analysis > .mr-section-heading p { margin-bottom: 0; }
+.mr-liquidity-buckets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }
+.mr-liquidity-analysis .mr-liquidity-bucket { text-align: left; padding: 16px; min-width: 0; border-color: #e4eaf2; }
+.mr-liquidity-bucket-title { display: block; color: #40516a; font-size: 13px; font-weight: 600; }
+.mr-liquidity-bucket > small { display: block; font-size: 11px; color: #8793a5; margin: 7px 0; line-height: 1.6; }
+.mr-liquidity-bucket > strong { display: block; font-size: 18px; font-weight: 500; margin: 10px 0; overflow-wrap: anywhere; }
+.mr-liquidity-bucket > span:last-child { font-size: 11px; color: #8793a5; }
+.mr-liquidity-template { border-top: 1px solid #edf1f6; padding-top: 16px; margin-top: 20px; }
+.mr-liquidity-template > summary { cursor: pointer; font-size: 12px; color: #778499; }
+.mr-liquidity-details .mr-profit-positive { color: #16845b; }
+.mr-liquidity-details .mr-profit-negative { color: #d14343; }
+@media (max-width: 1000px) { .mr-liquidity-buckets { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .mr-liquidity-buckets { grid-template-columns: 1fr; } }

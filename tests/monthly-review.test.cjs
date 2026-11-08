@@ -1075,3 +1075,189 @@ test('distribution classifies each product once even with multiple benchmark buc
   assert.equal(groups.reduce((sum, group) => sum + group.count, 0), rows.length);
   assert.equal(groups.find(group => group.key === 'high').balanceRmb, 33.4);
 });
+
+test('liquidity maturity groups use the supplied analysis date and calendar boundaries across years and leap years', () => {
+  const { liquidityBounds, maturityBucket, maturitySerial } = require('../src/pages/MonthlyReview/liquidity-analysis.ts');
+  const bounds = liquidityBounds(serialDate('2026-11-08'));
+  assert.equal(bounds.monthEnd, serialDate('2026-11-30'));
+  assert.equal(bounds.threeMonthEnd, serialDate('2027-02-28'));
+  for (const [date, expected] of [
+    ['2026-11-07', 'matured'], ['2026-11-08', 'matured'],
+    ['2026-11-09', 'thisMonth'], ['2026-11-30', 'thisMonth'],
+    ['2026-12-01', 'nextThreeMonths'], ['2027-02-28', 'nextThreeMonths'], ['2027-03-01', 'later'],
+  ]) assert.equal(maturityBucket(serialDate(date), bounds), expected);
+  assert.equal(maturityBucket('2026/11/30', bounds), 'thisMonth');
+  for (const value of [null, 0, '', '  ']) assert.equal(maturityBucket(value, bounds), 'undated');
+  for (const value of ['Restricted', '2026-02-30', -1, NaN, Infinity, false]) assert.equal(maturityBucket(value, bounds), 'unknown');
+  assert.equal(maturityBucket('2026-11-30', null), 'unknown');
+  assert.equal(liquidityBounds(null), null);
+  assert.equal(maturitySerial('2028-02-29'), serialDate('2028-02-29'));
+  assert.equal(maturitySerial('2027-02-29'), null);
+  const leap = liquidityBounds(serialDate('2027-11-30'));
+  assert.equal(leap.threeMonthEnd, serialDate('2028-02-29'));
+  assert.equal(maturityBucket('2028-02-29', leap), 'nextThreeMonths');
+});
+
+test('liquidity profitability filtering preserves zero and unknown gains and composes with member and holding scopes', async () => {
+  const { liquidityRows, selectLiquidityRows, DEFAULT_LIQUIDITY_FILTERS, profitStatus, liquidityGroups, liquiditySummary } = require('../src/pages/MonthlyReview/liquidity-analysis.ts');
+  const book = await fixture();
+  book.set('Assets', 'L1', serialDate('2026-11-08'));
+  book.set('Assets', 'G3', serialDate('2026-11-20'));
+  for (const p of book.products()) book.saveTransactions(p, [{ date: '2026-10-01', amount: p.sheet === 'WTH' ? 1100 : 1000, shares: 100, price: 10, kind: 'buy' }]);
+  const products = book.products(), before = book.cell('Assets', 'E3');
+  const rows = liquidityRows(book, products, [], '2026-11-08');
+  assert.deepEqual(rows.map(row => row.profit), ['profitable', 'unprofitable']);
+  assert.deepEqual(rows.map(row => row.bucket), ['thisMonth', 'undated']);
+  assert.equal(selectLiquidityRows(rows, { ...DEFAULT_LIQUIDITY_FILTERS, profit: 'profitable' }).length, 1);
+  assert.equal(selectLiquidityRows(rows, { ...DEFAULT_LIQUIDITY_FILTERS, profit: 'unprofitable', member: 'WTH', currency: 'RMB', category: 'Debt Fund' }).length, 1);
+  assert.equal(selectLiquidityRows(rows, { ...DEFAULT_LIQUIDITY_FILTERS, profit: 'profitable', member: 'WTH' }).length, 0);
+  assert.equal(profitStatus(0), 'unprofitable');
+  assert.equal(profitStatus(-1), 'unprofitable');
+  for (const value of [null, '', 'N/A', NaN, Infinity]) assert.equal(profitStatus(value), 'unknown');
+  const invalid = liquidityRows(book, products, [productKey(products[0])]);
+  assert.equal(invalid[0].profit, 'unknown');
+  assert.equal(invalid[0].balanceRmb, null);
+  const closed = [{ ...rows[0], product: { ...rows[0].product, balance: 0 } }];
+  assert.equal(selectLiquidityRows(closed, DEFAULT_LIQUIDITY_FILTERS).length, 0);
+  assert.equal(selectLiquidityRows(closed, { ...DEFAULT_LIQUIDITY_FILTERS, holdingOnly: false }).length, 1);
+  const groups = liquidityGroups(rows), summary = liquiditySummary(rows);
+  assert.equal(groups.reduce((total, group) => total + group.count, 0), rows.length);
+  assert.equal(groups.find(group => group.key === 'thisMonth').balanceRmb, 1100);
+  assert.equal(summary.balanceRmb, 2200);
+  assert.equal(summary.throughMonth, 1100);
+  assert.equal(summary.availableNow, 1100);
+  assert.equal(summary.unconfirmed, null);
+  assert.equal(summary.profitable, 1);
+  assert.equal(summary.unprofitable, 1);
+  assert.deepEqual(book.cell('Assets', 'E3'), before);
+  const foreign = liquidityRows(book, [{ ...products[0], currency: 'USD', balance: 0.1 }, { ...products[1], currency: 'MISSING' }]);
+  assert.equal(foreign[0].balanceRmb, 0.7);
+  assert.equal(foreign[1].balanceRmb, null);
+  assert.equal(liquiditySummary(foreign).missingBalance, 1);
+});
+
+test('liquidity details respect profit filtering and sort dates while keeping undated products separate', async () => {
+  const { liquidityRows, selectLiquidityRows, liquidityDetails, DEFAULT_LIQUIDITY_FILTERS } = require('../src/pages/MonthlyReview/liquidity-analysis.ts');
+  const book = await fixture();
+  book.set('Assets', 'G3', '2026-11-20'); book.set('WTH', 'G3', 'not a date');
+  book.saveTransactions(book.products()[0], [{ date: '2026-10-01', amount: 1000, shares: 100, price: 10, kind: 'buy' }]);
+  const rows = liquidityRows(book, book.products());
+  assert.equal(rows[0].date, '2026-11-20');
+  assert.equal(rows[1].bucket, 'unknown');
+  const unknown = selectLiquidityRows(rows, { ...DEFAULT_LIQUIDITY_FILTERS, profit: 'unknown' });
+  assert.equal(liquidityDetails(unknown, 'unknown').length, 1);
+  assert.equal(liquidityDetails(unknown, 'thisMonth').length, 0);
+  assert.deepEqual(liquidityDetails([...rows].reverse(), 'all').map(row => row.id), rows.map(row => row.id));
+  assert.equal(rows.length, 2);
+});
+
+test('liquidity profit filters drive scoped popup details and closing reuses data and table cache', async () => {
+  const book = await fixture();
+  book.set('Assets', 'L1', serialDate('2026-11-08'));
+  book.set('Assets', 'G3', serialDate('2026-11-20'));
+  for (const p of book.products()) book.saveTransactions(p, [{ date: '2026-10-01', amount: p.sheet === 'WTH' ? 1200 : 1000, shares: 100, price: 10, kind: 'buy' }]);
+  const products = book.products(), React = require('react'), { renderToStaticMarkup } = require('react-dom/server');
+  const original = { useState: React.useState, useMemo: React.useMemo, useEffect: React.useEffect };
+  const extension = require.extensions['.tsx'];
+  require.extensions['.tsx'] = (m, f) => m._compile(ts.transpileModule(fs.readFileSync(f, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React, esModuleInterop: true } }).outputText, f);
+  const value = book.value.bind(book);
+  let reads = 0, states = [], memos = [], cursor = 0;
+  try {
+    const Component = require('../src/pages/MonthlyReview/LiquidityAnalysis.tsx').default;
+    const props = { book, products, invalidKeys: [], templateSummary: [0, 100, 0, 0, 2100], categoryNames: {}, onViewProduct: () => {} };
+    const html = renderToStaticMarkup(React.createElement(Component, props));
+    for (const text of ['流动性分析', '流动性获利筛选', '已获利', '未获利', '模板原有流动性汇总']) assert.ok(html.includes(text));
+    const empty = renderToStaticMarkup(React.createElement(Component, { ...props, products: [] }));
+    assert.ok(empty.includes('没有符合当前筛选条件的产品'));
+    assert.ok(!empty.includes('NaN'));
+    React.useState = initial => {
+      const index = cursor++;
+      if (!(index in states)) states[index] = typeof initial === 'function' ? initial() : initial;
+      return [states[index], next => { states[index] = typeof next === 'function' ? next(states[index]) : next; }];
+    };
+    React.useMemo = (fn, deps) => {
+      const index = cursor++, previous = memos[index];
+      if (!previous || deps.length !== previous.deps.length || deps.some((item, i) => !Object.is(item, previous.deps[i]))) memos[index] = { deps: [...deps], value: fn() };
+      return memos[index].value;
+    };
+    React.useEffect = () => {};
+    book.value = (...args) => { reads++; return value(...args); };
+    const nodes = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(nodes) : [node, ...nodes(node.props?.children)];
+    const text = node => Array.isArray(node) ? node.map(text).join('') : node && typeof node === 'object' ? text(node.props?.children) : node == null || node === false ? '' : String(node);
+    const render = () => { cursor = 0; return Component(props); };
+    const modal = tree => nodes(tree).find(node => node.props?.className?.includes('mr-liquidity-details'));
+    const profit = tree => nodes(tree).find(node => node.type === 'select' && node.props['aria-label'] === '流动性获利筛选');
+    const openAll = tree => nodes(tree).find(node => node.type === 'button' && node.props.children === '查看产品明细').props.onClick();
+    profit(render()).props.onChange({ target: { value: 'profitable' } });
+    openAll(render());
+    let dialog = modal(render());
+    assert.equal(dialog.props.visible, true);
+    assert.equal(nodes(dialog).find(node => node.type === 'tbody').props.children.length, 1);
+    assert.ok(text(dialog).includes('Assets 示例产品'));
+    assert.ok(text(dialog).includes('2026-11-20'));
+    const before = reads, table = nodes(dialog).find(node => node.type === 'div' && node.props.className === 'mr-table-wrap');
+    dialog.props.onClose('maskClick');
+    dialog = modal(render());
+    assert.equal(dialog.props.visible, false);
+    assert.equal(reads, before);
+    assert.equal(nodes(dialog).find(node => node.type === 'div' && node.props.className === 'mr-table-wrap'), table);
+    profit(render()).props.onChange({ target: { value: 'unprofitable' } });
+    openAll(render());
+    dialog = modal(render());
+    assert.equal(nodes(dialog).find(node => node.type === 'tbody').props.children.length, 1);
+    assert.ok(text(dialog).includes('WTH 示例产品'));
+    assert.ok(text(dialog).includes('-100.00'));
+  } finally {
+    Object.assign(React, original);
+    book.value = value;
+    if (extension) require.extensions['.tsx'] = extension; else delete require.extensions['.tsx'];
+  }
+});
+
+
+test('liquidity uses XIRR total cost rather than period gain, with deposit exceptions and unknown costs', async () => {
+  const { liquidityRows, liquidityCost } = require('../src/pages/MonthlyReview/liquidity-analysis.ts');
+  const book = await fixture();
+  for (const p of book.products()) book.saveTransactions(p, [{ date: '2026-10-01', amount: p.sheet === 'WTH' ? 1200 : 1000, shares: 100, price: 10, kind: 'buy' }]);
+  book.set('Assets', 'J3', -999); book.set('WTH', 'J3', 999);
+  const products = book.products();
+  let rows = liquidityRows(book, products);
+  assert.deepEqual(rows.map(r => [r.cost, r.gain, r.profit]), [[1000, 100, 'profitable'], [1200, -100, 'unprofitable']]);
+  const block = products[0].block;
+  book.set(block.sheet, 'I' + block.summary, -50);
+  assert.equal(liquidityRows(book, products)[0].gain, 1150);
+  book.set(block.sheet, 'I' + block.summary, 'N/A');
+  assert.equal(liquidityRows(book, products)[0].profit, 'unknown');
+  for (const category of ['Current Account', '活期存款', 'Time Deposit', '定期存款']) {
+    const row = liquidityRows(book, [{ ...products[0], category, block: undefined }])[0];
+    assert.equal(row.profit, 'profitable'); assert.equal(row.gain, null);
+  }
+  book.set(block.sheet, 'E' + block.start, 1000);
+  book.set(block.sheet, 'E' + (block.start + 1), -200);
+  book.set(block.sheet, 'E' + (block.start + 2), -25);
+  const shared = { ...products[0], block: { ...block, shared: true, sourceRows: [block.start, block.start + 1, block.start + 2] } };
+  assert.equal(liquidityCost(book, shared), 775);
+  assert.equal(liquidityRows(book, [shared])[0].gain, 325);
+  book.set(block.sheet, 'E' + (block.start + 2), 'N/A');
+  assert.equal(liquidityCost(book, shared), null);
+  assert.equal(liquidityCost(book, { ...shared, block: { ...shared.block, sourceRows: [] } }), null);
+});
+
+
+test('liquidity maturity uses local today independently of workbook accounting dates', async () => {
+  const { liquidityRows, liquidityToday, liquidityBounds } = require('../src/pages/MonthlyReview/liquidity-analysis.ts');
+  const book = await fixture();
+  book.set('Assets', 'L1', serialDate('2026-10-01'));
+  book.set('Assets', 'G3', serialDate('2026-11-08'));
+  const products = book.products();
+  assert.equal(liquidityRows(book, products, [], '2026-11-07')[0].bucket, 'thisMonth');
+  assert.equal(liquidityRows(book, products, [], '2026-11-08')[0].bucket, 'matured');
+  assert.equal(liquidityRows(book, products, [], '2026-11-09')[0].days, -1);
+  assert.equal(liquidityToday(new Date(2026, 10, 8, 23, 59)), '2026-11-08');
+  const today = liquidityToday();
+  book.set('Assets', 'L1', 'invalid accounting date');
+  book.set('Assets', 'G3', serialDate(today));
+  const row = liquidityRows(book, products)[0];
+  assert.equal(row.bucket, 'matured'); assert.equal(row.days, 0);
+  assert.equal(liquidityBounds().asOf, serialDate(today));
+});
