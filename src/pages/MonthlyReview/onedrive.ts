@@ -96,7 +96,7 @@ export class MonthlyDrive extends OneDriveConnection {
       if (after.id !== current.id || after.name !== name || after.size !== current.size || after.eTag !== current.eTag) throw new Error('文件在核验期间发生变化');
       return { id: current.id, name: current.name, eTag: current.eTag, size: current.size, webUrl: current.webUrl };
     } catch (error) {
-      throw new Error(`上传请求已完成，但未能确认发布成功：${error.message || '云端文件核验失败'}。请刷新 OneDrive 核对后重试。`);
+      throw Object.assign(new Error(`上传请求已完成，但未能确认发布成功：${error.message || '云端文件核验失败'}。请刷新 OneDrive 核对后重试。`), { cause: error });
     }
   }
 }

@@ -6,6 +6,7 @@ import BenchmarkDialog from './BenchmarkDialog';
 import { Benchmarks, BENCHMARK_STORAGE_KEY, DEFAULT_BENCHMARKS, parseBenchmarks, BenchmarkBand, BENCHMARK_BANDS, benchmarkFor, benchmarkIntervalLabel, matchesBenchmarkBand } from './benchmarks';
 import AmountInput from './AmountInput';
 import { monthlyFileName } from './filename';
+import { isOneDriveAuthRequired } from '../../services/onedrive-auth';
 import { ReviewAccount, reviewAccounts, nextReviewAccount } from './account-navigation';
 import { linkedOptions } from './filters';
 import { rawAmount, currencyCode } from './amount';
@@ -85,6 +86,7 @@ export default function MonthlyReview() {
   const [settings, setSettings] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [authRequired, setAuthRequired] = useState(false);
   const [notice, setNotice] = useState<React.ReactNode>('');
   const [modal, setModal] = useState<null | 'product' | 'transactions' | 'newMonth' | 'liability' | 'cancelBatch' | 'group' | 'nextMember' | 'accountsComplete' | 'unreviewedAccount'>(null);
   const [pendingAccount, setPendingAccount] = useState<ReviewAccount | null>(null);
@@ -149,7 +151,7 @@ export default function MonthlyReview() {
           setNotice('云端账本已有变化，本机草稿已保留。请核对云端版本后再发布。');
         }
       }
-    })().catch(e => { if (active()) setError(`后台刷新失败：${e.message}。本机草稿不受影响，可点击连接重试。`); });
+    })().catch(e => { if (active()) { const required = isOneDriveAuthRequired(e); setAuthRequired(required); setError(required ? e.message : `后台刷新失败：${e.message}。本机草稿不受影响，可点击连接重试。`); } });
     return () => { cancelled = true; };
   }, []);
   useEffect(() => {
@@ -173,8 +175,8 @@ export default function MonthlyReview() {
     return () => window.removeEventListener('keydown', closeConfirmation, true);
   }, [modal]);
   async function run(action: () => Promise<void>) {
-    if (lock.current) return; lock.current = true; setBusy(true); setError(''); setNotice('');
-    try { await action(); } catch (e) { if (mounted.current) setError(e.message || '操作失败，请重试'); } finally { lock.current = false; if (mounted.current) setBusy(false); }
+    if (lock.current) return; lock.current = true; setBusy(true); setError(''); setAuthRequired(false); setNotice('');
+    try { await action(); } catch (e) { if (mounted.current) { setAuthRequired(isOneDriveAuthRequired(e)); setError(e.message || '操作失败，请重试'); } } finally { lock.current = false; if (mounted.current) setBusy(false); }
   }
   async function activate(data: Uint8Array, name: string, metadata?: Partial<Draft>) {
     if (batch) throw new Error('请先保存或取消本次批量记账');
@@ -397,7 +399,7 @@ export default function MonthlyReview() {
       <div className="mr-toolbar-group"><button disabled={busy || Boolean(batch)} onClick={() => input.current?.click()}>导入 Excel</button><select aria-label="打开本机账本" disabled={busy || Boolean(batch)} value={draft?.id || ''} onChange={e => { const d = drafts.find(x => x.id === e.target.value); if (d) run(async () => { const opened = await MonthlyWorkbook.open(d.data); setBook(opened); setDraft(d); }); }}><option value="">本机账本</option>{drafts.map(d => <option key={d.id} value={d.id} title={`${d.name} · ${draftSourceTitle(d)}`}>{draftOptionLabel(d, drafts)}</option>)}</select><button disabled={busy || !book || Boolean(batch)} onClick={() => { const today = new Date(); setNewDate(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`); setModal('newMonth'); }}>＋ 新建月份</button></div>
       <div className="mr-toolbar-group"><button disabled={busy || !book || Boolean(batch)} onClick={() => run(async () => { if (!book || !draft) return; const data = await book.export(); const url = URL.createObjectURL(new Blob([data as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })); const a = document.createElement('a'); a.href = url; a.download = monthlyFileName(isoDate(book.value('Assets', 'L1'))); a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); setNotice('Excel 已生成，包含原有公式及当前计算结果。'); })}>↓ 下载 Excel</button><button className="primary" disabled={busy || !book || !drive || Boolean(batch)} onClick={() => run(publish)}>发布到 OneDrive</button><button disabled={busy} onClick={() => setSettings(!settings)}>同步设置</button></div>
     </div>
-    {error && !modal && <div className="mr-message error" role="alert">{error}</div>}{notice && <div className="mr-message" role="status">{notice}</div>}
+    {error && !modal && <div className="mr-message error" role="alert">{error}{authRequired && <button disabled={busy} onClick={() => run(() => connect())}>重新授权 OneDrive</button>}</div>}{notice && <div className="mr-message" role="status">{notice}</div>}
     {settings && <section className="mr-panel"><h2>OneDrive 连接</h2><p>与交易日记共用 Microsoft 登录，账本目录独立。连接后修改目录并应用即可，无需重复登录。请在 Entra 中注册当前站点的重定向网址，并授予 Files.ReadWrite 权限。</p><div className="mr-grid">{field('应用客户端 ID', config.clientId, v => setConfig({ ...config, clientId: v }))}{field('账本文件夹', config.folder, v => setConfig({ ...config, folder: v }))}</div><div className="mr-actions"><button disabled={busy} onClick={() => setConfig({ ...monthlyOneDriveConfig })}>恢复默认配置</button><button className="primary" disabled={busy} onClick={() => run(() => connect())}>{drive ? '应用目录' : '连接 OneDrive'}</button>{drive && <button disabled={busy} onClick={() => run(() => connect(true))}>切换账户</button>}{drive && <button disabled={busy} onClick={() => run(async () => { backgroundRevision.current += 1; await drive.disconnect(); setDrive(null); setFiles([]); setScope(''); setAccount(''); })}>断开共享登录</button>}</div></section>}
     {drive && <div className="mr-cloud"><span>● {account} · /{drive.folder}/</span><select aria-label="打开 OneDrive Excel" disabled={busy || Boolean(batch)} value="" onChange={e => { const file = files.find(f => f.id === e.target.value); if (file) run(async () => { const result = await drive.download(file); await activate(new Uint8Array(result.data), result.file.name, { source: result.file, scope, sourceLabel: `${account} · /${drive.folder}/`, published: new Date().toISOString() }); }); }}><option value="">选择云端 Excel</option>{files.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}</select><button disabled={busy} onClick={() => run(async () => setFiles(await drive.list()))}>刷新文件</button></div>}
     {drive && book && draft?.scope && draft.scope !== scope && <div className="mr-message">当前账本来自其他账户或目录，原文件保持原位。可打开当前目录账本，或 <button disabled={busy || Boolean(batch)} onClick={() => run(async () => {

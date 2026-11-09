@@ -95,3 +95,53 @@ test('returning to either feature reuses restored identity without another silen
   await session.token(accountA.homeAccountId, false); assert.equal(silent, 2);
   await session.disconnect(); assert.equal(session.currentAccount(), null);
 });
+
+test('iframe timeouts require explicit reauthorization, skip repeated silent attempts and recover without a new login', async () => {
+  const { CacheLookupPolicy, BrowserAuthError } = require('@azure/msal-browser');
+  const { session, auth, state } = fixture(); state.accounts=[accountA];
+  let timedOut=true,calls=0; const silent=auth.acquireTokenSilent,popup=auth.acquireTokenPopup;
+  auth.acquireTokenSilent=async request=>{calls++;assert.equal(request.cacheLookupPolicy,CacheLookupPolicy.AccessTokenAndRefreshToken);if(timedOut)throw new BrowserAuthError('monitor_window_timeout','timeout');return silent(request)};
+  auth.acquireTokenPopup=async request=>{timedOut=false;return popup(request)};
+  await assert.rejects(session.restore(),/重新授权 OneDrive/);
+  await assert.rejects(session.restore(),/重新授权 OneDrive/);
+  assert.equal(calls,1);assert.equal(state.tokenPopups,0);assert.equal(state.logins,0);
+  assert.equal((await session.connect()).homeAccountId,accountA.homeAccountId);
+  assert.equal(state.tokenPopups,1);assert.equal(state.logins,0);
+  assert.equal(await session.token(accountA.homeAccountId,false),'token-account-a');
+  assert.equal(calls,2);
+});
+
+test('interactive token requests recover iframe timeouts but do not hide network errors', async () => {
+  const { BrowserAuthError }=require('@azure/msal-browser');
+  const {session,auth,state}=fixture();await session.connect();
+  auth.acquireTokenSilent=async()=>{throw new BrowserAuthError('monitor_window_timeout','timeout')};
+  await assert.rejects(session.token(accountA.homeAccountId,false),/登录已过期或静默授权超时/);
+  assert.equal(state.tokenPopups,0);
+  assert.equal(await session.token(accountA.homeAccountId,true),'token-account-a');assert.equal(state.tokenPopups,1);
+  auth.acquireTokenSilent=async()=>{throw new Error('network disconnected')};
+  await assert.rejects(session.token(accountA.homeAccountId,true),/network disconnected/);
+  assert.equal(state.tokenPopups,1);
+});
+
+test('blocked auth popups remain recoverable and a timeout after disconnect cannot reopen authorization', async () => {
+  const {session,auth,state}=fixture();await session.connect();state.expired=true;
+  const popup=auth.acquireTokenPopup;
+  auth.acquireTokenPopup=async()=>{throw {errorCode:'popup_window_error'}};
+  await assert.rejects(session.token(accountA.homeAccountId,true),/允许此站点弹出窗口/);
+  auth.acquireTokenPopup=popup;await session.connect();assert.equal(state.tokenPopups,1);
+  let reject;auth.acquireTokenSilent=()=>new Promise((_,fail)=>{reject=fail});
+  const request=session.token(accountA.homeAccountId,true);await new Promise(resolve=>setImmediate(resolve));await session.disconnect();
+  reject({errorCode:'monitor_window_timeout'});await assert.rejects(request,/状态|账户/);assert.equal(state.tokenPopups,1);
+});
+
+test('only child-window Microsoft auth responses bypass the application hash router', () => {
+  const {isOneDriveAuthCallback,isOneDriveAuthRequired,OneDriveAuthRequiredError}=require('../src/services/onedrive-auth.ts');
+  assert.equal(isOneDriveAuthCallback({hash:'#code=fake&state=fake',search:''},true),true);
+  assert.equal(isOneDriveAuthCallback({hash:'#error=login_required&state=fake',search:''},true),true);
+  assert.equal(isOneDriveAuthCallback({hash:'',search:'?code=fake&state=fake'},true),true);
+  assert.equal(isOneDriveAuthCallback({hash:'#code=fake&state=fake',search:''},false),false);
+  assert.equal(isOneDriveAuthCallback({hash:'#/monthly-review?code=fake&state=fake',search:''},true),false);
+  assert.equal(isOneDriveAuthCallback({hash:'#state=fake',search:''},true),false);
+  assert.equal(isOneDriveAuthRequired({cause:new OneDriveAuthRequiredError()}),true);
+  assert.equal(isOneDriveAuthRequired(new Error('network disconnected')),false);
+});
