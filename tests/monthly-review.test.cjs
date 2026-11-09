@@ -1614,3 +1614,29 @@ test('merged cells are centered in both directions and cash regions contain the 
   const secondStyles=parse(await again.file('xl/styles.xml').async('string'));
   assert.equal(secondStyles.getElementsByTagName('cellXfs')[0].getAttribute('count'),styles.getElementsByTagName('cellXfs')[0].getAttribute('count'),'repeated exports reuse centered styles');
 });
+
+test('liability totals follow visible accounts and suppress invalid batch amounts without losing opening balances', async () => {
+  const { liabilityTotals, debtRatio } = require('../src/pages/MonthlyReview/liability-analysis.ts');
+  const { MonthlyBatch, productKey } = require('../src/pages/MonthlyReview/batch.ts');
+  const book = await fixture(); book.set('Liabilities', 'D1', 0);
+  book.addLiability({ account: 'Card A', balance: 0.1, repayment: '22nd Day Every Month' });
+  book.addLiability({ account: 'Card B', balance: 0.2, repayment: '' });
+  const rows = book.liabilities();
+  book.set('Liabilities', `H${rows[0].row}`, 0.2);
+  book.set('Liabilities', `H${rows[1].row}`, 0.3);
+  const current = book.liabilities();
+  assert.deepEqual(liabilityTotals(current), { previous: 0.5, balance: 0.3, growth: -0.2 });
+  assert.deepEqual(liabilityTotals([current[1]]), { previous: 0.3, balance: 0.2, growth: -0.1 });
+  assert.deepEqual(liabilityTotals([]), { previous: 0, balance: 0, growth: 0 });
+  const invalid = new MonthlyBatch(book).stageBalances([[productKey(current[0]), 'bad']]);
+  assert.deepEqual(liabilityTotals(invalid.book.liabilities(), invalid.invalidBalances), { previous: 0.5, balance: null, growth: null });
+  assert.equal(liabilityTotals([current[1]], invalid.invalidBalances).balance, 0.2);
+  const updated = invalid.stageBalances([[productKey(current[0]), '0.4']]).commitInputs();
+  assert.deepEqual(liabilityTotals(updated.book.liabilities(), updated.invalidBalances), { previous: 0.5, balance: 0.6, growth: 0.1 });
+  assert.equal(book.liabilities()[0].balance, 0.1);
+  assert.equal(debtRatio(300, 1000), 0.3);
+  assert.equal(debtRatio(1200, 1000), 1.2);
+  assert.equal(debtRatio(0, 1000), 0);
+  for (const assets of [0, -100, null, '#N/A', NaN, Infinity]) assert.equal(debtRatio(300, assets), null);
+  assert.equal(debtRatio(null, 1000), null);
+});

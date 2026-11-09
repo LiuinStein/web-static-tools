@@ -9,6 +9,7 @@ import { balancePaste, MonthlyBatch, productKey } from './batch';
 import Decimal from 'decimal.js';
 import { displayValue } from './display';
 import { matchesSearch } from './search';
+import { liabilityTotals } from './liability-analysis';
 
 interface Props {
   reviewState?: ReviewState;
@@ -30,6 +31,7 @@ export default function LiabilitiesTable({ reviewState, book, batch, busy, money
   const ranks = new Map((order || []).map((key, index) => [key, index]));
   const filtered = rows.filter(row => matchesSearch(row.account, query) && (!batch || !unchecked || !batch.reviewed.has(productKey(row))));
   const displayed = batch && order ? [...filtered].sort((a, b) => (ranks.get(productKey(a)) ?? Infinity) - (ranks.get(productKey(b)) ?? Infinity)) : sorted(filtered);
+  const totals = liabilityTotals(displayed, batch?.invalidBalances || []);
   function heading(label: string, field: 'account' | 'balance' | 'previous') {
     const active = sort?.field === field ? sort.direction : null;
     return <th aria-sort={active === 'asc' ? 'ascending' : active === 'desc' ? 'descending' : 'none'}><button className="mr-sort-button" disabled={busy} aria-label={`按负债${label}排序`} title="点击切换升序、降序、原始顺序" onClick={() => {
@@ -64,12 +66,13 @@ export default function LiabilitiesTable({ reviewState, book, batch, busy, money
         <td><strong className="mr-product-name"><span>{displayValue(row.account)}</span>{(batch || reviewState) && <span className={`mr-change-tag ${(batch ? batch.reviewed.has(key) : reviewState?.reviewed.includes(key)) ? 'reviewed' : ''}`}>{(batch ? batch.reviewed.has(key) : reviewState?.reviewed.includes(key)) ? '已核对' : changed.has(key) ? '已修改' : ''}</span>}</strong></td>
         <td>RMB {money(row.previous)}</td><td>{repaymentDate(row.repayment) || displayValue(row.repayment)}</td>
         <td><div className="mr-row-actions"><button disabled={busy} onClick={() => onEdit(row)}>编辑</button><button disabled={busy} onClick={() => onZero(row)}>清零</button></div></td>
-        <td data-liability-growth={key} className={liabilityGrowthClass(growth.get(key) ?? 0)}>{money(growth.get(key) ?? null)}</td>
+        <td data-liability-growth={key} className={bad ? undefined : liabilityGrowthClass(growth.get(key) ?? 0)}>{money(bad ? null : growth.get(key) ?? null)}</td>
         <td>RMB {batch ? <><AmountInput onFocus={event => event.currentTarget.select()} onClick={event => event.currentTarget.select()} data-liability-balance={key} type="text" inputMode="decimal" autoComplete="off" aria-label={`${row.account} 本期余额`} aria-invalid={bad} aria-describedby={bad ? `debt-error-${key}` : undefined} disabled={busy} value={(batch.inputs.get(key) ?? String(row.balance))} onChange={e => onBatch(batch.stageBalances([[key, rawAmount(e.target.value)]]))} onBlur={() => finishInput(key)} onKeyDown={e => move(e, key)} onPaste={e => {
           const text = e.clipboardData.getData('text'); if (!/[\r\n\t]/.test(text)) return; e.preventDefault();
           try { onBatch(batch.stageBalances(balancePaste(displayed, key, text))); onError(''); } catch (error) { onError(error.message); }
         }} />{bad && <small id={`debt-error-${key}`} className="mr-input-error">请输入有效的非负余额</small>}</> : money(row.balance)}</td>
       </tr>;
-    })}</tbody></table>{!displayed.length && <p>{batch ? '没有匹配账户，或当前账户均已核对。' : '没有匹配的负债账户。'}</p>}</div>
+    })}</tbody><tfoot><tr>{batch && <td />}<th scope="row">合计 · RMB</th><td>RMB {money(totals.previous)}</td><td /><td /><td className={liabilityGrowthClass(totals.growth ?? 0)}>{money(totals.growth)}</td><td>RMB {money(totals.balance)}</td></tr></tfoot></table>{!displayed.length && <p>{batch ? '没有匹配账户，或当前账户均已核对。' : '没有匹配的负债账户。'}</p>}</div>
+    <p className="mr-footnote">表格底部合计仅统计当前可见账户；存在无效余额时，相关合计显示「—」。</p>
   </section>;
 }

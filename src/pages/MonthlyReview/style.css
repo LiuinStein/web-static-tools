@@ -89,6 +89,13 @@
 .mr-amount-field input { min-width: 0; flex: 1; }
 .mr-note-cell { white-space: pre-wrap; min-width: 240px; max-width: 420px; overflow-wrap: anywhere; }
 .mr-assets-table tfoot { background: #f3f6fb; font-weight: 600; }
+.monthly-review button.mr-auth-link { background: transparent; border: 0; border-radius: 0; padding: 0; margin-left: 12px; color: #2464ce; text-decoration: underline; text-underline-offset: 3px; }
+.monthly-review button.mr-auth-link:hover { background: transparent; color: #174a9d; }
+.monthly-review button.mr-auth-link:focus-visible { outline: 2px solid #3577eb; outline-offset: 4px; }
+.mr-liability-analysis > .mr-section-heading p { margin-bottom: 0; }
+.mr-liability-analysis h3 { font-size: 14px; font-weight: 600; margin: 24px 0 14px; }
+.mr-liability-analysis table td { white-space: nowrap; }
+.mr-debt-share { min-width: 130px; }
 .mr-assets-table tfoot td, .mr-assets-table tfoot th { padding: 14px 12px; white-space: nowrap; }
 .mr-currency-prefix { margin-right: 6px; }
 
@@ -134,6 +141,8 @@
 
 .mr-liabilities-table td.mr-debt-increase { color: #d14343; }
 .mr-liabilities-table td.mr-debt-decrease { color: #16845b; }
+.mr-liability-analysis .mr-debt-increase { color: #d14343; }
+.mr-liability-analysis .mr-debt-decrease { color: #16845b; }
 .mr-repayment-fields { margin-top: 16px; }
 .mr-repayment-fields > .mr-grid { margin-bottom: 0; }
 .mr-repayment-original { overflow-wrap: anywhere; }
