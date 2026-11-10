@@ -795,16 +795,17 @@ export class MonthlyWorkbook {
     if (!stylesFile) throw new Error('模板缺少单元格样式，无法生成合并居中格式');
     const styles = parse(await stylesFile.async('string')), xfs = descendants(styles, 'cellXfs')[0];
     if (!xfs) throw new Error('模板缺少单元格样式定义');
-    const centeredStyles = new Map<number, number>();
-    const centered = (index: number): number => {
-      const cached = centeredStyles.get(index); if (cached !== undefined) return cached;
+    const alignedStyles = new Map<string, number>();
+    const aligned = (index: number, horizontalCenter = false): number => {
+      const key = `${index}:${horizontalCenter}`, cached = alignedStyles.get(key); if (cached !== undefined) return cached;
       const formats = children(xfs, 'xf'), base = formats[index] || formats[0];
       const oldAlignment = first(base, 'alignment');
-      if (oldAlignment?.getAttribute('horizontal') === 'center' && oldAlignment?.getAttribute('vertical') === 'center') { centeredStyles.set(index, index); return index; }
+      if (base.getAttribute('applyAlignment') === '1' && oldAlignment?.getAttribute('vertical') === 'center' && (!horizontalCenter || oldAlignment?.getAttribute('horizontal') === 'center')) { alignedStyles.set(key, index); return index; }
       const format = base.cloneNode(true); let alignment = first(format, 'alignment');
       if (!alignment) { alignment = this.element(styles, 'alignment'); format.insertBefore(alignment, first(format, 'protection') || first(format, 'extLst') || null); }
-      alignment.setAttribute('horizontal', 'center'); alignment.setAttribute('vertical', 'center'); format.setAttribute('applyAlignment', '1');
-      const next = formats.length; xfs.appendChild(format); centeredStyles.set(index, next); return next;
+      if (horizontalCenter) alignment.setAttribute('horizontal', 'center');
+      alignment.setAttribute('vertical', 'center'); format.setAttribute('applyAlignment', '1');
+      const next = formats.length; xfs.appendChild(format); alignedStyles.set(key, next); return next;
     };
     const cash = this.products().filter(p => isCashAccount(p.category));
     for (const s of this.sheets) {
@@ -838,8 +839,18 @@ export class MonthlyWorkbook {
         const text = this.element(doc, 'is'); text.appendChild(this.element(doc, 't', CASH_RETURN_MESSAGE)); anchor.appendChild(text);
         const merge = this.element(doc, 'mergeCell'); merge.setAttribute('ref', `I${group.start}:M${group.end}`); merges.appendChild(merge);
       }
+      // Give every used cell an explicit vertical alignment, including cells that
+      // previously inherited their format from a row or column. Merged anchors
+      // additionally center horizontally; ordinary cells keep their alignment.
+      for (const merge of merges ? children(merges, 'mergeCell') : []) outputCell(merge.getAttribute('ref').split(':')[0]);
+      const columns = descendants(doc, 'col');
+      for (const row of descendants(doc, 'row')) for (const cell of children(row, 'c')) {
+        const col = column(cell.getAttribute('r').replace(/\d+/, ''));
+        const inherited = row.getAttribute('s') || columns.find(c => Number(c.getAttribute('min')) <= col && Number(c.getAttribute('max')) >= col)?.getAttribute('style') || '0';
+        cell.setAttribute('s', String(aligned(Number(cell.getAttribute('s') || inherited))));
+      }
       for (const merge of merges ? children(merges, 'mergeCell') : []) {
-        const anchor = outputCell(merge.getAttribute('ref').split(':')[0]); anchor.setAttribute('s', String(centered(Number(anchor.getAttribute('s') || 0))));
+        const anchor = outputCell(merge.getAttribute('ref').split(':')[0]); anchor.setAttribute('s', String(aligned(Number(anchor.getAttribute('s') || 0), true)));
       }
       if (merges) { const count = children(merges, 'mergeCell').length; if (count) merges.setAttribute('count', String(count)); else merges.parentNode.removeChild(merges); }
       if (s.name === 'Liabilities' || s.name === 'Analyze' || this.members().some(m => m.sheet === s.name)) {

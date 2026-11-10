@@ -1640,3 +1640,54 @@ test('liability totals follow visible accounts and suppress invalid batch amount
   for (const assets of [0, -100, null, '#N/A', NaN, Infinity]) assert.equal(debtRatio(300, assets), null);
   assert.equal(debtRatio(null, 1000), null);
 });
+
+test('export vertically centers ordinary and merged cells and preserves their independent formats', async () => {
+  const { DOMParser, XMLSerializer } = require('@xmldom/xmldom');
+  const source = await fixture();
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await source.export());
+  const assets = wb.getWorksheet('Assets');
+  for (const row of assets._rows.filter(Boolean)) for (const cell of row._cells.filter(Boolean)) cell.style = { ...cell.style };
+  assets.getCell('D3').alignment = { horizontal: 'left', vertical: 'top', wrapText: true, indent: 1 };
+  assets.getCell('E3').alignment = { horizontal: 'right', vertical: 'bottom' };
+  assets.getCell('E3').numFmt = '#,##0.00';
+  assets.getCell('E3').font = { name: 'Arial', bold: true, size: 11 };
+  assets.getCell('E3').border = { bottom: { style: 'thin', color: { argb: 'FF3577EB' } } };
+  assets.mergeCells('Y3:Z4'); assets.getCell('Y3').value = 'Merged heading';
+  assets.getCell('Y3').alignment = { horizontal: 'center', vertical: 'middle' };
+  assets.getRow(2).alignment = { horizontal: 'right', vertical: 'bottom' };
+  assets.getCell('Y2').value = 'row inherited';
+  assets.getColumn(26).alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
+  assets.getCell('Z5').value = 'column inherited';
+  const zip = await JSZip.loadAsync(await wb.xlsx.writeBuffer());
+  const parse = text => new DOMParser().parseFromString(text, 'application/xml');
+  const doc = parse(await zip.file('xl/worksheets/sheet1.xml').async('string'));
+  const cells = new Map(Array.from(doc.getElementsByTagName('c')).map(c => [c.getAttribute('r'), c]));
+  cells.get('Y2').removeAttribute('s'); cells.get('Z5').removeAttribute('s');
+  const styles = parse(await zip.file('xl/styles.xml').async('string'));
+  const formats = Array.from(styles.getElementsByTagName('cellXfs')[0].childNodes).filter(n => n.localName === 'xf');
+  formats[Number(cells.get('Y3').getAttribute('s'))].setAttribute('applyAlignment', '0');
+  zip.file('xl/worksheets/sheet1.xml', new XMLSerializer().serializeToString(doc));
+  zip.file('xl/styles.xml', new XMLSerializer().serializeToString(styles));
+  const book = await MonthlyWorkbook.open(await zip.generateAsync({ type: 'uint8array' }));
+  const output = await book.export(), result = new ExcelJS.Workbook(); await result.xlsx.load(output);
+  for (const sheet of result.worksheets) for (const row of sheet._rows.filter(Boolean)) for (const cell of row._cells.filter(Boolean)) {
+    assert.equal(cell.alignment.vertical, 'middle', `${sheet.name}!${cell.address}`);
+  }
+  const final = result.getWorksheet('Assets');
+  assert.deepEqual(final.getCell('D3').alignment, { horizontal: 'left', vertical: 'middle', wrapText: true, indent: 1 });
+  assert.deepEqual(final.getCell('E3').alignment, { horizontal: 'right', vertical: 'middle' });
+  assert.equal(final.getCell('E3').numFmt, '#,##0.00');
+  assert.deepEqual(final.getCell('E3').font, assets.getCell('E3').font);
+  assert.deepEqual(final.getCell('E3').border, assets.getCell('E3').border);
+  assert.equal(final.getCell('Y3').alignment.horizontal, 'center');
+  assert.equal(final.getCell('Y2').alignment.horizontal, 'right');
+  assert.equal(final.getCell('Z5').alignment.horizontal, 'left');
+  const outZip = await JSZip.loadAsync(output), outStyles = parse(await outZip.file('xl/styles.xml').async('string'));
+  const outFormats = Array.from(outStyles.getElementsByTagName('cellXfs')[0].childNodes).filter(n => n.localName === 'xf');
+  const outDoc = parse(await outZip.file(book.sheet('Assets').path).async('string'));
+  const anchor = Array.from(outDoc.getElementsByTagName('c')).find(c => c.getAttribute('r') === 'Y3');
+  assert.equal(outFormats[Number(anchor.getAttribute('s'))].getAttribute('applyAlignment'), '1');
+  assert.equal(book.cell('Assets', 'D3').value, source.cell('Assets', 'D3').value);
+  const reopened = await MonthlyWorkbook.open(output), again = await JSZip.loadAsync(await reopened.export());
+  assert.equal(parse(await again.file('xl/styles.xml').async('string')).getElementsByTagName('cellXfs')[0].getAttribute('count'), outStyles.getElementsByTagName('cellXfs')[0].getAttribute('count'));
+});

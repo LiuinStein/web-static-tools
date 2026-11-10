@@ -249,3 +249,8 @@
 /* Equal space above the title and between the title and the first paragraph. */
 .mr-review-warning-dialog .next-dialog-header { padding-top: 16px; }
 .mr-review-warning-dialog .next-dialog-close { top: 12px; }
+
+.mr-download-toast { position: fixed; right: 24px; bottom: 24px; z-index: 1000; display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 32px); padding: 12px 16px; background: #edf7f3; border: 1px solid #d3e9de; border-radius: 8px; color: #2f7759; box-shadow: 0 4px 20px rgba(37,52,76,.12); line-height: 1.6; overflow-wrap: anywhere; }
+.mr-download-toast.error { background: #fff3f1; border-color: #f1d2cc; color: #b54536; }
+.monthly-review .mr-download-toast button { flex: 0 0 auto; padding: 2px 8px; background: transparent; border: 0; color: inherit; font-size: 18px; }
+@media (max-width: 600px) { .mr-download-toast { right: 16px; bottom: 16px; } }
