@@ -763,6 +763,33 @@ export class MonthlyWorkbook {
     prepared.cleanupEmptySubtotals();
     return prepared.serialize();
   }
+  private cleanupXirrAccountPadding() {
+    const products = this.products();
+    for (const { xirr } of this.members()) {
+      const sheet = this.sheet(xirr), blocks = this.blocks(xirr), remove = new Set<number>();
+      const merges = descendants(sheet.doc, 'mergeCells')[0];
+      for (const merge of merges ? children(merges, 'mergeCell') : []) {
+        const range = merge.getAttribute('ref').match(/^B(\d+):B(\d+)$/);
+        if (!range) continue;
+        const start = Number(range[1]), end = Number(range[2]);
+        const contained = blocks.filter(block => block.start <= end && block.summary >= start);
+        if (!contained.length || contained.some(block => block.start < start || block.summary > end || !products.some(p => p.block?.sheet === xirr && p.block.summary === block.summary))) continue;
+        const firstProduct = contained[0].start;
+        if (firstProduct <= start) continue;
+        const padding = Array.from({ length: firstProduct - start }, (_, i) => start + i);
+        const empty = padding.every(row => [...sheet.cells.keys()].filter(address => Number(address.replace(/[A-Z]+/, '')) === row).every(address => {
+          const cell = this.cell(xirr, address);
+          return !cell?.formula && ((address === `B${start}` && typeof cell?.value === 'string') || cell?.value === null || cell?.value === '');
+        }));
+        if (!empty) continue;
+        // Keep a shared-account label when its old merge anchor is removed.
+        const label = this.value(xirr, `B${start}`);
+        if (label && !this.value(xirr, `B${firstProduct}`)) this.set(xirr, `B${firstProduct}`, label);
+        for (const row of padding) remove.add(row);
+      }
+      for (const row of [...remove].sort((a, b) => b - a)) this.shiftRows(xirr, row, 1, true);
+    }
+  }
   private repairXirrAccountLabels() {
     const products = this.products();
     for (const { xirr } of this.members()) {
@@ -837,6 +864,7 @@ export class MonthlyWorkbook {
   }
   private async serialize(): Promise<Uint8Array> {
     this.applyCashAccountRules();
+    this.cleanupXirrAccountPadding();
     this.repairXirrAccountLabels();
     this.prepareCashSummaries();
     this.mergeAssetLabels();

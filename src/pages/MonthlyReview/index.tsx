@@ -191,8 +191,8 @@ export default function MonthlyReview() {
   }
   async function activate(data: Uint8Array, name: string, metadata?: Partial<Draft>) {
     if (batch) throw new Error('请先保存或取消本次批量记账');
-    const opened = await MonthlyWorkbook.open(data);
-    if (opened.cleanupEmptySubtotals()) data = await opened.export();
+    let opened = await MonthlyWorkbook.open(data);
+    if (opened.cleanupEmptySubtotals()) { data = await opened.export(); opened = await MonthlyWorkbook.open(data); }
     const entry: Draft = { id: fileId(), name, data, updated: new Date().toISOString(), ...metadata };
     const saved = await saveDraft(entry); setDrafts(await listDrafts()); setBook(opened); setDraft(saved); setModal(null);
   }
@@ -206,8 +206,9 @@ export default function MonthlyReview() {
     // Apply to a copy; a rejected operation leaves both the visible workbook and saved draft intact.
     const edited = MonthlyBatch.restore(await MonthlyWorkbook.open(draft.data), draft.reviewState).apply(action, touchedKey).markSettings(settingsKeys).apply(next => next.cleanupEmptySubtotals());
     const next = edited.book;
-    const data = await next.export(); const updated = { ...draft, data, reviewState: edited.reviewState(), updated: new Date().toISOString(), published: undefined };
-    const saved = await saveDraft(updated, draft); setBook(next); setDraft(saved); setDrafts(await listDrafts()); setNotice('已保存本机草稿，页面结果已更新。');
+    const data = await next.export(); const persisted = await MonthlyWorkbook.open(data);
+    const updated = { ...draft, data, reviewState: edited.reviewState(), updated: new Date().toISOString(), published: undefined };
+    const saved = await saveDraft(updated, draft); setBook(persisted); setDraft(saved); setDrafts(await listDrafts()); setNotice('已保存本机草稿，页面结果已更新。');
   }
   async function saveNote(product: Product, note: string) {
     let saved = false;
@@ -257,8 +258,9 @@ export default function MonthlyReview() {
     completed = completed.apply(next => next.cleanupEmptySubtotals());
     completed.book.validate();
     const data = await completed.book.export();
+    const persisted = await MonthlyWorkbook.open(data);
     const saved = await saveDraft({ ...draft, data, reviewState: completed.reviewState(), updated: new Date().toISOString(), published: undefined }, draft);
-    setBook(completed.book); setDraft(saved); setDrafts(await listDrafts()); setBatch(null); setOnlyUnchecked(false);
+    setBook(persisted); setDraft(saved); setDrafts(await listDrafts()); setBatch(null); setOnlyUnchecked(false);
     setNotice('批量记账已保存到本机草稿，可下载 Excel 检查或发布到 OneDrive。');
   }
   function discardBatch() {
@@ -366,10 +368,11 @@ export default function MonthlyReview() {
     const name = monthlyFileName(isoDate(book.value('Assets', 'L1')));
     if (!window.confirm(`将“${name}”发布到 ${account} 的 /${drive.folder}/。如存在同名文件，将覆盖其内容；不存在则创建新文件。`)) return;
     const prepared = MonthlyBatch.restore(book, draft.reviewState).apply(next => next.cleanupEmptySubtotals());
-    const data = await prepared.book.export(); const result = await drive.publish(name, data);
+    const data = await prepared.book.export(); const persisted = await MonthlyWorkbook.open(data);
+    const result = await drive.publish(name, data);
     const updated = { ...draft, name: result.name, data, reviewState: prepared.reviewState(), source: result, scope, sourceLabel: `${account} · /${drive.folder}/`, published: new Date().toISOString() };
     // Publication is already successful even if refreshing the folder or persisting cache fails.
-    setBook(prepared.book); setDraft(updated);
+    setBook(persisted); setDraft(updated);
     setNotice(<>已发布到 OneDrive：/{drive.folder}/{result.name}（内容已核验）。 <a href={result.webUrl} target="_blank" rel="noopener noreferrer">打开文件</a></>);
     try { const saved = await saveDraft(updated, draft); setDraft(saved); setDrafts(await listDrafts()); setFiles(await drive.list()); } catch (e) { setError(`文件已发布，但刷新本机缓存失败：${e.message}`); }
   }
