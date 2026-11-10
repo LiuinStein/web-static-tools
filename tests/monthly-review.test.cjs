@@ -1691,3 +1691,34 @@ test('export vertically centers ordinary and merged cells and preserves their in
   const reopened = await MonthlyWorkbook.open(output), again = await JSZip.loadAsync(await reopened.export());
   assert.equal(parse(await again.file('xl/styles.xml').async('string')).getElementsByTagName('cellXfs')[0].getAttribute('count'), outStyles.getElementsByTagName('cellXfs')[0].getAttribute('count'));
 });
+
+test('export repairs blank XIRR account merge anchors using linked products and splits mixed-account merges', async () => {
+  const { DOMParser } = require('@xmldom/xmldom');
+  const book = await fixture();
+  const first = book.products()[0];
+  book.updateProduct(first, { ...first, flow: 0, account: 'ZA Bank', due: '' });
+  let p = book.products().find(p => p.sheet === 'Assets');
+  book.saveTransactions(p, [{ kind: 'buy', date: '2026-10-01', amount: 1000, shares: 100, price: 10 }]);
+  const second = book.addProduct(book.products().find(p => p.sheet === 'Assets'), 'Another fund', 'ZA Bank');
+  book.saveTransactions(second, [{ kind: 'buy', date: '2026-10-02', amount: 200, shares: 20, price: 10 }]);
+  const rows = book.products().filter(p => p.sheet === 'Assets').sort((a,b) => a.block.start - b.block.start);
+  const start = rows[0].block.start, mergeStart = start - 1, end = rows[1].block.summary;
+  let merges = book.sheet('XIRR').doc.getElementsByTagName('mergeCells')[0];
+  if (!merges) { merges = book.sheet('XIRR').doc.createElementNS('http://schemas.openxmlformats.org/spreadsheetml/2006/main','mergeCells'); book.sheet('XIRR').doc.documentElement.appendChild(merges); }
+  const merge = book.sheet('XIRR').doc.createElementNS('http://schemas.openxmlformats.org/spreadsheetml/2006/main','mergeCell');
+  merge.setAttribute('ref',`B${mergeStart}:B${end}`);merges.appendChild(merge);
+  for(let r=mergeStart;r<=end;r++)book.set('XIRR','B'+r,null);
+  const snapshots = rows.map(p => [p.name, p.account, book.transactions(p.block), book.value(p.sheet,'K'+p.row), book.value(p.sheet,'L'+p.row)]);
+  const output = await book.export(), excel = new ExcelJS.Workbook();await excel.xlsx.load(output);
+  const sheet=excel.getWorksheet('XIRR');
+  for(let r=mergeStart;r<=end;r++)assert.equal(sheet.getCell('B'+r).value,'ZA Bank');
+  assert.equal(book.value('XIRR','B'+mergeStart),null,'repair only affects the export copy');
+  const loaded = await MonthlyWorkbook.open(output);
+  for(const snapshot of snapshots){const p=loaded.products().find(p=>p.name===snapshot[0]&&p.sheet==='Assets');assert.deepEqual([p.name,p.account,loaded.transactions(p.block),loaded.value(p.sheet,'K'+p.row),loaded.value(p.sheet,'L'+p.row)],snapshot);}
+  const changed = rows[1];book.updateProduct(changed,{...changed,account:'Other Bank',flow:Number(changed.flow),due:''});
+  const mixed=new ExcelJS.Workbook();await mixed.xlsx.load(await book.export());
+  assert.equal(mixed.getWorksheet('XIRR').getCell('B'+rows[0].block.start).value,'ZA Bank');
+  assert.equal(mixed.getWorksheet('XIRR').getCell('B'+changed.block.start).value,'Other Bank');
+  assert.equal(mixed.getWorksheet('XIRR').model.merges.includes(`B${mergeStart}:B${end}`),false);
+  const again=new ExcelJS.Workbook();await again.xlsx.load(await loaded.export());assert.equal(again.getWorksheet('XIRR').getCell('B'+mergeStart).value,'ZA Bank');
+});

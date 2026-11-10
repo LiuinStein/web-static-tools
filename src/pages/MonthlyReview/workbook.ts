@@ -763,6 +763,58 @@ export class MonthlyWorkbook {
     prepared.cleanupEmptySubtotals();
     return prepared.serialize();
   }
+  private repairXirrAccountLabels() {
+    const products = this.products();
+    for (const { xirr } of this.members()) {
+      const sheet = this.sheet(xirr), blocks = this.blocks(xirr);
+      const linked = blocks.map(block => {
+        const owners = products.filter(p => p.block?.sheet === xirr && p.block.summary === block.summary);
+        const accounts = [...new Set(owners.map(p => p.account))];
+        return { block, accounts };
+      });
+      if (!linked.some(item => item.accounts.length)) continue;
+      let merges = descendants(sheet.doc, 'mergeCells')[0];
+      if (!merges) {
+        merges = this.element(sheet.doc, 'mergeCells');
+        const later = ['phoneticPr', 'conditionalFormatting', 'dataValidations', 'hyperlinks', 'printOptions', 'pageMargins', 'pageSetup', 'headerFooter', 'rowBreaks', 'colBreaks', 'drawing', 'legacyDrawing', 'extLst'];
+        sheet.doc.documentElement.insertBefore(merges, Array.from(sheet.doc.documentElement.childNodes).find((n: any) => later.includes(n.localName)) || null);
+      }
+      const accountMerges = children(merges, 'mergeCell').map(node => {
+        const range = node.getAttribute('ref').match(/^B(\d+):B(\d+)$/);
+        return range ? { node, start: Number(range[1]), end: Number(range[2]) } : null;
+      }).filter((range): range is { node: any; start: number; end: number } => Boolean(range));
+      const handled = new Set<number>();
+      for (const range of accountMerges) {
+        const contained = linked.filter(({ block }) => block.start <= range.end && block.summary >= range.start);
+        // Do not infer an account for orphan blocks or partially overlapping ranges.
+        if (!contained.length || contained.some(({ block, accounts }) => !accounts.length || block.start < range.start || block.summary > range.end)) continue;
+        const accounts = [...new Set(contained.flatMap(item => item.accounts))];
+        if (accounts.length === 1) {
+          this.set(xirr, `B${range.start}`, accounts[0]);
+          for (const { block } of contained) handled.add(block.start);
+        } else if (contained.length === 1) {
+          // Preserve a legacy composite label for a shared cross-account holding.
+          if (!this.value(xirr, `B${range.start}`)) this.set(xirr, `B${range.start}`, accounts.join(' + '));
+          handled.add(contained[0].block.start);
+        } else {
+          // An edit/insert can leave one merge spanning different accounts.
+          range.node.parentNode.removeChild(range.node);
+          this.set(xirr, `B${range.start}`, null);
+        }
+      }
+      for (const { block, accounts } of linked) {
+        if (!accounts.length || handled.has(block.start)) continue;
+        // Preserve unknown template ranges rather than writing into covered cells.
+        if (accountMerges.some(range => range.node.parentNode && block.start >= range.start && block.start <= range.end)) continue;
+        const label = accounts.length === 1 ? accounts[0] : this.value(xirr, `B${block.start}`) || accounts.join(' + ');
+        this.set(xirr, `B${block.start}`, String(label));
+        if (merges) {
+          const merge = this.element(sheet.doc, 'mergeCell'); merge.setAttribute('ref', `B${block.start}:B${block.summary}`); merges.appendChild(merge);
+        }
+      }
+      if (merges) merges.setAttribute('count', String(children(merges, 'mergeCell').length));
+    }
+  }
   private prepareCashSummaries() {
     const products = this.products();
     for (const { sheet } of this.members()) {
@@ -785,6 +837,7 @@ export class MonthlyWorkbook {
   }
   private async serialize(): Promise<Uint8Array> {
     this.applyCashAccountRules();
+    this.repairXirrAccountLabels();
     this.prepareCashSummaries();
     this.mergeAssetLabels();
     // Patch only XML parts we understand. Original styles, drawings and package relationships stay intact.
