@@ -56,7 +56,8 @@ const asideMenuConfig = [
       {
         name: '编解码类',
         path: '/code/encoding'
-      }
+      },
+      { name: '税后工资计算器', path: '/code/salary' }
     ]
   },
 ];

@@ -1,0 +1,31 @@
+const assert = require('node:assert/strict');
+const ts = require('typescript');
+const fs = require('node:fs');
+const m = { exports: {} };
+new Function('exports', 'require', 'module', ts.transpileModule(fs.readFileSync('src/pages/SalaryTools/model.ts','utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS }}).outputText)(m.exports,require,m);
+const {tax,calculate,defaults}=m.exports;
+assert.equal(tax(36000),1080);
+assert.equal(tax(36000,true),1080);
+assert.equal(tax(36001,true),3390.1);
+assert.equal(tax(144000),11880);
+assert.equal(tax(0),0);
+assert.equal(tax(-1),0);
+const r=calculate({...defaults,bonus:60000,equity:100000,socialBase:999999,fundBase:999999},true,true);
+assert.equal(r.social,3819.54);
+assert.equal(r.fund,4362);
+assert.equal(r.fundAnnual,104688);
+assert.equal(r.equityTax,7480);
+assert.equal(r.bonusTax,5790);
+for(const b of [true,false]) for(const e of [true,false]) {
+ const a=calculate(defaults,b,e);
+ assert.ok(Math.abs(a.salaryTax+a.bonusTax+a.equityTax-a.totalTax)<.01);
+ assert.ok(Math.abs(a.cash+a.fundAnnual-a.total)<.01);
+ assert.ok(Math.abs(a.months.reduce((s,x)=>s+x.tax,0)-a.salaryTax)<.01);
+ assert.equal(a.gross-a.totalTax-a.social*12+a.employerFund*12,a.total);
+}
+const low=calculate({...defaults,salary:0,bonus:10000,equity:0,socialBase:0,fundBase:0,fund:0,employerFund:0,pension:0,medical:0,medicalFixed:0,unemployment:0},false,false);
+assert.equal(low.totalTax,0);
+assert.equal(low.total,10000);
+assert.equal(calculate({...defaults,maxBase:40000,socialBase:60000,fundBase:60000},true,true).sb,40000);
+assert.equal(calculate({...defaults,maxBase:40000,socialBase:60000,fundBase:60000},true,true).fund,4800);
+console.log('Salary calculator: tax brackets, bonus cliff, contribution caps, equity, four tax plans and conservation checks passed.');

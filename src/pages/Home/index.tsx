@@ -3,6 +3,7 @@ import { Link } from 'ice';
 import './style.css';
 
 const tools = [
+  { path: '/code/salary', title: '税后工资计算器', category: '开发工具', icon: '¥', description: '拆解工资、年终奖与股权激励，比较计税方案，单列公积金收入。', tags: ['北京社保', '个税', '公积金'], scene: '核对薪资与比较 Offer 时' },
   { path: '/monthly-review', title: '月度复盘', category: '复盘记录', icon: 'monthly-review', description: '汇总资产与负债，核对每月余额，回顾投入、收益和资产变化。', tags: ['资产负债', '批量记账', 'Excel / OneDrive'], scene: '每月整理财务时', featured: true },
   { path: '/trading-journal', title: '交易日记', category: '复盘记录', icon: 'trading-journal', description: '记录每笔交易与投资想法，整理持仓，让下一次决策有据可循。', tags: ['交易记录', '持仓管理', 'Excel / OneDrive'], scene: '交易之后，及时记录', featured: true },
   { path: '/finance/return', title: '收益率计算', category: '金融计算', icon: '%', description: '用 XIRR 计算多笔、不规则现金流对应的年化收益率。', tags: ['XIRR', '年化收益'], scene: '想知道投资实际回报时' },
