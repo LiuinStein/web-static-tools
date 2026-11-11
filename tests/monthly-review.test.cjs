@@ -1347,7 +1347,7 @@ test('monthly dialogs use CSS positioning from first paint and preserve cached m
     const element = MonthlyDialog({ visible: true, title: '产品明细', className: 'mr-dialog', closeMode: ['close', 'mask', 'esc'], overlayProps: { cache: true, wrapperClassName: 'custom-overlay' }, onClose: () => { closed++; } });
     assert.equal(element.props.animation, false);
     assert.equal(element.props.overlayProps.cache, true);
-    assert.equal(element.props.overlayProps.wrapperClassName, 'mr-dialog-overlay custom-overlay');
+    assert.equal(element.props.overlayProps.wrapperClassName, 'tool-dialog-overlay mr-dialog-overlay custom-overlay');
     const impl = new DialogImpl({ ...DialogImpl.defaultProps, ...element.props });
     const overlay = impl.render();
     assert.equal(overlay.props.align, false); // No JS measurement or repositioning.

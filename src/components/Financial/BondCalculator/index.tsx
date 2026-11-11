@@ -43,7 +43,7 @@ export default function BondCalculator() {
     <input id={`bond-${key}`} type="text" inputMode="decimal" autoComplete="off" value={key === 'couponRate' ? couponText : fields[key]} readOnly={key === 'couponRate' && bondType === 'strips'} onChange={event => setFields({ ...fields, [key]: event.target.value })} onFocus={event => event.currentTarget.select()} aria-invalid={parsed[key] === null || (key === 'couponRate' && parsed[key]! > 100)} aria-describedby={error ? 'bond-error' : undefined} />
   </label>;
 
-  return <section className="financial-calculator bond-calculator" aria-label="债券到期收益计算器">
+  return <section className="tool-page financial-calculator bond-calculator" aria-label="债券到期收益计算器">
     <div className="sf-heading"><div><span className="sf-eyebrow">BOND RETURN</span><h2>持有到期，算清收益。</h2><p>选择券商与债券，查看到期收益和持有成本。</p></div><span className="sf-currency">{currency} · {currencyPlan.label}</span></div>
     <div className="sf-workspace">
       <div className="sf-input-panel">

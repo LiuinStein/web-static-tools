@@ -1,11 +1,11 @@
 import React from 'react';
 import { Dialog } from '@alifd/next';
+import ToolDialog from '../../components/ToolPage/ToolDialog';
 
-// CSS positions the dialog on its first paint. The default JS positioning path
-// measures mounted content and can visibly move it after it has appeared.
+// Compatibility entry for monthly review's feature-specific dialog classes.
 export default function MonthlyDialog(props: React.ComponentProps<typeof Dialog>) {
-  return <Dialog {...props} isFullScreen align="cc cc" animation={false} overlayProps={{
+  return ToolDialog({ ...props, overlayProps: {
     ...props.overlayProps,
     wrapperClassName: ['mr-dialog-overlay', props.overlayProps?.wrapperClassName].filter(Boolean).join(' '),
-  }} />;
+  }});
 }

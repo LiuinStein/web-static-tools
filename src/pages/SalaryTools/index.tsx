@@ -36,7 +36,7 @@ export default function SalaryTools() {
   };
   const incomeField = (key: 'bonus' | 'equity', title: string) => <div className="salary-income" key={key}><div className="salary-income-heading"><span>{title}</span><div className="salary-mode" role="group" aria-label={`${title}输入模式`}>{(['months', 'amount'] as IncomeMode[]).map(mode => <button type="button" key={mode} aria-pressed={modes[key] === mode} onClick={() => switchMode(key, mode)}>{mode === 'months' ? '基本工资月数' : '直接输入金额'}</button>)}</div></div>{modes[key] === 'months' ? field(`${key}Months` as InputKey, `${title}（个月基本工资 / 年）`) : field(key, `${title}（元 / 年）`)}<p className="salary-conversion">{modes[key] === 'months' ? `${inputs[key + 'Months']} 个月 × 月基本工资` : '全年金额'} = ¥ {money(v[key])}</p></div>;
   const plans = [true, false].flatMap(b => [true, false].map(e => ({ b, e, ...calculate(v, b, e) })));
-  return <main className="salary-page">
+  return <main className="salary-page tool-page">
     <header className="salary-heading"><div><div className="salary-eyebrow">程序员 / 收入测算</div><h1>税后工资计算器</h1><p>把基本工资、年终奖和股权收入算清楚，也看见公积金里的收入。</p></div><button onClick={() => { setInputs(initialInputs()); setModes({ bonus: 'months', equity: 'months' }); setAutoBases(true); setBonusSeparate(true); setEquitySeparate(true); }}>恢复默认</button></header>
     <div className="salary-notice">北京最新标准 · 核对于 2026-11-10 · 中国税收居民 · 全年 12 个月同薪测算。按最新缴费标准全年外推，不还原 2026 年上半年历史缴费；可按实际缴费信息配置。</div>
     <div className="salary-layout"><section className="salary-panel"><h2>01　税前收入</h2><div className="salary-fields">{field('salary', '基本工资（元 / 月）')}{incomeField('bonus', '年终奖')}{incomeField('equity', '股权激励应税所得')}{field('extra', '专项附加扣除（元 / 月）')}{field('other', '其他税前扣除（元 / 月）')}</div>

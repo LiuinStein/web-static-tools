@@ -29,7 +29,7 @@ export default function StockCommission({ fixedMarket }: { fixedMarket?: Market 
   const price = (value: number | null | undefined) => value == null ? '—' : value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 6 });
   const id = `stock-${fixedMarket || 'all'}`;
   const selectOnFocus = (event: React.FocusEvent<HTMLInputElement>) => event.currentTarget.select();
-  return <section className="financial-calculator stock-fees" aria-label={`${fixedMarket === 'HK' ? '港股' : fixedMarket === 'US' ? '美股' : '港美股'}交易费用计算器`}>
+  return <section className="tool-page financial-calculator stock-fees" aria-label={`${fixedMarket === 'HK' ? '港股' : fixedMarket === 'US' ? '美股' : '港美股'}交易费用计算器`}>
     <div className="sf-heading"><div><span className="sf-eyebrow">TRADING COST</span><h2>每笔交易，算清成本。</h2><p>选择市场与券商，查看买卖费用和回本参考价。</p></div><span className="sf-currency">{currency} · {market === 'HK' ? '港元' : '美元'}</span></div>
     <div className="sf-workspace">
       <div className="sf-input-panel">
