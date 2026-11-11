@@ -4,7 +4,7 @@ const ts = require('typescript');
 const React = require('react');
 let states=[], cursor=0;
 const mockReact={...React,useState(initial){const i=cursor++;if(!(i in states))states[i]=typeof initial==='function'?initial():initial;return [states[i],next=>{states[i]=typeof next==='function'?next(states[i]):next;}];}};
-function load(file){const m={exports:{}};new Function('exports','require','module',ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText)(m.exports,name=>name==='react'?mockReact:name==='./model'?load('src/pages/SalaryTools/model.ts'):name.endsWith('.css')?{}:require(name),m);return m.exports;}
+function load(file){const m={exports:{}};new Function('exports','require','module',ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText)(m.exports,name=>name==='react'?mockReact:name==='./SeveranceCalculator'?{default:()=>null,__esModule:true}:name==='./model'?load('src/pages/SalaryTools/model.ts'):name.endsWith('.css')?{}:require(name),m);return m.exports;}
 const Page=load('src/pages/SalaryTools/index.tsx').default;
 function render(){cursor=0;return Page();}
 function all(node,predicate,result=[]){if(Array.isArray(node))node.forEach(n=>all(n,predicate,result));else if(node&&typeof node==='object'){if(predicate(node))result.push(node);all(node.props?.children,predicate,result);}return result;}

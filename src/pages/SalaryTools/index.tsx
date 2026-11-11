@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { calculate, defaults, SalaryInput, brackets, rates, deductions } from './model';
 import './style.css';
+import SeveranceCalculator from './SeveranceCalculator';
 const money = (n: number) => n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export default function SalaryTools() {
   type InputKey = keyof SalaryInput | 'bonusMonths' | 'equityMonths';
@@ -52,5 +53,6 @@ export default function SalaryTools() {
     <li><a href="https://www.beijing.gov.cn/zhengce/zhengcefagui/202608/t20260821_4831679.html" target="_blank" rel="noreferrer">北京 2026 年社保缴费基数（2026 年 7 月起）</a></li><li><a href="https://www.bjfsh.gov.cn/zsk/zcwd/202608/t20260818_40116625.shtml" target="_blank" rel="noreferrer">北京职工社保比例</a> · <a href="https://zyk.bjhd.gov.cn/zwdt/tdzt/2018/csrlsb/cjwtcs/shbxdj/202510/t20251022_4790568.shtml" target="_blank" rel="noreferrer">医保 2% + 3 元</a></li>
     <li><a href="https://www.beijing.gov.cn/zhengce/zhengcefagui/202608/t20260824_4834975.html" target="_blank" rel="noreferrer">2026 公积金年度标准（2026-07 至 2027-06）</a></li>
     <li><a href="https://fgk.chinatax.gov.cn/zcfgk/c102416/c5211524/content.html" target="_blank" rel="noreferrer">全年一次性奖金：2023 年第 30 号公告</a></li><li><a href="https://tianjin.chinatax.gov.cn/11200000000/0300/030004/03000418/20230823145338958.shtml" target="_blank" rel="noreferrer">股权激励：2023 年第 25 号公告</a></li></ul><p className="salary-help">按全年在职、固定工资与扣除额估算；不含股权卖出环节税费、递延纳税及其他收入。实际申报以税务机关与公司核算为准。填写的信息仅用于本页即时计算。</p></section>
+    <SeveranceCalculator monthlyAverage={v.salary + (v.bonus + v.equity) / 12} />
   </main>;
 }
