@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { BondBroker, BondCurrency, BondType, bondLabels, bondPlans, currencies, getBondPlan, reviewedOn, supportedBondTypes } from './rates';
-import { BondInput, calculateBond, parseBondNumber } from './model';
+import { BondInput, calculateBond, compareBondBrokers, parseBondNumber } from './model';
 import './style.css';
+import FeeComparisonTable, { ComparisonRow } from '../CalculatorLayout/FeeComparisonTable';
 
 function localDate(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -38,6 +39,16 @@ export default function BondCalculator() {
   const { result, error } = calculation;
   const amount = (value: number | undefined) => value === undefined ? '—' : value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const percent = (value: number | undefined) => value === undefined ? '—' : `${value.toFixed(4)}%`;
+  const comparisons = useMemo(() => compareBondBrokers(currency, broker, bondType, Object.values(parsed).some(value => value === null) ? null : { ...fields, ...parsed, frequency, currency, bondType } as Omit<BondInput, 'broker'>), [fields, frequency, currency, broker, bondType]);
+  const comparisonRows: ComparisonRow[] = [
+    ...[{ id: 'commission', label: '交易费 / 佣金' }, { id: 'platform', label: '平台使用费' }, { id: 'custody', label: '预计托管费' }, { id: 'other', label: '其他费用（手动输入）' }].map(fee => ({
+      ...fee, description: result?.fees.find(line => line.id === fee.id)?.rule ? `当前券商：${result.fees.find(line => line.id === fee.id)!.rule}` : '按各券商当前币种及债券类型的费率计算', cells: comparisons.map(item => { const line = item.result?.fees.find(line => line.id === fee.id); return { value: amount(line?.amount), detail: line?.rule }; }),
+    })),
+    { id: 'total', description: '佣金 + 平台费 + 托管费 + 其他费用', label: '总费用', emphasis: true, cells: comparisons.map(item => ({ value: amount(item.result?.totalFees) })) },
+    { id: 'cash', description: '买入成交额 + 佣金 + 平台费', label: '买入总支出', cells: comparisons.map(item => ({ value: amount(item.result?.buyCash) })) },
+    { id: 'profit', description: '累计净回款 − 买入总支出', label: '预计到期净收益', cells: comparisons.map(item => ({ value: amount(item.result?.profit) })) },
+    { id: 'annualized', description: '到期净收益 ÷ 买入总支出 × 365 ÷ 持有天数，非 YTM', label: '参考年化（单利）', cells: comparisons.map(item => ({ value: percent(item.result?.annualizedRate) })) },
+  ];
   const input = (key: 'buyPrice' | 'unitFace' | 'couponRate' | 'faceAmount' | 'otherFees', label: string, unit: string) => <label className="sf-field" htmlFor={`bond-${key}`}>
     <span>{label}<small>{unit}</small></span>
     <input id={`bond-${key}`} type="text" inputMode="decimal" autoComplete="off" value={key === 'couponRate' ? couponText : fields[key]} readOnly={key === 'couponRate' && bondType === 'strips'} onChange={event => setFields({ ...fields, [key]: event.target.value })} onFocus={event => event.currentTarget.select()} aria-invalid={parsed[key] === null || (key === 'couponRate' && parsed[key]! > 100)} aria-describedby={error ? 'bond-error' : undefined} />
@@ -82,10 +93,9 @@ export default function BondCalculator() {
         </div>
       </div>
     </div>
-    <div className="sf-detail-heading"><h3>费用明细</h3><span>{plan.name} · {currency}</span></div>
-    <div className="sf-table-wrap"><table><caption className="sf-sr-only">债券买入及持有期间费用</caption><thead><tr><th scope="col">费项</th><th scope="col">计费规则</th><th scope="col">金额（{currency}）</th></tr></thead><tbody>
-      {(result?.fees || [{ id: 'commission', label: '交易费 / 佣金' }, { id: 'platform', label: '平台使用费' }, { id: 'custody', label: '预计托管费' }, { id: 'other', label: '其他费用' }]).map(fee => <tr key={fee.id}><th scope="row">{fee.label}<small>{fee.id === 'custody' ? '持有期间估算' : fee.id === 'other' ? '手动填写' : '买入时收取'}</small><small className="bond-mobile-rule">{'rule' in fee ? fee.rule : '输入有效参数后显示'}</small></th><td>{'rule' in fee ? fee.rule : '输入有效参数后显示'}</td><td>{amount('amount' in fee ? fee.amount : undefined)}</td></tr>)}
-    </tbody><tfoot><tr><th scope="row">总费用</th><td>买入费用 + 持有期间费用</td><td>{amount(result?.totalFees)}</td></tr></tfoot></table></div>
+    <div className="sf-detail-heading"><h3>券商费用对比</h3><span>{currency} · {bondLabels[bondType]} · 当前券商列在最前</span></div>
+    <p className="sf-comparison-note">使用相同的债券类型、价格、面值、票息、交割及到期日，仅展示支持当前币种及类型的已收录券商；字段名下的小字为当前券商计费口径。其他费用按输入值统一计入，券商专属公司行动收费请结合明细另行核对。报价是否含费及买卖价差可能不同。</p>
+    <FeeComparisonTable caption={`全部已收录债券券商费用对比（${currency}）`} columns={comparisons.map(item => ({ id: item.plan.broker, name: item.plan.name, plan: item.plan.plan, selected: item.plan.broker === broker, error: item.error, source: item.plan.source.url }))} rows={comparisonRows} />
     <details className="sf-rules"><summary>查看费率、计算口径与官方来源 <span>核对于 {reviewedOn}</span></summary><div className="sf-rule-content">
       <dl><div><dt>成交金额</dt><dd>持有面值总额 × 买入价格 ÷ 每张票面价格。报价按每 100 面值时，票面价格填 100；Schwab「每张 1,000 面值」指计费单位，报价单位仍可填 100。</dd></div><div><dt>持有期利息</dt><dd>持有面值 × 票面年利率 × 实际持有天数 ÷ 365。每次派息按全年等额拆分，不代表完整派息日程。</dd></div><div><dt>到期净收益 / 年化</dt><dd>累计净回款 − 买入总支出；参考年化为净收益 ÷ 买入总支出 × 365 ÷ 持有天数。假设本金按面值偿还，不采用逐期现金流的 YTM 口径。</dd></div><div><dt>托管费估算</dt><dd>以买入成交额近似持有期间市值；uSMART 企业债按持仓月末计收，其他类型按所选券商规则处理。</dd></div></dl>
       <ul>{plan.notes.map(note => <li key={note}>{note}</li>)}<li>切换币种不做汇率换算；本工具不计算提前卖出、应计利息交割明细、汇兑、融资及税费。实际票息天数规则、报价加价与结单取整可能使结果不同。</li><li>「其他费用」在累计净回款中扣除，默认 0。按订单或公司行动通知填入适用收费。</li><li>ZA Bank 未列入：截至核对日，未查到普通个人账户直投债券的公开交易入口及费率；债券基金、南向通合格产品说明不作为本工具的债券收费依据。</li></ul>

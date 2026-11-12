@@ -1,9 +1,1 @@
 @import "../CalculatorLayout/style.css";
-
-.bond-calculator .sf-table-wrap .bond-mobile-rule { display: none; }
-@media (max-width: 600px) {
-  .bond-calculator .sf-table-wrap thead th:nth-child(2),
-  .bond-calculator .sf-table-wrap td:nth-child(2) { display: none; }
-  .bond-calculator .sf-table-wrap th:first-child { width: 70%; min-width: 0; }
-  .bond-calculator .sf-table-wrap .bond-mobile-rule { display: block; line-height: 1.7; margin-top: 6px; }
-}

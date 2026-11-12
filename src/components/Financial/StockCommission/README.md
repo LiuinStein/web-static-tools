@@ -40,3 +40,5 @@ SEC 费率应查 Section 31 交易费公告，不应混用 Section 6(b) 注册�
 港股采用固定式：成交金额 0.08%，最低 HKD 18，包含交易及结算费用，另计印花税、SFC 和 AFRC。美股采用 Pro 固定式 SmartRouting：USD 0.005/股，最低 USD 1，最高成交金额 1%，上限优先；卖出监管费参考估算。暂不支持阶梯式、Lite、直接路由或介绍经纪商加价。
 
 来源：[股票佣金](https://www.interactivebrokers.com/en/pricing/commissions-stocks.php)、[港股固定式示例](https://www.interactivebrokers.com.hk/en/index.php?f=1316)。
+
+费用表使用共享的 `../CalculatorLayout/FeeComparisonTable.tsx`，当前券商固定排在第一数据列。股票比较当前市场全部已收录方案，债券仅比较支持当前币种及类型的已收录券商；逐列复用原计算引擎，不自动替换证券类型，未支持的方案不显示为零费用。

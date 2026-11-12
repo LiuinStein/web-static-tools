@@ -22,3 +22,5 @@ CSS 变量限定在 `.tool-page` 内，不影响其他页面。可覆写 `--tool
 页面加载 `style.css` 后，从本目录导入 `ToolDialog`。支持 `size="normal" | "wide" | "compact"`，分别用于普通表单、宽表格和简短确认。标题、关闭按钮、输入框、表格、操作区和移动端留白由模板统一管理；关闭回调、Esc、遮罩关闭和缓存选项沿用原有 Dialog 合约。弹窗从首帧通过 CSS 居中，长弹窗在视口内滚动。
 
 使用 `useToolConfirm()` 获取 `confirm` 和 `confirmationDialog`，将后者渲染在页面中。执行修改前先 `await confirm({ title, message, confirmLabel, danger })`；只有返回 `true` 才执行动作。取消、Esc、点击遮罩和页面卸载均返回 `false`，重复调用不会替换正在等待的确认。浏览器自身的关闭页面 / 刷新警告不属于应用内对话框。
+
+股票、债券的市场切换及下拉选择保留原计算工具样式，统一放在 `Financial/CalculatorLayout/style.css`，通过 `.financial-calculator` 限定作用域和优先级。左右输入与结果采用独立卡片，列间距和窄屏断点仍使用基础模板。

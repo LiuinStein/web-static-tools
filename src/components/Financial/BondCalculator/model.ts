@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js';
-import { BondBroker, BondCurrency, BondType, currencies, getBondPlan, supportedBondTypes } from './rates';
+import { BondBroker, BondCurrency, BondType, currencies, getBondPlan, supportedBondTypes, bondPlans } from './rates';
 
 export interface BondInput {
   currency: BondCurrency;
@@ -118,4 +118,14 @@ export function calculateBond(input: BondInput) {
     profitRate: profitRate.toNumber(), annualizedRate: profitRate.mul(365).div(days).toNumber(),
     feeRate: totalFees.div(notional).mul(100).toNumber(),
   };
+}
+
+
+/** Never substitute a different currency or bond type to create a comparison. */
+export function compareBondBrokers(currency: BondCurrency, selected: BondBroker, bondType: BondType, input: Omit<BondInput, 'broker'> | null) {
+  return bondPlans.filter(plan => plan.currencies.includes(currency) && supportedBondTypes(currency, plan.broker).includes(bondType)).sort((a, b) => Number(b.broker === selected) - Number(a.broker === selected)).map(plan => {
+    if (!input) return { plan, result: null, error: '请输入有效的债券参数' };
+    try { return { plan, result: calculateBond({ ...input, currency, bondType, broker: plan.broker }), error: '' }; }
+    catch (error) { return { plan, result: null, error: error instanceof Error ? error.message : '无法测算' }; }
+  });
 }

@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { Broker, Instrument, Market, getPlan, plans, reviewedOn } from './rates';
-import { TradeInput, breakEvenPrice, calculateRoundTrip, parseTradeNumber } from './model';
+import { TradeInput, breakEvenPrice, calculateRoundTrip, parseTradeNumber, compareStockBrokers } from './model';
 import './style.css';
+import FeeComparisonTable, { ComparisonRow } from '../CalculatorLayout/FeeComparisonTable';
 
 export default function StockCommission({ fixedMarket }: { fixedMarket?: Market }) {
   const [selectedMarket, setMarket] = useState<Market>('HK');
@@ -27,6 +28,24 @@ export default function StockCommission({ fixedMarket }: { fixedMarket?: Market 
   const result = calculation?.result;
   const amount = (value: number | undefined) => value === undefined ? '—' : value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const price = (value: number | null | undefined) => value == null ? '—' : value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+  const comparisons = useMemo(() => compareStockBrokers(market, broker, buyPrice !== null && shares !== null && sellPrice !== null ? { market, price: buyPrice, shares, instrument, commissionFree, oddLotSell } : null, sellPrice ?? undefined), [market, broker, buyPrice, shares, sellPrice, instrument, commissionFree, oddLotSell]);
+  const feeIds = Array.from(new Set(comparisons.flatMap(item => item.plan.rules.map(rule => rule.id))));
+  const comparisonRows: ComparisonRow[] = feeIds.map(feeId => ({
+    id: feeId, label: comparisons.flatMap(item => item.plan.rules).find(rule => rule.id === feeId)!.label + '（买卖合计）',
+    description: plan.rules.find(rule => rule.id === feeId) ? `当前券商：${plan.rules.find(rule => rule.id === feeId)!.description}` : '当前券商未单列此项，其他券商可能单独收费',
+    cells: comparisons.map(item => {
+      if (!item.result) return { value: '—' };
+      const buy = item.result.buy.lines.find(line => line.id === feeId), sell = item.result.sell.lines.find(line => line.id === feeId);
+      return { value: amount(Number(((buy?.amount || 0) + (sell?.amount || 0)).toFixed(2))), detail: buy ? `买入 ${amount(buy.amount)} / 卖出 ${amount(sell?.amount)}；${buy.description}` : '未单列收费，可能已包含在其他费项中' };
+    }),
+  }));
+  comparisonRows.push(...[
+    { id: 'buy-total', description: '买入时各项费用之和', label: '买入费用合计', cells: comparisons.map(item => ({ value: amount(item.result?.buy.total) })) },
+    { id: 'sell-total', description: '卖出时各项费用之和', label: '卖出费用合计', cells: comparisons.map(item => ({ value: amount(item.result?.sell.total) })) },
+    { id: 'broker-subtotal', description: '买卖佣金、平台费等券商费用合计', label: '券商费用小计（买卖合计）', cells: comparisons.map(item => ({ value: item.result ? amount(Number((item.result.buy.brokerFees + item.result.sell.brokerFees).toFixed(2))) : '—' })) },
+    { id: 'third-party-subtotal', description: '买卖税费及交易所等代收费合计', label: '税费 / 代收费小计（买卖合计）', cells: comparisons.map(item => ({ value: item.result ? amount(Number((item.result.buy.thirdPartyFees + item.result.sell.thirdPartyFees).toFixed(2))) : '—' })) },
+    { id: 'total', description: '买入费用 + 卖出费用', label: '买卖总费用', emphasis: true, cells: comparisons.map(item => ({ value: amount(item.result?.total) })) },
+  ]);
   const id = `stock-${fixedMarket || 'all'}`;
   const selectOnFocus = (event: React.FocusEvent<HTMLInputElement>) => event.currentTarget.select();
   return <section className="tool-page financial-calculator stock-fees" aria-label={`${fixedMarket === 'HK' ? '港股' : fixedMarket === 'US' ? '美股' : '港美股'}交易费用计算器`}>
@@ -59,12 +78,9 @@ export default function StockCommission({ fixedMarket }: { fixedMarket?: Market 
         <div className="sf-result-grid"><div><span>买入总支出</span><strong>{amount(result?.buy.cash)}</strong><small>成交金额 + 买入费用</small></div><div><span>卖出净收入</span><strong>{amount(result?.sell.cash)}</strong><small>成交金额 − 卖出费用</small></div><div><span>扣费后盈亏</span><strong className={result && result.profit < 0 ? 'sf-negative' : ''}>{amount(result?.profit)}</strong><small>卖出净收入 − 买入总支出</small></div><div><span>回本参考卖价</span><strong>{price(calculation?.breakEven)}</strong><small>已计卖出费用，未按报价档位取整</small></div></div>
       </div>
     </div>
-    <div className="sf-detail-heading"><h3>费用明细</h3><span>{plan.name} · {currency}</span></div>
-    <div className="sf-table-wrap"><table><caption className="sf-sr-only">所选券商买入与卖出费用</caption><thead><tr><th scope="col">费项</th><th scope="col">买入</th><th scope="col">卖出</th><th scope="col">合计</th></tr></thead><tbody>
-      {plan.rules.map(rule => { const buy = result?.buy.lines.find(line => line.id === rule.id)?.amount, sell = result?.sell.lines.find(line => line.id === rule.id)?.amount; return <tr key={rule.id}><th scope="row"><span>{rule.label}</span><small>{rule.category === 'broker' ? '券商费用' : '税费 / 代收费'}</small></th><td>{amount(buy)}</td><td>{amount(sell)}</td><td>{amount(buy === undefined || sell === undefined ? undefined : Number((buy + sell).toFixed(2)))}</td></tr>; })}
-      <tr className="sf-subtotal"><th scope="row">券商费用小计</th><td>{amount(result?.buy.brokerFees)}</td><td>{amount(result?.sell.brokerFees)}</td><td>{amount(result ? result.buy.brokerFees + result.sell.brokerFees : undefined)}</td></tr>
-      <tr className="sf-subtotal"><th scope="row">税费 / 代收费小计</th><td>{amount(result?.buy.thirdPartyFees)}</td><td>{amount(result?.sell.thirdPartyFees)}</td><td>{amount(result ? result.buy.thirdPartyFees + result.sell.thirdPartyFees : undefined)}</td></tr>
-    </tbody><tfoot><tr><th scope="row">总费用</th><td>{amount(result?.buy.total)}</td><td>{amount(result?.sell.total)}</td><td>{amount(result?.total)}</td></tr></tfoot></table></div>
+    <div className="sf-detail-heading"><h3>券商费用对比</h3><span>{market === 'HK' ? '港股' : '美股'} · {currency} · 当前券商列在最前</span></div>
+    <p className="sf-comparison-note">同一买入价、卖出价、股数及证券类型，采用本工具已收录的当前市场全部券商费率。富途免佣：{commissionFree ? '开启' : '关闭'}{market === 'HK' ? `；ZA 碎股卖出：${oddLotSell ? '开启' : '关闭'}` : ''}。优惠只作用于对应券商，未计报价差异与汇兑成本。</p>
+    <FeeComparisonTable caption={`所有已收录${market === 'HK' ? '港股' : '美股'}券商费用对比（${currency}）`} columns={comparisons.map(item => ({ id: item.plan.broker, name: item.plan.name, plan: item.plan.plan, selected: item.plan.broker === broker, error: item.error, source: item.plan.sources[0]?.url }))} rows={comparisonRows} />
     <details className="sf-rules"><summary>查看费率、计算口径与官方来源 <span>核对于 {reviewedOn}</span></summary><div className="sf-rule-content"><dl>{plan.rules.map(rule => <div key={rule.id}><dt>{rule.label}</dt><dd>{rule.description}</dd></div>)}</dl><ul>{plan.notes.map(note => <li key={note}>{note}</li>)}<li>除整港元印花税、向上取分的 SEC / FINRA 外，其余逐项四舍五入至分进行估算。拆单或多次成交会改变取整及最低收费。</li><li>不包含汇兑、融资利息、持仓、股息、ADR 特别费用及个别证券的额外税费。费率为核对日快照，优惠及实际扣费以券商结单为准。</li></ul><div className="sf-sources">{plan.sources.map(source => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.label} ↗</a>)}</div></div></details>
   </section>;
 }

@@ -17,7 +17,7 @@
   min-width: 0;
 }
 .tool-page * { box-sizing: border-box; }
-:where(.tool-page) :is(.tool-heading, .mr-title, .salary-heading, .sf-heading) { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin: 22px 0 26px; }
+:where(.tool-page) :is(.tool-heading, .mr-title, .salary-heading, .sf-heading) { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin: 22px 0 22px; }
 :where(.tool-page) :is(.tool-eyebrow, .mr-eyebrow, .salary-eyebrow, .sf-eyebrow) { font-size: 11px; letter-spacing: 2.4px; color: var(--tool-accent); font-weight: 700; }
 :where(.tool-page) :is(.tool-heading, .mr-title, .salary-heading, .sf-heading) :is(h1, h2) { font-size: 28px; letter-spacing: .2px; margin: 10px 0 12px; font-weight: 600; }
 :where(.tool-page) :is(.tool-heading, .mr-title, .salary-heading, .sf-heading) p { color: var(--tool-muted); line-height: 1.7; margin: 6px 0 18px; }

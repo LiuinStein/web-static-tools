@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js';
-import { Broker, FeeRule, Instrument, Market, getPlan } from './rates';
+import { Broker, FeeRule, Instrument, Market, getPlan, plans } from './rates';
 
 export interface TradeInput { market: Market; broker: Broker; price: number; shares: number; instrument?: Instrument; commissionFree?: boolean; oddLotSell?: boolean; }
 export interface FeeLine { id: string; label: string; category: FeeRule['category']; amount: number; description: string; }
@@ -67,4 +67,16 @@ export function parseTradeNumber(text: string, integer = false): number | null {
   const number = Number(value);
   if (!Number.isFinite(number) || number <= 0 || number > 1e9 || (integer && !Number.isSafeInteger(number))) return null;
   return number;
+}
+
+
+/** Same order inputs for every plan; broker-specific promotions never leak to peers. */
+export function compareStockBrokers(market: Market, selected: Broker, input: Omit<TradeInput, 'broker'> | null, sellPrice?: number) {
+  return [...plans[market]].sort((a, b) => Number(b.broker === selected) - Number(a.broker === selected)).map(plan => {
+    if (!input) return { plan, result: null, error: '请输入有效的股价和股数' };
+    try {
+      const result = calculateRoundTrip({ ...input, market, broker: plan.broker, commissionFree: plan.broker === 'futu' && input.commissionFree, oddLotSell: market === 'HK' && plan.broker === 'za' && input.oddLotSell }, sellPrice ?? input.price);
+      return { plan, result, error: '' };
+    } catch (error) { return { plan, result: null, error: error instanceof Error ? error.message : '无法测算' }; }
+  });
 }
