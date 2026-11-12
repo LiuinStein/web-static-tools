@@ -24,6 +24,8 @@ export function calculateTrade(input: TradeInput, side: 'buy' | 'sell'): TradeRe
       // A rate cap is applied before the minimum: the published minimum takes priority.
       if (rule.maximumRate) amount = Decimal.min(amount, notional.times(rule.maximumRate));
       if (rule.minimum) amount = Decimal.max(amount, rule.minimum);
+      // IBKR explicitly lets the percentage cap override the minimum.
+      if (rule.maximumTakesPriority && rule.maximumRate) amount = Decimal.min(amount, notional.times(rule.maximumRate));
       if (rule.maximum) amount = Decimal.min(amount, rule.maximum);
       amount = amount.toDecimalPlaces(rule.decimals ?? 2, rule.rounding === 'up' ? Decimal.ROUND_CEIL : Decimal.ROUND_HALF_UP);
     }

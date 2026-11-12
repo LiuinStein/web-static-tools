@@ -34,3 +34,9 @@ SEC 费率应查 Section 31 交易费公告，不应混用 Section 6(b) 注册�
 ## 验证
 
 `npm run test:stock` 覆盖全部七种市场/券商组合、买卖侧差异、税费取整、最低费与封顶、ETF、免佣、ZA 碎股卖出、回本价及无效输入。`npm run typecheck` 与 `npm run build` 验证应用集成。
+
+## IBKR（2026-11-11 新增）
+
+港股采用固定式：成交金额 0.08%，最低 HKD 18，包含交易及结算费用，另计印花税、SFC 和 AFRC。美股采用 Pro 固定式 SmartRouting：USD 0.005/股，最低 USD 1，最高成交金额 1%，上限优先；卖出监管费参考估算。暂不支持阶梯式、Lite、直接路由或介绍经纪商加价。
+
+来源：[股票佣金](https://www.interactivebrokers.com/en/pricing/commissions-stocks.php)、[港股固定式示例](https://www.interactivebrokers.com.hk/en/index.php?f=1316)。

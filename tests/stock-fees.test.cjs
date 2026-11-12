@@ -9,8 +9,8 @@ const base = { market: 'HK', broker: 'futu', price: 100, shares: 100, instrument
 const fee = (result, id) => result.lines.find(line => line.id === id).amount;
 
 test('only the requested market/broker combinations are available and each has official sources', () => {
-  assert.deepEqual(plans.HK.map(p => p.broker), ['futu', 'usmart', 'za']);
-  assert.deepEqual(plans.US.map(p => p.broker), ['futu', 'usmart', 'za', 'schwab']);
+  assert.deepEqual(plans.HK.map(p => p.broker), ['futu', 'usmart', 'za', 'ibkr']);
+  assert.deepEqual(plans.US.map(p => p.broker), ['futu', 'usmart', 'za', 'ibkr', 'schwab']);
   assert.throws(() => getPlan('HK', 'schwab'), /不支持/);
   for (const plan of [...plans.HK, ...plans.US]) {
     assert.equal(new Set(plan.rules.map(rule => rule.id)).size, plan.rules.length);
@@ -141,4 +141,24 @@ test('all fee line sums reconcile with category totals and totals across the ful
     assert.equal(result.total, new Decimal(result.brokerFees).plus(result.thirdPartyFees).toNumber());
     assert.ok(result.lines.every(line => Number.isFinite(line.amount) && line.amount >= 0));
   }
+});
+
+
+test('IBKR HK fixed includes exchange and clearing, but passes through levies and stamp duty', () => {
+  const buy = calculateTrade({ ...base, broker: 'ibkr' }, 'buy');
+  assert.equal(fee(buy, 'commission'), 18);
+  assert.equal(buy.total, 28.29);
+  assert.ok(!buy.lines.some(line => ['trading', 'settlement'].includes(line.id)));
+  assert.equal(calculateTrade({ ...base, broker: 'ibkr', instrument: 'etf' }, 'buy').total, 18.29);
+  assert.equal(fee(calculateTrade({ ...base, broker: 'ibkr', shares: 1000 }, 'buy'), 'commission'), 80);
+});
+
+test('IBKR US fixed uses the minimum, per-share rate and overriding low-value cap', () => {
+  const input = { ...base, market: 'US', broker: 'ibkr' };
+  const result = calculateRoundTrip(input);
+  assert.equal(result.buy.total, 1);
+  assert.equal(result.sell.total, 1.23);
+  assert.equal(fee(calculateTrade({ ...input, shares: 1000 }, 'buy'), 'commission'), 5);
+  assert.equal(fee(calculateTrade({ ...input, price: .20, shares: 10 }, 'buy'), 'commission'), .02);
+  assert.equal(fee(calculateTrade({ ...input, commissionFree: true }, 'buy'), 'commission'), 1);
 });
