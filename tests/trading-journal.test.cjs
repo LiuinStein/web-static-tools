@@ -488,7 +488,7 @@ test('holdings immediately follow pending creates, edits and deletions and stay 
   const { workbook } = await readWorkbook();
   const imported = await readWorkbook(await writeWorkbook(workbook, visible));
   assert.deepEqual(imported.workbook.worksheets.map(sheet => sheet.name), ['交易记录']);
-  assert.equal(imported.workbook.getWorksheet('交易记录').columnCount, 14);
+  assert.equal(imported.workbook.getWorksheet('交易记录').columnCount, 15);
   assert.deepEqual(imported.trades, [edited]);
   assert.deepEqual(calculateHoldings(imported.trades), calculateHoldings(visible));
   assert.deepEqual(calculateHoldings([]), []);
@@ -513,7 +513,7 @@ test('stock markets and brainstorm records roundtrip without affecting actual ho
 test('legacy twelve-column Excel remains readable and gains brainstorm column on save', async () => {
   const { workbook } = await readWorkbook();
   await writeWorkbook(workbook, [trade()]);
-  workbook.getWorksheet('交易记录').spliceColumns(13, 2);
+  workbook.getWorksheet('交易记录').spliceColumns(13, 3);
   const legacy = await readWorkbook(await workbook.xlsx.writeBuffer());
   assert.deepEqual(legacy.trades, [trade()]);
   const updated = await readWorkbook(await writeWorkbook(legacy.workbook, [{ ...trade(), brainstorm: true }]));
@@ -696,7 +696,7 @@ test('stock currencies are fixed by market and fund currency survives Excel, edi
 test('older Excel records keep unknown fund currencies while deriving stock defaults when saved', async () => {
   const {workbook}=await readWorkbook();
   await writeWorkbook(workbook,[trade(),{...trade('stock'),type:'美股'}]);
-  workbook.getWorksheet('交易记录').spliceColumns(14,1);
+  workbook.getWorksheet('交易记录').spliceColumns(14,2);
   const legacy=await readWorkbook(await workbook.xlsx.writeBuffer());
   assert.equal(legacy.trades[0].currency,undefined);
   assert.equal(legacy.trades[1].currency,undefined);
@@ -727,4 +727,55 @@ test('holding cost summary shows all currencies and excludes closed, brainstorm 
   ];
   assert.deepEqual(summarizeHoldingCosts(calculateHoldings(records)),{HKD:200,USD:60,RMB:300});
   assert.deepEqual(summarizeHoldingCosts([]),{HKD:0,USD:0,RMB:0});
+});
+
+test('same-day transactions sort by first recording time, including milliseconds, before UUID', () => {
+  const rows = [
+    { ...trade('a-early'), createdAt: '2026-11-14T01:30:00.001Z' },
+    { ...trade('z-late'), createdAt: '2026-11-14T01:30:00.002Z' },
+    { ...trade('older-date'), date: '2026-10-28', createdAt: '2026-11-15T12:00:00.000Z' },
+    trade('legacy'),
+    { ...trade('newer-date'), date: '2026-10-30', createdAt: '2026-11-13T00:00:00.000Z' },
+  ];
+  const expected = ['newer-date', 'z-late', 'a-early', 'legacy', 'older-date'];
+  for (const actual of [mergeTrades(rows.slice(0, 2), rows.slice(2)), applyChanges(rows, []), visibleTrades(rows, [], []), mergeForSync(rows, [], [])]) assert.deepEqual(actual.map(row => row.id), expected);
+  const edited = { ...rows[0], reason: '修改原因' };
+  const changes = queueChange(rows, [], [], rows[0], edited);
+  const result = mergeForSync(rows, [], changes);
+  assert.deepEqual(result.map(row => row.id), expected);
+  assert.equal(result.find(row => row.id === edited.id).createdAt, rows[0].createdAt);
+  assert.throws(() => mergeTrades([rows[0]], [{ ...rows[0], createdAt: rows[1].createdAt }]), /ID/);
+  assert.throws(() => applyChanges([{ ...rows[0], createdAt: rows[1].createdAt }], changes), /其他设备/);
+});
+test('recording time accepts canonical timestamps and legacy missing values, rejects invalid data', () => {
+  validateTrade(trade());
+  validateTrade({ ...trade(), createdAt: '2026-11-14T01:30:00.001Z' });
+  for (const createdAt of ['', 'invalid', '15:00:00', '2026-02-30T01:00:00.000Z']) assert.throws(() => validateTrade({ ...trade(), createdAt }), /记录时间/);
+});
+test('recording timestamps roundtrip through Excel while date-only history stays unchanged', async () => {
+  const { workbook } = await readWorkbook();
+  const recorded = { ...trade('recorded'), createdAt: '2026-11-14T01:30:00.123Z' }, legacy = trade('legacy');
+  let imported = await readWorkbook(await writeWorkbook(workbook, [recorded, legacy]));
+  assert.deepEqual(imported.trades, [recorded, legacy]);
+  let sheet = imported.workbook.getWorksheet('交易记录');
+  assert.equal(sheet.getCell('O1').text, '记录时间');
+  assert.equal(sheet.getCell('O2').text, recorded.createdAt);
+  sheet.getCell('O2').value = new Date(recorded.createdAt);
+  sheet.getCell('O2').numFmt = 'yyyy-mm-dd hh:mm:ss.000';
+  imported = await readWorkbook(await imported.workbook.xlsx.writeBuffer());
+  assert.equal(imported.trades[0].createdAt, recorded.createdAt);
+  sheet = imported.workbook.getWorksheet('交易记录');
+  sheet.spliceColumns(15, 1);
+  imported = await readWorkbook(await imported.workbook.xlsx.writeBuffer());
+  assert.ok(imported.trades.every(row => row.createdAt === undefined));
+  imported = await readWorkbook(await writeWorkbook(imported.workbook, imported.trades));
+  assert.ok(imported.trades.every(row => row.createdAt === undefined));
+  sheet = imported.workbook.getWorksheet('交易记录');
+  sheet.getCell('O1').value = '交易时间';
+  sheet.getCell('O2').value = '15:00:00';
+  imported = await readWorkbook(await imported.workbook.xlsx.writeBuffer());
+  assert.ok(imported.trades.every(row => row.createdAt === undefined));
+  imported = await readWorkbook(await writeWorkbook(imported.workbook, imported.trades));
+  assert.equal(imported.workbook.getWorksheet('交易记录').getCell('O1').text, '记录时间');
+  assert.equal(imported.workbook.getWorksheet('交易记录').getCell('O2').text, '');
 });

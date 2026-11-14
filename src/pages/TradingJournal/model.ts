@@ -13,6 +13,7 @@ export function tradeCurrency(trade: Pick<Trade, 'type' | 'currency'>): Currency
 export interface Trade {
   id: string;
   date: string;
+  createdAt?: string;
   type: AssetType;
   currency?: Currency;
   code: string;
@@ -37,6 +38,9 @@ export function today(): string {
     '0',
   )}`;
 }
+export function compareTrades(a: Trade, b: Trade): number {
+  return b.date.localeCompare(a.date) || (b.createdAt || '').localeCompare(a.createdAt || '') || a.id.localeCompare(b.id);
+}
 export function validateTrade(trade: Trade): void {
   const parsed = new Date(`${trade.date}T12:00:00`);
   if (
@@ -46,6 +50,7 @@ export function validateTrade(trade: Trade): void {
     parsed.getMonth() + 1 !== Number(trade.date.slice(5, 7)) ||
     parsed.getDate() !== Number(trade.date.slice(8, 10))
   ) throw new Error('请输入有效交易日期');
+  if (trade.createdAt !== undefined && (!Number.isFinite(Date.parse(trade.createdAt)) || new Date(trade.createdAt).toISOString() !== trade.createdAt)) throw new Error('记录时间无效');
   if (!trade.id || !trade.code.trim() || !trade.name.trim()) throw new Error('代码和名称必填');
   if (
     !assetTypes.includes(trade.type) ||
@@ -69,7 +74,7 @@ export function mergeTrades(remote: Trade[], pending: Trade[]): Trade[] {
     if (existing && !sameTrade(existing, trade)) throw new Error('发现重复记录 ID 且内容不同，请检查 Excel 文件');
     records.set(trade.id, trade);
   });
-  return Array.from(records.values()).sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
+  return Array.from(records.values()).sort(compareTrades);
 }
 
 export interface TradeChange {
@@ -94,7 +99,7 @@ export function sameTrade(left: Trade | undefined, right: Trade | undefined): bo
     'fee',
     'reason',
   ];
-  return tradeCurrency(left) === tradeCurrency(right) && !!left.brainstorm === !!right.brainstorm && keys.every((key) => left[key] === right[key]);
+  return left.createdAt === right.createdAt && tradeCurrency(left) === tradeCurrency(right) && !!left.brainstorm === !!right.brainstorm && keys.every((key) => left[key] === right[key]);
 }
 export function applyChanges(trades: Trade[], changes: TradeChange[]): Trade[] {
   const records = new Map(trades.map((trade) => [trade.id, trade]));
@@ -113,7 +118,7 @@ export function applyChanges(trades: Trade[], changes: TradeChange[]): Trade[] {
       records.set(change.id, change.after);
     } else records.delete(change.id);
   });
-  return Array.from(records.values()).sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
+  return Array.from(records.values()).sort(compareTrades);
 }
 export function queueChange(
   remote: Trade[],
@@ -156,7 +161,7 @@ export function visibleTrades(remote: Trade[], pending: Trade[], changes: TradeC
     if (change.after) records.set(change.id, change.after);
     else records.delete(change.id);
   });
-  return Array.from(records.values()).sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
+  return Array.from(records.values()).sort(compareTrades);
 }
 
 export function isStock(type: AssetType): boolean {

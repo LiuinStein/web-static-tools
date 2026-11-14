@@ -17,6 +17,7 @@ const columns: Array<[keyof Trade, string]> = [
   ['reason', '交易原因'],
   ['brainstorm', '头脑风暴'],
   ['currency', '货币标记'],
+  ['createdAt', '记录时间'],
 ];
 export async function readWorkbook(data?: ArrayBuffer): Promise<{ workbook: ExcelJS.Workbook; trades: Trade[] }> {
   const Excel = (await import('exceljs')).default;
@@ -29,7 +30,8 @@ export async function readWorkbook(data?: ArrayBuffer): Promise<{ workbook: Exce
     sheet.addRow(columns.map(([, label]) => label));
   }
   columns.forEach(([, label], index) => {
-    if (['头脑风暴', '货币标记'].includes(label) && !sheet!.getRow(1).getCell(index + 1).text) return;
+    if (label === '记录时间' && sheet!.getRow(1).getCell(index + 1).text === '交易时间') return;
+    if (['头脑风暴', '货币标记', '记录时间'].includes(label) && !sheet!.getRow(1).getCell(index + 1).text) return;
     if (sheet!.getRow(1).getCell(index + 1).text !== label) throw new Error(`Excel 表头不匹配：第 ${index + 1} 列应为“${label}”`);
   });
   const trades: Trade[] = [];
@@ -38,7 +40,13 @@ export async function readWorkbook(data?: ArrayBuffer): Promise<{ workbook: Exce
     const trade: any = {};
     columns.forEach(([key], col) => {
       const cell = row.getCell(col + 1);
-      if (key === 'currency') {
+      if (key === 'createdAt') {
+        // Discard the reverted manual-time column; it is not a creation timestamp.
+        if (sheet!.getCell('O1').text === '记录时间') {
+          if (cell.value instanceof Date) trade.createdAt = cell.value.toISOString();
+          else if (cell.text.trim()) trade.createdAt = cell.text.trim();
+        }
+      } else if (key === 'currency') {
         if (cell.text.trim()) trade.currency = cell.text.trim().toUpperCase();
       } else if (key === 'brainstorm') {
         if (!['', '是', '否'].includes(cell.text)) throw new Error(`Excel 第 ${index} 行：头脑风暴只能填写“是”或留空`);
@@ -66,6 +74,7 @@ export async function writeWorkbook(workbook: ExcelJS.Workbook, trades: Trade[])
   trades.forEach(validateTrade);
   sheet.getCell('M1').value = '头脑风暴';
   sheet.getCell('N1').value = '货币标记';
+  sheet.getCell('O1').value = '记录时间';
   const value = (trade: Trade, key: keyof Trade) => key === 'currency' ? tradeCurrency(trade) || null : key === 'brainstorm' ? (trade.brainstorm ? '是' : null) : trade[key] === undefined ? null : trade[key]!;
   const byId = new Map(trades.map((trade) => [trade.id, trade]));
   if (byId.size !== trades.length) throw new Error('记录 ID 重复，未保存 Excel');
@@ -88,10 +97,10 @@ export async function writeWorkbook(workbook: ExcelJS.Workbook, trades: Trade[])
   sheet.views = [{ state: 'frozen', ySplit: 1 }];
   columns.forEach(([key], index) => {
     const column = sheet.getColumn(index + 1);
-    const widths = { reason: 70, id: 40 };
+    const widths = { reason: 70, id: 40, createdAt: 30 };
     column.width = widths[key] || 18;
     if (['amount', 'price', 'shares', 'fee'].includes(key)) column.numFmt = '0.00####';
-    if (key === 'code') column.numFmt = '@';
+    if (['code', 'createdAt'].includes(key)) column.numFmt = '@';
   });
   sheet.getColumn(12).alignment = { wrapText: true, vertical: 'top' };
   return workbook.xlsx.writeBuffer() as Promise<ArrayBuffer>;

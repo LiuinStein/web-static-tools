@@ -274,6 +274,7 @@ export default function TradingJournal() {
       const trade: Trade = {
         id: editing ? editing.id : crypto.randomUUID(),
         date: draft.date,
+        createdAt: editing ? editing.createdAt : new Date().toISOString(),
         type: draft.type,
         currency: stockCurrency(draft.type) || draft.currency || undefined,
         code: completeStockCode(draft.type, draft.code.trim().toUpperCase()),
