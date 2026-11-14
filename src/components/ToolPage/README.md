@@ -14,7 +14,7 @@
 
 ## 配置
 
-CSS 变量限定在 `.tool-page` 内，不影响其他页面。可覆写 `--tool-panel-padding` 等明确的布局变量。原生单选下拉框统一使用全局 `src/styles/select.css`（由 `src/global.css` 引入），以交易日记为基准：12px 箭头、距右侧 8px、右侧文字留白 32px，桌面和移动端一致。所有页面及弹窗自动生效，新工具无需单独接入。通过 `--select-arrow-inset` 调整箭头距离（工资页保留 16px），文字留白同步变化。不要在业务样式中覆盖 `appearance`、箭头背景或右侧留白；背景颜色使用 `background-color`。多选和列表框不显示该箭头。
+CSS 变量限定在 `.tool-page` 内，不影响其他页面。可覆写 `--tool-panel-padding` 等明确的布局变量。原生单选下拉框统一使用全局 `src/styles/select.css`（由 `src/global.css` 引入），以交易日记为基准：12px 箭头、距右侧 8px、右侧文字留白 32px，桌面和移动端一致。所有页面及弹窗自动生效，新工具无需单独接入。工资页与其他页面执行同一规则，不保留页面例外；`--select-arrow-inset` 仅由共享样式维护，业务页面和组件不得单独赋值。不要在业务样式中覆盖 `appearance`、箭头背景或右侧留白；背景颜色使用 `background-color`。多选和列表框不显示该箭头。
 
 窄屏标题与列布局使用月度复盘的 1050px / 600px 断点；表格可横向滚动。弹窗通过 `ToolDialog` 挂载；弹窗根节点携带 `tool-page tool-dialog`，即使挂到页面外也复用相同的样式变量。月度复盘的 `MonthlyDialog` 只是兼容入口，业务专属的表格列宽、收益图表规则仍留在页面内。
 
