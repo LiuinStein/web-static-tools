@@ -4,7 +4,6 @@ const { spawnSync } = require('node:child_process');
 const COS = require('cos-nodejs-sdk-v5');
 const mime = require('mime-types');
 const yaml = require('js-yaml');
-const { crc64 } = require('crc64-ecma182.js');
 
 const root = path.resolve(__dirname, '..');
 
@@ -52,29 +51,7 @@ function listFiles(directory, relative = '') {
   return files;
 }
 
-async function calculateCrc64(filename) {
-  // Keep the unsigned 64-bit value as a decimal string (Number loses precision).
-  let checksum = '0';
-  for await (const chunk of fs.createReadStream(filename)) {
-    checksum = crc64(chunk, checksum);
-  }
-  return checksum;
-}
-
-function getRemoteHeaders(client, params) {
-  return new Promise((resolve, reject) => {
-    client.headObject(params, (error, data) => {
-      if (error) {
-        if (error.statusCode === 404) return resolve(null);
-        // SDK errors can contain signing details; only show our own message.
-        return reject(new Error(`比较失败：${params.Key}，请检查 COS 读取权限、配置和网络。`));
-      }
-      resolve(Object.fromEntries(Object.entries(data.headers || {}).map(([key, value]) => [key.toLowerCase(), value])));
-    });
-  });
-}
-
-async function deploy(config, { dryRun = false, noCrc = false, build, createClient, log = console.log, directory = path.join(root, 'build') } = {}) {
+async function deploy(config, { dryRun = false, build, createClient, log = console.log, directory = path.join(root, 'build') } = {}) {
   // Build must succeed before any upload is attempted.
   build();
   const files = listFiles(directory);
@@ -85,23 +62,12 @@ async function deploy(config, { dryRun = false, noCrc = false, build, createClie
   for (const file of files) {
     const key = [config.prefix, file].filter(Boolean).join('/');
     if (!dryRun) {
-      const filename = path.join(directory, file);
-      if (!noCrc) {
-        const headers = await getRemoteHeaders(client, { Bucket: config.bucket, Region: config.region, Key: key });
-        const remoteCrc64 = headers && headers['x-cos-hash-crc64ecma'];
-        if (typeof remoteCrc64 === 'string' && /^\d+$/.test(remoteCrc64)
-          && headers['content-length'] === String(fs.statSync(filename).size)
-          && remoteCrc64 === await calculateCrc64(filename)) {
-          log(`[跳过，内容相同] ${key}`);
-          continue;
-        }
-      }
       await new Promise((resolve, reject) => {
         client.uploadFile({
           Bucket: config.bucket,
           Region: config.region,
           Key: key,
-          FilePath: filename,
+          FilePath: path.join(directory, file),
           ContentType: mime.contentType(path.extname(file)) || 'application/octet-stream',
           CacheControl: 'no-cache',
         }, (error) => {
@@ -115,19 +81,13 @@ async function deploy(config, { dryRun = false, noCrc = false, build, createClie
   }
 }
 
-function parseOptions(args) {
-  if (args.some((arg) => !['--dry-run', '--no-crc'].includes(arg))) {
-    throw new Error('仅支持 --dry-run 和 --no-crc 参数；全量上传请使用 npm run deploy:full。');
-  }
-  return { dryRun: args.includes('--dry-run'), noCrc: args.includes('--no-crc') };
-}
-
 async function main() {
-  const { dryRun, noCrc } = parseOptions(process.argv.slice(2));
+  const args = process.argv.slice(2);
+  if (args.some((arg) => arg !== '--dry-run')) throw new Error('仅支持 --dry-run 参数。');
+  const dryRun = args.includes('--dry-run');
   const config = readConfig(path.join(root, 'config.yaml'), dryRun);
   await deploy(config, {
     dryRun,
-    noCrc,
     build() {
       const result = spawnSync(process.execPath, [process.env.npm_execpath || require.resolve('npm/bin/npm-cli.js'), 'run', 'build'], {
         cwd: root,
@@ -152,4 +112,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { readConfig, listFiles, calculateCrc64, parseOptions, deploy };
+module.exports = { readConfig, listFiles, deploy };
