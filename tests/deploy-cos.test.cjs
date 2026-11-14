@@ -42,9 +42,7 @@ test('full upload bypasses HEAD and preserves build, upload order, and headers',
   assert.deepEqual(uploads.map((params) => params.Key), ['tools/js/app.js', 'tools/index.html']);
   assert.equal(uploads[1].ContentType, 'text/html; charset=utf-8');
   assert.equal(uploads[1].CacheControl, 'no-cache');
-  assert.match(messages[0], /全量模式/);
-  assert.match(messages.at(-1), /已上传 2 个文件，跳过 0 个/);
-  assert.ok(messages.every((message) => !message.startsWith('[比较 CRC64]')));
+  assert.deepEqual(messages, ['[已上传] tools/js/app.js', '[已上传] tools/index.html']);
 });
 
 test('full upload dry run lists files without creating a client', async (t) => {
@@ -53,9 +51,7 @@ test('full upload dry run lists files without creating a client', async (t) => {
     noCrc: true, dryRun: true, directory: fixture(t), build() {}, log: (message) => messages.push(message),
     createClient() { assert.fail('dry run must not connect'); },
   });
-  assert.match(messages[0], /仅预览，不上传/);
-  assert.ok(messages.includes('[预览] tools/js/app.js'));
-  assert.ok(messages.includes('[预览] tools/index.html'));
+  assert.deepEqual(messages, ['[预览] tools/js/app.js', '[预览] tools/index.html']);
 });
 
 test('full upload still stops on build or upload failure', async (t) => {
@@ -112,16 +108,26 @@ test('repeated deployments skip unchanged objects and upload only edited content
   const options = { directory, build() {}, createClient: () => client, log: (message) => messages.push(message) };
   await deploy(config, options);
   assert.equal(uploaded.length, 3);
+  assert.equal(messages.length, 3);
   uploaded.length = 0;
+  messages.length = 0;
   await deploy(config, options);
   assert.deepEqual(uploaded, []);
-  assert.match(messages.at(-1), /已上传 0 个文件，跳过 3 个/);
-  assert.ok(messages.includes('[跳过，内容未变] tools/empty.txt'));
+  assert.deepEqual(messages, [
+    '[跳过，内容相同] tools/empty.txt',
+    '[跳过，内容相同] tools/js/app.js',
+    '[跳过，内容相同] tools/index.html',
+  ]);
   // Same-size edit must be detected by CRC64, not only length or mtime.
   fs.writeFileSync(path.join(directory, 'js/app.js'), 'console.log(2);');
+  messages.length = 0;
   await deploy(config, options);
   assert.deepEqual(uploaded, ['tools/js/app.js']);
-  assert.match(messages.at(-1), /已上传 1 个文件，跳过 2 个/);
+  assert.deepEqual(messages, [
+    '[跳过，内容相同] tools/empty.txt',
+    '[已上传] tools/js/app.js',
+    '[跳过，内容相同] tools/index.html',
+  ]);
 });
 
 test('objects without usable CRC64 or with inconsistent size are uploaded', async (t) => {
@@ -198,7 +204,7 @@ test('dry run builds and lists files without creating a COS client', async (t) =
     log(message) { messages.push(message); },
   });
   assert.equal(messages[0], '[预览] js/app.js');
-  assert.equal(messages.length, 3);
+  assert.equal(messages.length, 2);
 });
 
 test('build failure prevents client creation and uploads', async () => {

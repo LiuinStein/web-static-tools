@@ -82,21 +82,17 @@ async function deploy(config, { dryRun = false, noCrc = false, build, createClie
   // Publish assets first so new HTML does not reference files that are not uploaded yet.
   files.sort((a, b) => Number(a.endsWith('.html')) - Number(b.endsWith('.html')) || a.localeCompare(b));
   const client = dryRun ? null : createClient(config);
-  if (noCrc) log(`[全量模式] 已跳过 CRC64 比较${dryRun ? '（仅预览，不上传）' : '，将上传全部构建文件'}。`);
-  let skipped = 0;
   for (const file of files) {
     const key = [config.prefix, file].filter(Boolean).join('/');
     if (!dryRun) {
       const filename = path.join(directory, file);
       if (!noCrc) {
-        log(`[比较 CRC64] ${key}`);
         const headers = await getRemoteHeaders(client, { Bucket: config.bucket, Region: config.region, Key: key });
         const remoteCrc64 = headers && headers['x-cos-hash-crc64ecma'];
         if (typeof remoteCrc64 === 'string' && /^\d+$/.test(remoteCrc64)
           && headers['content-length'] === String(fs.statSync(filename).size)
           && remoteCrc64 === await calculateCrc64(filename)) {
-          skipped += 1;
-          log(`[跳过，内容未变] ${key}`);
+          log(`[跳过，内容相同] ${key}`);
           continue;
         }
       }
@@ -117,8 +113,6 @@ async function deploy(config, { dryRun = false, noCrc = false, build, createClie
     }
     log(`${dryRun ? '[预览]' : '[已上传]'} ${key}`);
   }
-  log(dryRun ? `预览完成，未上传 ${files.length} 个文件（未连接 COS，未比较 CRC64）。`
-    : `部署完成，已上传 ${files.length - skipped} 个文件，跳过 ${skipped} 个未变化文件。`);
 }
 
 function parseOptions(args) {
@@ -137,9 +131,15 @@ async function main() {
     build() {
       const result = spawnSync(process.execPath, [process.env.npm_execpath || require.resolve('npm/bin/npm-cli.js'), 'run', 'build'], {
         cwd: root,
-        stdio: 'inherit',
+        stdio: 'pipe',
+        encoding: 'utf8',
+        maxBuffer: 16 * 1024 * 1024,
       });
-      if (result.error || result.status !== 0) throw new Error('构建失败，未上传任何文件。');
+      if (result.error || result.status !== 0) {
+        if (result.stdout) process.stderr.write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
+        throw new Error('构建失败，未上传任何文件。');
+      }
     },
     createClient: ({ secretId, secretKey }) => new COS({ SecretId: secretId, SecretKey: secretKey, Protocol: 'https:' }),
   });
