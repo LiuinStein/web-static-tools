@@ -1,4 +1,4 @@
-import { AssetType, Trade } from './model';
+import { AssetType, Trade, completeStockCode } from './model';
 
 export type IdentityField = 'code' | 'name';
 export interface SecurityIdentity { code: string; name: string }
@@ -6,9 +6,9 @@ const normalized = (value: string) => value.trim().toUpperCase();
 export function findRecordedSecurity(trades: Trade[], type: AssetType, field: IdentityField, input: string): SecurityIdentity | undefined {
   if (!input.trim()) return undefined;
   const match = trades.filter(trade => trade.type === type &&
-    normalized(trade[field]) === normalized(input) && trade.code.trim() && trade.name.trim())
+    normalized(field === 'code' ? completeStockCode(type, trade.code) : trade.name) === normalized(field === 'code' ? completeStockCode(type, input) : input) && trade.code.trim() && trade.name.trim())
     .sort((a, b) => b.date.localeCompare(a.date))[0];
-  return match && { code: match.code, name: match.name };
+  return match && { code: completeStockCode(type, match.code), name: match.name };
 }
 export function selectEastmoneySecurity(payload: any, type: AssetType, field: IdentityField, input: string): SecurityIdentity | undefined {
   const market = type;
@@ -18,9 +18,9 @@ export function selectEastmoneySecurity(payload: any, type: AssetType, field: Id
   if (!Array.isArray(data)) return undefined;
   const matches = data.filter(item => item.Classify === classification && typeof item.Code === 'string' &&
     typeof item.Name === 'string' && item.Code.trim() && item.Name.trim() &&
-    normalized(field === 'code' ? item.Code : item.Name) === normalized(input));
+    normalized(field === 'code' ? completeStockCode(type, item.Code) : item.Name) === normalized(field === 'code' ? completeStockCode(type, input) : input));
   // Do not silently choose among distinct securities with the same name.
-  const unique = new Map(matches.map(item => [item.Code, { code: item.Code, name: item.Name }]));
+  const unique = new Map(matches.map(item => [completeStockCode(type, item.Code), { code: completeStockCode(type, item.Code), name: item.Name }]));
   return unique.size === 1 ? Array.from(unique.values())[0] : undefined;
 }
 let sequence = 0;
@@ -57,5 +57,5 @@ export async function resolveSecurity(trades: Trade[], type: AssetType, field: I
   const recorded = findRecordedSecurity(trades, type, field, input);
   if (recorded) return { identity: recorded, source: 'Excel' };
   if (!['港股', '美股', 'A股'].includes(type) || !input.trim()) return { source: '东方财富' };
-  return { identity: selectEastmoneySecurity(await query(input, signal), type, field, input), source: '东方财富' };
+  return { identity: selectEastmoneySecurity(await query(field === 'code' ? completeStockCode(type, input) : input, signal), type, field, input), source: '东方财富' };
 }

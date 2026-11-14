@@ -1,3 +1,5 @@
+import Decimal from 'decimal.js';
+
 export const assetTypes = ['港股', '美股', 'A股', '债券基金', '股票基金'] as const;
 export type AssetType = typeof assetTypes[number];
 export interface Trade {
@@ -46,7 +48,8 @@ export function validateTrade(trade: Trade): void {
     if (isStock(trade.type)) throw new Error('股票单价必填');
   } else if (!Number.isFinite(trade.price) || trade.price <= 0) throw new Error('单价必须大于 0，基金可留空');
   if (!Number.isFinite(trade.fee)) throw new Error('交易费用无效');
-  if (trade.shares !== undefined && (!Number.isFinite(trade.shares) || trade.shares <= 0)) throw new Error('份额需大于 0，或留空');
+  if (isStock(trade.type) && trade.shares === undefined) throw new Error('股票份额必填');
+  if (trade.shares !== undefined && (!Number.isFinite(trade.shares) || trade.shares <= 0)) throw new Error(isStock(trade.type) ? '股票份额必须大于 0' : '份额需大于 0，或留空');
 }
 export function mergeTrades(remote: Trade[], pending: Trade[]): Trade[] {
   const records = new Map(remote.map((trade) => [trade.id, trade]));
@@ -147,4 +150,46 @@ export function visibleTrades(remote: Trade[], pending: Trade[], changes: TradeC
 
 export function isStock(type: AssetType): boolean {
   return ['港股', '美股', 'A股'].includes(type);
+}
+
+export interface PricingDraft {
+  type: AssetType;
+  price: string;
+  shares: string;
+  amount: string;
+  amountManual: boolean;
+}
+export function updatePricingDraft<T extends PricingDraft>(draft: T, key: 'type' | 'price' | 'shares' | 'amount', value: string): T {
+  const next = { ...draft, [key]: value, amountManual: key === 'amount' ? true : draft.amountManual };
+  if (isStock(next.type) && !next.amountManual) {
+    try {
+      const price = new Decimal(next.price), shares = new Decimal(next.shares);
+      next.amount = price.isFinite() && shares.isFinite() && price.gt(0) && shares.gt(0) ? price.times(shares).toString() : '';
+    } catch { next.amount = ''; }
+  }
+  return next;
+}
+
+const stockCodeRules = {
+  'A股': { pattern: '[0-9]{6}', placeholder: '6 位数字，如 600519', message: 'A 股代码需为 6 位数字，输入完成后自动补前导零' },
+  '港股': { pattern: '[0-9]{5}', placeholder: '5 位数字，如 00700', message: '港股代码需为 5 位数字，输入完成后自动补前导零' },
+  '美股': { pattern: '[A-Z]{1,5}([.][A-Z]{1,3}|-[A-Z]{1,3})?', placeholder: '如 AAPL / BRK.B', message: '美股代码需为 1–5 位大写字母，可带 . 或 - 分隔的 1–3 位类别后缀' },
+};
+export function stockCodeRule(type: AssetType): { pattern: string; placeholder: string; message: string } | undefined {
+  return stockCodeRules[type];
+}
+export function normalizeCodeInput(type: AssetType, value: string): string {
+  if (type === 'A股' || type === '港股') return value.replace(/[^0-9]/g, '').slice(0, type === 'A股' ? 6 : 5);
+  if (type === '美股') return value.toUpperCase().replace(/[^A-Z.-]/g, '').slice(0, 9);
+  return value;
+}
+export function validateStockCode(type: AssetType, code: string): void {
+  const rule = stockCodeRule(type);
+  if (rule && !new RegExp(`^(?:${rule.pattern})$`).test(code)) throw new Error(rule.message);
+}
+
+export function completeStockCode(type: AssetType, value: string): string {
+  const code = value.trim();
+  const width = type === 'A股' ? 6 : type === '港股' ? 5 : 0;
+  return width && /^[0-9]+$/.test(code) && code.length <= width ? code.padStart(width, '0') : code;
 }

@@ -591,3 +591,68 @@ test('only the five current asset categories are accepted', () => {
     assert.throws(() => validateTrade({ ...trade(), type }), /交易分类无效/);
   }
 });
+
+test('stock total follows price and shares until manually adjusted, preserving decimal precision', () => {
+  const { updatePricingDraft } = require('../src/pages/TradingJournal/model.ts');
+  let draft = { type: '美股', price: '', shares: '', amount: '', amountManual: false };
+  draft = updatePricingDraft(draft, 'price', '0.1');
+  assert.equal(draft.amount, '');
+  draft = updatePricingDraft(draft, 'shares', '3');
+  assert.equal(draft.amount, '0.3');
+  draft = updatePricingDraft(draft, 'price', '100');
+  assert.equal(draft.amount, '300');
+  draft = updatePricingDraft(draft, 'amount', '305');
+  assert.equal(calculateFee(Number(draft.amount), Number(draft.price), Number(draft.shares)), 5);
+  draft = updatePricingDraft(draft, 'shares', '2');
+  assert.equal(draft.amount, '305');
+  assert.equal(calculateFee(Number(draft.amount), Number(draft.price), Number(draft.shares)), 105);
+  const fund = updatePricingDraft({ ...draft, type: '债券基金', amountManual: false }, 'price', '8');
+  assert.equal(fund.amount, '305');
+  const editing = updatePricingDraft({ ...draft, amount: '295', amountManual: true }, 'price', '100');
+  assert.equal(editing.amount, '295');
+  const empty = updatePricingDraft({ ...draft, amountManual: false }, 'shares', '');
+  assert.equal(empty.amount, '');
+});
+
+test('stocks require positive shares while funds allow blank shares', async () => {
+  for (const type of ['港股', '美股', 'A股']) {
+    assert.throws(() => validateTrade({ ...trade(), type, shares: undefined }), /股票份额必填/);
+    for (const shares of [0, -1, NaN, Infinity]) assert.throws(() => validateTrade({ ...trade(), type, shares }), /份额/);
+    assert.doesNotThrow(() => validateTrade({ ...trade(), type, shares: 0.25 }));
+  }
+  for (const type of ['债券基金', '股票基金']) assert.doesNotThrow(() => validateTrade({ ...trade(), type, shares: undefined }));
+});
+test('market-specific stock code input filters, casing and complete-format checks', () => {
+  const { normalizeCodeInput, validateStockCode } = require('../src/pages/TradingJournal/model.ts');
+  assert.equal(normalizeCodeInput('A股', 'ab60051979'), '600519');
+  assert.equal(normalizeCodeInput('港股', 'x00700y9'), '00700');
+  assert.equal(normalizeCodeInput('美股', 'brk.b中1'), 'BRK.B');
+  assert.equal(normalizeCodeInput('股票基金', 'fund-123'), 'fund-123');
+  for (const [type, codes] of [['A股', ['600519','000001','920001']], ['港股', ['00700','09988']], ['美股', ['A','AAPL','GOOGL','BRK.B','BF-B']]]) {
+    for (const code of codes) assert.doesNotThrow(() => validateStockCode(type, code));
+  }
+  for (const [type, codes] of [['A股', ['60051','6005199','A00519']], ['港股', ['700','007000','HK700']], ['美股', ['aapl','600519','ABCDEF','BRK.','BRK..B','A123']]]) {
+    for (const code of codes) assert.throws(() => validateStockCode(type, code));
+  }
+});
+
+test('numeric stock codes pad on completion without changing empty inputs, US tickers or fund codes', () => {
+  const { completeStockCode } = require('../src/pages/TradingJournal/model.ts');
+  for (const [type,input,expected] of [['A股','1','000001'],['A股','000001','000001'],['A股','600519','600519'],['港股','700','00700'],['港股','0700','00700'],['港股','00700','00700'],['港股','',''],['A股','',''],['美股','AAPL','AAPL'],['债券基金','1','1'],['A股','1234567','1234567']]) {
+    assert.equal(completeStockCode(type,input),expected);
+  }
+});
+test('stock identity lookup pads recorded, external query and reverse-lookup codes consistently', async () => {
+  const { resolveSecurity } = require('../src/pages/TradingJournal/security-lookup.ts');
+  const records=[{ ...trade(), type:'港股', code:'00700', name:'自定义腾讯' }];
+  const signal=new AbortController().signal;
+  const recorded=await resolveSecurity(records,'港股','code','700',signal,async()=>{throw Error('unexpected request')});
+  assert.equal(recorded.source,'Excel');assert.equal(recorded.identity.code,'00700');
+  const short=[{ ...trade(),type:'A股',code:'1',name:'自定义平安' }];
+  assert.equal((await resolveSecurity(short,'A股','name','自定义平安',signal)).identity.code,'000001');
+  let request;
+  const query=async input=>{ request=input; return {QuotationCodeTable:{Data:[{Code:'700',Name:'腾讯',Classify:'HK'}]}}; };
+  const external=await resolveSecurity([],'港股','code','700',signal,query);
+  assert.equal(request,'00700');assert.equal(external.identity.code,'00700');
+  assert.equal((await resolveSecurity([],'港股','name','腾讯',signal,query)).identity.code,'00700');
+});

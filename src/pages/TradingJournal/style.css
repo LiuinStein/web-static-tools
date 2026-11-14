@@ -184,7 +184,7 @@
   margin: 9px 0;
 }
 .journal-records > .j-section-heading {
-  padding: 24px 24px 12px;
+  padding: 24px 24px 0;
 }
 .journal-toolbar {
   display: flex;
@@ -654,7 +654,7 @@
     padding: 16px;
   }
   .journal-records > .j-section-heading {
-    padding: 18px 16px 10px;
+    padding: 18px 16px 0;
   }
   .journal-toolbar {
     flex-wrap: wrap;
@@ -730,3 +730,7 @@
 
 .j-brainstorm { display: flex; align-items: flex-start; gap: 8px; margin: 16px 0; cursor: pointer; }
 .j-brainstorm input { margin-top: 4px; }
+
+.j-trade-identity { white-space: nowrap; }
+.journal-delete-dialog .next-dialog-header { padding-top: 20px; padding-bottom: 20px; }
+.journal-delete-dialog .next-dialog-body { padding-top: 0; }

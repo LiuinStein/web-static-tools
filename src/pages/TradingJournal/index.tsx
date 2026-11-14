@@ -1,12 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Button, Dialog } from '@alifd/next';
+import { Button } from '@alifd/next';
 import PageHeader from '@/components/PageHeader';
+import ToolDialog from '@/components/ToolPage/ToolDialog';
+import '@/components/ToolPage/style.css';
 import {
   Trade,
   assetTypes,
   isStock,
   TradeChange,
   calculateFee,
+  updatePricingDraft,
+  normalizeCodeInput,
+  completeStockCode,
+  stockCodeRule,
+  validateStockCode,
   mergeTrades,
   queueChange,
   visibleTrades,
@@ -46,6 +53,7 @@ const blank = () => ({
   stance: '看多' as Trade['stance'],
   direction: '买入' as Trade['direction'],
   amount: '',
+  amountManual: false,
   price: '',
   shares: '',
   fee: '0',
@@ -98,7 +106,7 @@ export default function TradingJournal() {
       (filter === '全部' || trade.type === filter) &&
       `${trade.code} ${trade.name} ${trade.reason}`.toLowerCase().includes(search.toLowerCase()),
   );
-  const automaticFee = isStock(draft.type) && draft.shares !== '';
+  const automaticFee = isStock(draft.type);
   const fee = automaticFee
     ? calculateFee(Number(draft.amount), Number(draft.price), Number(draft.shares))
     : Number(draft.fee);
@@ -175,25 +183,31 @@ export default function TradingJournal() {
   }
   function updateIdentity(type: Trade['type'], key: IdentityField, value: string) {
     cancelIdentity();
+    if (key === 'code') value = normalizeCodeInput(type, value);
+    const base = updatePricingDraft(draft, 'type', type);
     const request = identityRequest.current;
     const counterpart = key === 'code' ? 'name' : 'code';
     // Once matched, allow editing the filled field without overwriting the original input.
     if (type === draft.type && request.primary && request.primary !== key && draft.code && draft.name) {
-      setDraft({ ...draft, [key]: value });
+      setDraft({ ...base, [key]: value });
       setIdentityStatus('已手动修改，可继续编辑代码和名称');
       return;
     }
     request.primary = key;
-    setDraft({ ...draft, type, [key]: value, [counterpart]: '' });
+    setDraft({ ...base, type, [key]: value, [counterpart]: '' });
     if (!value.trim()) { request.primary = undefined; setIdentityStatus(''); return; }
     const records = drive ? cache.remote : all;
     const recorded = findRecordedSecurity(records, type, key, value);
     if (recorded) {
-      setDraft({ ...draft, type, [key]: value, [counterpart]: recorded[counterpart] });
+      setDraft({ ...base, type, [key]: value, [counterpart]: counterpart === 'code' ? completeStockCode(type, normalizeCodeInput(type, recorded.code)) : recorded.name });
       setIdentityStatus('已匹配 Excel 中同类型的记录，可手动修改');
       return;
     }
     if (!isStock(type)) { setIdentityStatus('未找到同类型记录，请手动填写'); return; }
+    if (key === 'code') {
+      try { validateStockCode(type, value); }
+      catch (error) { setIdentityStatus(error.message); return; }
+    }
     const version = request.version;
     const controller = new AbortController();
     request.controller = controller;
@@ -203,7 +217,7 @@ export default function TradingJournal() {
         const result = await resolveSecurity([], type, key, value, controller.signal);
         if (identityRequest.current.version !== version) return;
         setDraft(current => current.type === type && current[key] === value
-          ? { ...current, [counterpart]: result.identity?.[counterpart] || '' } : current);
+          ? { ...current, [counterpart]: counterpart === 'code' ? completeStockCode(type, normalizeCodeInput(type, result.identity?.code || '')) : result.identity?.name || '' } : current);
         setIdentityStatus(result.identity ? '已匹配东方财富，可手动修改' : '未找到同类型的精确匹配，请手动填写');
       } catch (error) {
         if (identityRequest.current.version === version) setIdentityStatus(error.message || '查询失败，请手动填写');
@@ -254,7 +268,7 @@ export default function TradingJournal() {
         id: editing ? editing.id : crypto.randomUUID(),
         date: draft.date,
         type: draft.type,
-        code: draft.code.trim().toUpperCase(),
+        code: completeStockCode(draft.type, draft.code.trim().toUpperCase()),
         name: draft.name.trim(),
         stance: draft.stance,
         direction: draft.direction,
@@ -265,6 +279,8 @@ export default function TradingJournal() {
         reason: draft.reason.trim(),
         brainstorm: draft.brainstorm || undefined,
       };
+      if (!trade.reason) throw new Error('请填写交易原因');
+      validateStockCode(trade.type, trade.code);
       validateTrade(trade);
       const stored = readJSON(cacheKey, cache) as Cache;
       let next = { ...stored, pending: stored.pending };
@@ -322,6 +338,7 @@ export default function TradingJournal() {
       stance: trade.stance,
       direction: trade.direction,
       amount: String(trade.amount),
+      amountManual: true,
       price: trade.price === undefined ? '' : String(trade.price),
       shares: trade.shares === undefined ? '' : String(trade.shares),
       fee: String(trade.fee),
@@ -352,7 +369,25 @@ export default function TradingJournal() {
       } else setNotice('交易记录已从本机日记删除。');
     });
   }
-  const field = (key: keyof typeof draft, value: string) => setDraft({ ...draft, [key]: value });
+  const field = (key: keyof typeof draft, value: string) => setDraft(current =>
+    key === 'price' || key === 'shares' || key === 'amount'
+      ? updatePricingDraft(current, key, value) : { ...current, [key]: value });
+  const amountField = (
+    <label className="j-field">
+      交易总价 <em>*</em>
+      <input
+        aria-label="交易总价"
+        onFocus={(e) => e.currentTarget.select()}
+        onClick={(e) => e.currentTarget.select()}
+        type="text"
+        inputMode="decimal"
+        required
+        placeholder="0.00"
+        value={draft.amount}
+        onChange={(e) => field('amount', e.target.value)}
+      />
+    </label>
+  );
   return (
     <div className="journal">
       <PageHeader title="交易日记" />
@@ -553,7 +588,7 @@ export default function TradingJournal() {
                     <th>日期 / 标的</th>
                     <th>判断 / 方向</th>
                     <th>金额 / 单价</th>
-                    <th>费用 / 份额</th>
+                    <th>份额 / 费用</th>
                     <th>交易原因</th>
                     <th className="journal-actions-column">操作</th>
                   </tr>
@@ -563,11 +598,8 @@ export default function TradingJournal() {
                     <tr key={trade.id}>
                       <td>
                         <span className="j-trade-date">{trade.date}</span>
-                        <strong>{trade.name}</strong>
-                        {trade.brainstorm && <span className="j-asset-tag">头脑风暴 · 非实际成交</span>}
-                        <span className="j-subtle">
-                          {trade.code} <span className="j-asset-tag">{trade.type}</span>
-                        </span>
+                        <strong className="j-trade-identity">{trade.code} · {trade.name}</strong>
+                        <span className="j-subtle">{trade.type}{trade.brainstorm ? ' · 头脑风暴' : ''}</span>
                       </td>
                       <td>
                         <span className={`j-badge stance-${stanceStyles[trade.stance]}`}>{trade.stance}</span>
@@ -580,8 +612,8 @@ export default function TradingJournal() {
                         <span className="j-subtle">单价 {trade.price === undefined ? '—' : number(trade.price)}</span>
                       </td>
                       <td>
-                        <span className="j-numeric">{number(trade.fee)}</span>
-                        <span className="j-subtle">份额 {trade.shares === undefined ? '—' : number(trade.shares)}</span>
+                        <span className="j-numeric">{trade.shares === undefined ? '—' : number(trade.shares)}</span>
+                        <span className="j-subtle">费用 {number(trade.fee)}</span>
                       </td>
                       <td>
                         <details className="journal-reason">
@@ -741,10 +773,28 @@ export default function TradingJournal() {
                 代码 <em>*</em>
                 <input
                   aria-label="代码"
+                  onBlur={() => {
+                    const code = completeStockCode(draft.type, draft.code);
+                    if (code !== draft.code) updateIdentity(draft.type, 'code', code);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter') return;
+                    const code = completeStockCode(draft.type, draft.code);
+                    if (code !== draft.code) {
+                      event.preventDefault();
+                      updateIdentity(draft.type, 'code', code);
+                    }
+                  }}
                   onFocus={(e) => e.currentTarget.select()}
                   onClick={(e) => e.currentTarget.select()}
                   required
-                  placeholder="如 600519 / 005827"
+                  inputMode={draft.type === 'A股' || draft.type === '港股' ? 'numeric' : 'text'}
+                  autoCapitalize="characters"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  pattern={stockCodeRule(draft.type)?.pattern}
+                  title={stockCodeRule(draft.type)?.message}
+                  placeholder={stockCodeRule(draft.type)?.placeholder || '如 005827'}
                   value={draft.code}
                   onChange={(e) => updateIdentity(draft.type, 'code', e.target.value)}
                 />
@@ -799,20 +849,7 @@ export default function TradingJournal() {
               </div>
             </div>
             <div className="j-form-grid">
-              <label className="j-field">
-                交易总价 <em>*</em>
-                <input
-                  aria-label="交易总价"
-                  onFocus={(e) => e.currentTarget.select()}
-                  onClick={(e) => e.currentTarget.select()}
-                  type="text"
-                  inputMode="decimal"
-                  required
-                  placeholder="0.00"
-                  value={draft.amount}
-                  onChange={(e) => field('amount', e.target.value)}
-                />
-              </label>
+              {!isStock(draft.type) && amountField}
               <label className="j-field">
                 单价 {isStock(draft.type) ? <em>*</em> : <span className="j-optional">选填</span>}
                 <input
@@ -828,9 +865,10 @@ export default function TradingJournal() {
                 />
               </label>
               <label className="j-field">
-                份额 <span className="j-optional">选填</span>
+                份额 {isStock(draft.type) ? <em>*</em> : <span className="j-optional">选填</span>}
                 <input
                   aria-label="份额"
+                  required={isStock(draft.type)}
                   onFocus={(e) => e.currentTarget.select()}
                   onClick={(e) => e.currentTarget.select()}
                   type="text"
@@ -840,6 +878,7 @@ export default function TradingJournal() {
                   onChange={(e) => field('shares', e.target.value)}
                 />
               </label>
+              {isStock(draft.type) && amountField}
               <label className="j-field">
                 交易费用 <span className="j-optional">{automaticFee ? '自动计算' : '可手填 · 默认 0'}</span>
                 <input
@@ -857,13 +896,14 @@ export default function TradingJournal() {
             </div>
             <p className="j-fee-help">
               {isStock(draft.type)
-                ? '费用 = 总价 − 单价 × 股数；未填份额时可手填费用。'
+                ? '单价与份额必填；总价默认 = 单价 × 份额，可手动调整；费用 = 总价 − 单价 × 份额。'
                 : '基金费用默认 0，请按实际成交费用填写。'}
             </p>
             <label className="j-field">
-              交易原因
+              <span>交易原因 <em>*</em></span>
               <textarea
                 aria-label="交易原因"
+                required
                 rows={4}
                 placeholder="为什么在此刻交易？记录你的逻辑、预期与风险…"
                 value={draft.reason}
@@ -885,14 +925,16 @@ export default function TradingJournal() {
           </form>
         </section>
       </div>
-      <Dialog
+      <ToolDialog
+        size="compact"
+        className="journal-delete-dialog"
         title="删除交易记录"
         visible={!!deleteTarget}
         onClose={() => !busy && setDeleteTarget(null)}
         onCancel={() => setDeleteTarget(null)}
         onOk={() => deleteTarget && removeTrade(deleteTarget)}
         okProps={{ warning: true, disabled: busy, children: busy ? '正在删除…' : '确认删除' }}
-        cancelProps={{ disabled: busy }}
+        cancelProps={{ disabled: busy, children: '取消' }}
       >
         <p>
           确定删除 {deleteTarget?.date} 的「{deleteTarget?.name}」交易记录吗？
@@ -902,7 +944,7 @@ export default function TradingJournal() {
             ? '确认后将从日记和 OneDrive Excel 中删除，无法在本页撤销。'
             : '确认后将从本机日记中删除，无法在本页撤销。'}
         </p>
-      </Dialog>
+      </ToolDialog>
     </div>
   );
 }
