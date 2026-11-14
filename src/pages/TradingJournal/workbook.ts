@@ -15,6 +15,7 @@ const columns: Array<[keyof Trade, string]> = [
   ['shares', '份额'],
   ['fee', '交易费用'],
   ['reason', '交易原因'],
+  ['brainstorm', '头脑风暴'],
 ];
 export async function readWorkbook(data?: ArrayBuffer): Promise<{ workbook: ExcelJS.Workbook; trades: Trade[] }> {
   const Excel = (await import('exceljs')).default;
@@ -27,6 +28,7 @@ export async function readWorkbook(data?: ArrayBuffer): Promise<{ workbook: Exce
     sheet.addRow(columns.map(([, label]) => label));
   }
   columns.forEach(([, label], index) => {
+    if (label === '头脑风暴' && !sheet!.getRow(1).getCell(index + 1).text) return;
     if (sheet!.getRow(1).getCell(index + 1).text !== label) throw new Error(`Excel 表头不匹配：第 ${index + 1} 列应为“${label}”`);
   });
   const trades: Trade[] = [];
@@ -35,7 +37,10 @@ export async function readWorkbook(data?: ArrayBuffer): Promise<{ workbook: Exce
     const trade: any = {};
     columns.forEach(([key], col) => {
       const cell = row.getCell(col + 1);
-      if (['amount', 'price', 'shares', 'fee'].includes(key)) {
+      if (key === 'brainstorm') {
+        if (!['', '是', '否'].includes(cell.text)) throw new Error(`Excel 第 ${index} 行：头脑风暴只能填写“是”或留空`);
+        if (cell.text === '是') trade.brainstorm = true;
+      } else if (['amount', 'price', 'shares', 'fee'].includes(key)) {
         trade[key] = cell.value === null || cell.text === '' ? undefined : Number(cell.value);
       } else if (key === 'date' && cell.value instanceof Date) {
         trade[key] = cell.value.toISOString().slice(0, 10);
@@ -56,6 +61,8 @@ export async function readWorkbook(data?: ArrayBuffer): Promise<{ workbook: Exce
 export async function writeWorkbook(workbook: ExcelJS.Workbook, trades: Trade[]): Promise<ArrayBuffer> {
   const sheet = workbook.getWorksheet(sheetName)!;
   trades.forEach(validateTrade);
+  sheet.getCell('M1').value = '头脑风暴';
+  const value = (trade: Trade, key: keyof Trade) => key === 'brainstorm' ? (trade.brainstorm ? '是' : null) : trade[key] === undefined ? null : trade[key]!;
   const byId = new Map(trades.map((trade) => [trade.id, trade]));
   if (byId.size !== trades.length) throw new Error('记录 ID 重复，未保存 Excel');
   // Update matching rows and remove deleted rows, retaining other worksheets.
@@ -66,12 +73,12 @@ export async function writeWorkbook(workbook: ExcelJS.Workbook, trades: Trade[])
     if (!trade) sheet.spliceRows(index, 1);
     else {
       columns.forEach(([key], column) => {
-        row.getCell(column + 1).value = trade[key] === undefined ? null : trade[key]!;
+        row.getCell(column + 1).value = value(trade, key);
       });
       byId.delete(id);
     }
   }
-  byId.forEach((trade) => sheet.addRow(columns.map(([key]) => (trade[key] === undefined ? null : trade[key]))));
+  byId.forEach((trade) => sheet.addRow(columns.map(([key]) => value(trade, key))));
   sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
   sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF209BFA' } };
   sheet.views = [{ state: 'frozen', ySplit: 1 }];

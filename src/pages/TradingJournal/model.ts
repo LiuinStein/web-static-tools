@@ -1,6 +1,5 @@
-export const assetTypes = ['股票', '基金-债券类', '基金-股票类'] as const;
-// Keep historical fund records readable until the user explicitly classifies them.
-export type AssetType = typeof assetTypes[number] | '基金';
+export const assetTypes = ['港股', '美股', 'A股', '债券基金', '股票基金'] as const;
+export type AssetType = typeof assetTypes[number];
 export interface Trade {
   id: string;
   date: string;
@@ -14,6 +13,7 @@ export interface Trade {
   shares?: number;
   fee: number;
   reason: string;
+  brainstorm?: boolean;
 }
 export function calculateFee(amount: number, price: number, shares?: number): number {
   if (![amount, price, shares].every((value) => Number.isFinite(value))) return 0;
@@ -37,13 +37,13 @@ export function validateTrade(trade: Trade): void {
   ) throw new Error('请输入有效交易日期');
   if (!trade.id || !trade.code.trim() || !trade.name.trim()) throw new Error('代码和名称必填');
   if (
-    ![...assetTypes, '基金'].includes(trade.type) ||
+    !assetTypes.includes(trade.type) ||
     !['看多', '看空', '平仓'].includes(trade.stance) ||
     !['买入', '卖出'].includes(trade.direction)
   ) throw new Error('交易分类无效');
   if (!Number.isFinite(trade.amount) || trade.amount <= 0) throw new Error('金额必须大于 0');
   if (trade.price === undefined) {
-    if (trade.type === '股票') throw new Error('股票单价必填');
+    if (isStock(trade.type)) throw new Error('股票单价必填');
   } else if (!Number.isFinite(trade.price) || trade.price <= 0) throw new Error('单价必须大于 0，基金可留空');
   if (!Number.isFinite(trade.fee)) throw new Error('交易费用无效');
   if (trade.shares !== undefined && (!Number.isFinite(trade.shares) || trade.shares <= 0)) throw new Error('份额需大于 0，或留空');
@@ -80,7 +80,7 @@ export function sameTrade(left: Trade | undefined, right: Trade | undefined): bo
     'fee',
     'reason',
   ];
-  return keys.every((key) => left[key] === right[key]);
+  return !!left.brainstorm === !!right.brainstorm && keys.every((key) => left[key] === right[key]);
 }
 export function applyChanges(trades: Trade[], changes: TradeChange[]): Trade[] {
   const records = new Map(trades.map((trade) => [trade.id, trade]));
@@ -143,4 +143,8 @@ export function visibleTrades(remote: Trade[], pending: Trade[], changes: TradeC
     else records.delete(change.id);
   });
   return Array.from(records.values()).sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
+}
+
+export function isStock(type: AssetType): boolean {
+  return ['港股', '美股', 'A股'].includes(type);
 }

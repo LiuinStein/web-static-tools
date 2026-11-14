@@ -13,7 +13,7 @@ const { calculateFee, mergeTrades, validateTrade, applyChanges, queueChange, mer
 const { readWorkbook, writeWorkbook } = require('../src/pages/TradingJournal/workbook.ts');
 const { OneDriveJournal, normalizePath } = require('../src/pages/TradingJournal/onedrive.ts');
 function trade(id = 'trade-1') {
-  return { id, date: '2026-10-29', type: '基金', code: '005827', name: '示例基金', stance: '看多', direction: '买入', amount: 1001.5, price: 1, shares: 1000, fee: 1.5, reason: '第一行\n第二行，记录完整交易逻辑。' };
+  return { id, date: '2026-10-29', type: '债券基金', code: '005827', name: '示例基金', stance: '看多', direction: '买入', amount: 1001.5, price: 1, shares: 1000, fee: 1.5, reason: '第一行\n第二行，记录完整交易逻辑。' };
 }
 test('stock fees use total minus price times shares, preserving signed difference', () => {
   assert.equal(calculateFee(10005, 100, 100), 5);
@@ -361,9 +361,9 @@ test('missing cloud version disables cache reuse and prevents unprotected upload
 
 test('fund unit price is optional; stocks require it and supplied prices must be positive', () => {
   assert.doesNotThrow(() => validateTrade({ ...trade(), price: undefined }));
-  assert.doesNotThrow(() => validateTrade({ ...trade(), type: '股票', price: 1 }));
-  assert.throws(() => validateTrade({ ...trade(), type: '股票', price: undefined }), /股票单价必填/);
-  for (const type of ['股票', '基金-债券类', '基金-股票类', '基金']) {
+  assert.doesNotThrow(() => validateTrade({ ...trade(), type: '美股', price: 1 }));
+  assert.throws(() => validateTrade({ ...trade(), type: '美股', price: undefined }), /股票单价必填/);
+  for (const type of ['港股', '美股', 'A股', '债券基金', '股票基金']) {
     for (const price of [0, -1, NaN, Infinity, null]) {
       assert.throws(() => validateTrade({ ...trade(), type, price }), /单价/);
     }
@@ -380,18 +380,18 @@ test('blank fund prices survive Excel export/import and editing; blank stock pri
   const changes = queueChange(imported.trades, [], [], fund, edited);
   const merged = mergeForSync(imported.trades, [], changes);
   assert.deepEqual((await readWorkbook(await writeWorkbook(imported.workbook, merged))).trades, [edited]);
-  imported.workbook.getWorksheet('交易记录').getCell('C2').value = '股票';
+  imported.workbook.getWorksheet('交易记录').getCell('C2').value = '美股';
   await assert.rejects(readWorkbook(await imported.workbook.xlsx.writeBuffer()), /股票单价必填/);
 });
 
 
 test('both fund categories allow blank prices and roundtrip through Excel unchanged', async () => {
   const categories = require('../src/pages/TradingJournal/model.ts').assetTypes;
-  assert.deepEqual(categories, ['股票', '基金-债券类', '基金-股票类']);
+  assert.deepEqual(categories, ['港股', '美股', 'A股', '债券基金', '股票基金']);
   const records = [
-    { ...trade('bond-fund'), type: '基金-债券类', price: undefined, shares: undefined },
-    { ...trade('equity-fund'), type: '基金-股票类', price: undefined, shares: 100 },
-    { ...trade('stock'), type: '股票', price: 10 },
+    { ...trade('bond-fund'), type: '债券基金', price: undefined, shares: undefined },
+    { ...trade('equity-fund'), type: '股票基金', price: undefined, shares: 100 },
+    { ...trade('stock'), type: '美股', price: 10 },
     trade('historical-fund'),
   ];
   records.forEach(row => assert.doesNotThrow(() => validateTrade(row)));
@@ -399,9 +399,9 @@ test('both fund categories allow blank prices and roundtrip through Excel unchan
   assert.deepEqual((await readWorkbook(await writeWorkbook(workbook, records))).trades, records);
   assert.throws(() => validateTrade({ ...trade(), type: '债券' }), /交易分类/);
 });
-test('historical fund records can be explicitly reclassified and synced without changing record IDs', async () => {
+test('fund records can be explicitly reclassified and synced without changing record IDs', async () => {
   const original = trade('historical-fund');
-  for (const type of ['基金-债券类', '基金-股票类']) {
+  for (const type of ['债券基金', '股票基金']) {
     const updated = { ...original, type, price: undefined };
     const changes = queueChange([original], [], [], original, updated);
     const merged = mergeForSync([original], [], changes);
@@ -409,7 +409,7 @@ test('historical fund records can be explicitly reclassified and synced without 
     assert.deepEqual(mergeForSync(merged, [], changes), [updated]);
     const { workbook } = await readWorkbook();
     assert.deepEqual((await readWorkbook(await writeWorkbook(workbook, merged))).trades, [updated]);
-    assert.throws(() => validateTrade({ ...updated, type: '股票' }), /股票单价必填/);
+    assert.throws(() => validateTrade({ ...updated, type: '美股' }), /股票单价必填/);
   }
 });
 
@@ -427,20 +427,20 @@ test('holdings net buy/sell amounts and shares, without adding fees twice', () =
 });
 test('holdings group by type and normalized text code, preserve leading zeros and use newest name', () => {
   const rows = [
-    { ...trade('old'), name: '旧名称', date: '2026-10-01', amount: 100, shares: 10, type: '基金-债券类' },
-    { ...trade('new'), name: '新名称', date: '2026-10-30', amount: 200, shares: 20, type: '基金-债券类' },
-    { ...trade('equity'), amount: 900, shares: 30, type: '基金-股票类' },
-    { ...trade('stock-a'), code: 'aapl', type: '股票', amount: 100, shares: 1 },
-    { ...trade('stock-b'), code: 'AAPL', type: '股票', amount: 200, shares: 1 },
+    { ...trade('old'), name: '旧名称', date: '2026-10-01', amount: 100, shares: 10, type: '债券基金' },
+    { ...trade('new'), name: '新名称', date: '2026-10-30', amount: 200, shares: 20, type: '债券基金' },
+    { ...trade('equity'), amount: 900, shares: 30, type: '股票基金' },
+    { ...trade('stock-a'), code: 'aapl', type: '美股', amount: 100, shares: 1 },
+    { ...trade('stock-b'), code: 'AAPL', type: '美股', amount: 200, shares: 1 },
   ];
   const holdings = calculateHoldings(rows);
   assert.equal(holdings.length, 3);
-  const bond = holdings.find(row => row.type === '基金-债券类');
+  const bond = holdings.find(row => row.type === '债券基金');
   assert.equal(bond.code, '005827');
   assert.equal(bond.name, '新名称');
   assert.equal(bond.totalCost, 300);
   assert.equal(bond.shares, 30);
-  assert.equal(holdings.find(row => row.type === '股票').totalCost, 300);
+  assert.equal(holdings.find(row => row.type === '美股').totalCost, 300);
 });
 test('closed positions including fractional share residue are hidden; remaining cost may be negative', () => {
   assert.deepEqual(calculateHoldings([
@@ -479,8 +479,115 @@ test('holdings immediately follow pending creates, edits and deletions and stay 
   const { workbook } = await readWorkbook();
   const imported = await readWorkbook(await writeWorkbook(workbook, visible));
   assert.deepEqual(imported.workbook.worksheets.map(sheet => sheet.name), ['交易记录']);
-  assert.equal(imported.workbook.getWorksheet('交易记录').columnCount, 12);
+  assert.equal(imported.workbook.getWorksheet('交易记录').columnCount, 13);
   assert.deepEqual(imported.trades, [edited]);
   assert.deepEqual(calculateHoldings(imported.trades), calculateHoldings(visible));
   assert.deepEqual(calculateHoldings([]), []);
+});
+
+test('stock markets and brainstorm records roundtrip without affecting actual holdings', async () => {
+  const { calculateHoldings } = require('../src/pages/TradingJournal/holdings.ts');
+  const markets = ['港股', '美股', 'A股'];
+  const records = markets.map((type, index) => ({ ...trade(String(index)), type, brainstorm: true }));
+  records.forEach(validateTrade);
+  records.forEach(row => assert.throws(() => validateTrade({ ...row, price: undefined }), /股票单价必填/));
+  const { workbook } = await readWorkbook();
+  const result = await readWorkbook(await writeWorkbook(workbook, records));
+  assert.deepEqual(result.trades, records);
+  assert.equal(result.workbook.getWorksheet('交易记录').getCell('M2').text, '是');
+  assert.deepEqual(calculateHoldings(result.trades), []);
+  assert.equal(calculateHoldings([...records, trade('actual')]).length, 1);
+  const { sameTrade } = require('../src/pages/TradingJournal/model.ts');
+  assert.equal(sameTrade(trade(), { ...trade(), brainstorm: false }), true);
+  assert.equal(sameTrade(trade(), { ...trade(), brainstorm: true }), false);
+});
+test('legacy twelve-column Excel remains readable and gains brainstorm column on save', async () => {
+  const { workbook } = await readWorkbook();
+  await writeWorkbook(workbook, [trade()]);
+  workbook.getWorksheet('交易记录').spliceColumns(13, 1);
+  const legacy = await readWorkbook(await workbook.xlsx.writeBuffer());
+  assert.deepEqual(legacy.trades, [trade()]);
+  const updated = await readWorkbook(await writeWorkbook(legacy.workbook, [{ ...trade(), brainstorm: true }]));
+  assert.equal(updated.trades[0].brainstorm, true);
+});
+
+test('identity lookup gives same-market Excel names priority in both directions', async () => {
+  const { resolveSecurity } = require('../src/pages/TradingJournal/security-lookup.ts');
+  let calls = 0;
+  const query = async () => { calls++; throw new Error('should not query'); };
+  const records = [{ ...trade(), type: '美股', code: 'AAPL', name: '自定义苹果' },
+    { ...trade('other'), type: '港股', code: 'AAPL', name: '其他市场' }];
+  for (const [field, input] of [['code', 'aapl'], ['name', '自定义苹果']]) {
+    const result = await resolveSecurity(records, '美股', field, input, new AbortController().signal, query);
+    assert.equal(result.source, 'Excel');
+    assert.deepEqual(result.identity, { code: 'AAPL', name: '自定义苹果' });
+  }
+  assert.equal(calls, 0);
+});
+test('external identity lookup requires an exact match in the selected market', async () => {
+  const { resolveSecurity, selectEastmoneySecurity } = require('../src/pages/TradingJournal/security-lookup.ts');
+  const payload = { QuotationCodeTable: { Data: [
+    { Code: 'AAPL', Name: '苹果', Classify: 'UsStock' },
+    { Code: '00005', Name: '汇丰控股', Classify: 'HK' },
+    { Code: '600519', Name: '贵州茅台', Classify: 'AStock' },
+    { Code: 'AAPLX', Name: '苹果相似项', Classify: 'UsStock' },
+  ] } };
+  for (const [type, code, name] of [['美股', 'AAPL', '苹果'], ['港股', '00005', '汇丰控股'], ['A股', '600519', '贵州茅台']]) {
+    for (const [field, input] of [['code', code], ['name', name]]) {
+      const result = await resolveSecurity([], type, field, input, new AbortController().signal, async () => payload);
+      assert.deepEqual(result.identity, { code, name });
+    }
+  }
+  assert.equal(selectEastmoneySecurity(payload, '港股', 'code', 'AAPL'), undefined);
+  assert.equal(selectEastmoneySecurity(payload, '美股', 'name', '苹'), undefined);
+  assert.equal(selectEastmoneySecurity({}, '美股', 'code', 'AAPL'), undefined);
+  const duplicate = { QuotationCodeTable: { Data: [...payload.QuotationCodeTable.Data,
+    { Code: 'OTHER', Name: '苹果', Classify: 'UsStock' }] } };
+  assert.equal(selectEastmoneySecurity(duplicate, '美股', 'name', '苹果'), undefined);
+  await assert.rejects(resolveSecurity([], '美股', 'code', 'AAPL', new AbortController().signal,
+    async () => { throw new Error('offline'); }), /offline/);
+});
+test('Eastmoney JSONP requests encode input, handle callbacks, errors and cancellation', async () => {
+  const { queryEastmoney } = require('../src/pages/TradingJournal/security-lookup.ts');
+  const oldWindow = global.window;
+  const oldDocument = global.document;
+  const oldSetTimeout = global.setTimeout;
+  let script;
+  global.window = {};
+  global.document = {
+    createElement: () => ({ remove() { this.removed = true; } }),
+    head: { appendChild(element) { script = element; } },
+  };
+  // Avoid keeping the test process alive for late-callback cleanup.
+  global.setTimeout = (...args) => { const timer = oldSetTimeout(...args); timer.unref(); return timer; };
+  try {
+    const controller = new AbortController();
+    const pending = queryEastmoney('苹果 & A', controller.signal);
+    const params = new URL(script.src).searchParams;
+    assert.equal(params.get('input'), '苹果 & A');
+    assert.equal(params.get('type'), '14');
+    const payload = { QuotationCodeTable: { Data: [] } };
+    global.window[params.get('cb')](payload);
+    assert.deepEqual(await pending, payload);
+    assert.ok(script.removed);
+    const cancelled = queryEastmoney('AAPL', controller.signal);
+    const lateCallback = global.window[new URL(script.src).searchParams.get('cb')];
+    controller.abort();
+    await assert.rejects(cancelled, /取消/);
+    assert.ok(script.removed);
+    assert.doesNotThrow(() => lateCallback(payload));
+    const failed = queryEastmoney('AAPL', new AbortController().signal);
+    script.onerror();
+    await assert.rejects(failed, /手动填写/);
+  } finally {
+    global.window = oldWindow;
+    global.document = oldDocument;
+    global.setTimeout = oldSetTimeout;
+  }
+});
+
+test('only the five current asset categories are accepted', () => {
+  for (const type of ['股票', '基金', '股票-港股', '股票-美股', '股票-A股']) {
+    assert.throws(() => validateTrade({ ...trade(), type }), /交易分类无效/);
+  }
 });

@@ -26,7 +26,7 @@ async function fixture() {
 }
 async function bytes(id = 'trade-a') {
   const { workbook } = await readWorkbook();
-  return writeWorkbook(workbook, [{ id, date: '2026-11-03', type: '股票', code: '000001', name: id, stance: '看多', direction: '买入', amount: 100, price: 1, shares: 100, fee: 0, reason: '' }]);
+  return writeWorkbook(workbook, [{ id, date: '2026-11-03', type: '美股', code: '000001', name: id, stance: '看多', direction: '买入', amount: 100, price: 1, shares: 100, fee: 0, reason: '' }]);
 }
 function transport(service, initial) {
   const state = { data: initial, eTag: 'v1', downloads: 0, metadata: 0, uploads: 0, beforeContent: undefined, mutateAfterContent: false };

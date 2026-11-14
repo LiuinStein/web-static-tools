@@ -30,6 +30,7 @@ export function calculateHoldings(trades: Trade[]): Holding[] {
     cost: Total; shares: Total; missingShares: number;
   }>();
   trades.forEach((trade) => {
+    if (trade.brainstorm) return;
     const code = trade.code.trim().toUpperCase();
     const key = JSON.stringify([trade.type, code]);
     let group = groups.get(key);

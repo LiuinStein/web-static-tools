@@ -660,6 +660,18 @@
     flex-wrap: wrap;
     padding: 8px 16px 16px;
   }
+  .journal-toolbar .j-tabs {
+    flex-wrap: nowrap;
+    width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    padding-left: 1px;
+    overscroll-behavior-x: contain;
+  }
+  .journal-toolbar .j-tabs button {
+    flex: 0 0 auto;
+    padding: 6px 8px;
+  }
   .journal-toolbar > input {
     width: 100%;
   }
@@ -715,3 +727,6 @@
     padding-right: 16px;
   }
 }
+
+.j-brainstorm { display: flex; align-items: flex-start; gap: 8px; margin: 16px 0; cursor: pointer; }
+.j-brainstorm input { margin-top: 4px; }
