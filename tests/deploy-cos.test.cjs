@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const yaml = require('js-yaml');
-const { readConfig, listFiles, calculateCrc64, deploy } = require('../scripts/deploy-cos.cjs');
+const { readConfig, listFiles, calculateCrc64, parseOptions, deploy } = require('../scripts/deploy-cos.cjs');
 
 function fixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-cos-'));
@@ -16,6 +16,63 @@ function fixture(t) {
 }
 
 const config = { bucket: 'site-1250000000', region: 'ap-guangzhou', prefix: 'tools' };
+
+test('deployment options default to CRC comparison and support full upload with dry run', () => {
+  assert.deepEqual(parseOptions([]), { dryRun: false, noCrc: false });
+  assert.deepEqual(parseOptions(['--no-crc']), { dryRun: false, noCrc: true });
+  assert.deepEqual(parseOptions(['--dry-run', '--no-crc']), { dryRun: true, noCrc: true });
+  assert.throws(() => parseOptions(['--no-crcc']), /仅支持/);
+});
+
+test('full upload bypasses HEAD and preserves build, upload order, and headers', async (t) => {
+  const uploads = [];
+  const messages = [];
+  let built = false;
+  await deploy(config, {
+    noCrc: true, directory: fixture(t), build() { built = true; }, log: (message) => messages.push(message),
+    createClient: () => ({
+      headObject() { assert.fail('full upload must not query remote CRC64'); },
+      uploadFile(params, callback) {
+        assert.equal(built, true);
+        uploads.push(params);
+        callback(null);
+      },
+    }),
+  });
+  assert.deepEqual(uploads.map((params) => params.Key), ['tools/js/app.js', 'tools/index.html']);
+  assert.equal(uploads[1].ContentType, 'text/html; charset=utf-8');
+  assert.equal(uploads[1].CacheControl, 'no-cache');
+  assert.match(messages[0], /全量模式/);
+  assert.match(messages.at(-1), /已上传 2 个文件，跳过 0 个/);
+  assert.ok(messages.every((message) => !message.startsWith('[比较 CRC64]')));
+});
+
+test('full upload dry run lists files without creating a client', async (t) => {
+  const messages = [];
+  await deploy(config, {
+    noCrc: true, dryRun: true, directory: fixture(t), build() {}, log: (message) => messages.push(message),
+    createClient() { assert.fail('dry run must not connect'); },
+  });
+  assert.match(messages[0], /仅预览，不上传/);
+  assert.ok(messages.includes('[预览] tools/js/app.js'));
+  assert.ok(messages.includes('[预览] tools/index.html'));
+});
+
+test('full upload still stops on build or upload failure', async (t) => {
+  await assert.rejects(deploy(config, {
+    noCrc: true, build() { throw new Error('build failed'); },
+    createClient() { assert.fail('failed build must not create a client'); },
+  }), /build failed/);
+  let calls = 0;
+  await assert.rejects(deploy(config, {
+    noCrc: true, directory: fixture(t), build() {}, log() {},
+    createClient: () => ({
+      headObject() { assert.fail('full upload must not send HEAD'); },
+      uploadFile(params, callback) { calls += 1; callback(new Error('sensitive details')); },
+    }),
+  }), /上传失败：tools\/js\/app.js/);
+  assert.equal(calls, 1);
+});
 
 test('CRC64 uses COS-compatible decimal values, including empty and streamed files', async (t) => {
   const filename = path.join(fixture(t), 'checksum');

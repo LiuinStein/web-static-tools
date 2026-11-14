@@ -70,6 +70,7 @@
     "test:stock": "node --test tests/stock-fees.test.cjs",
     "test:bond": "node --test tests/bond-calculator.test.cjs",
     "deploy": "node scripts/deploy-cos.cjs",
+    "deploy:full": "node scripts/deploy-cos.cjs --no-crc",
     "test:deploy": "node --test tests/deploy-cos.test.cjs"
   },
   "publishConfig": {

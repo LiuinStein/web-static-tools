@@ -74,7 +74,7 @@ function getRemoteHeaders(client, params) {
   });
 }
 
-async function deploy(config, { dryRun = false, build, createClient, log = console.log, directory = path.join(root, 'build') } = {}) {
+async function deploy(config, { dryRun = false, noCrc = false, build, createClient, log = console.log, directory = path.join(root, 'build') } = {}) {
   // Build must succeed before any upload is attempted.
   build();
   const files = listFiles(directory);
@@ -82,20 +82,23 @@ async function deploy(config, { dryRun = false, build, createClient, log = conso
   // Publish assets first so new HTML does not reference files that are not uploaded yet.
   files.sort((a, b) => Number(a.endsWith('.html')) - Number(b.endsWith('.html')) || a.localeCompare(b));
   const client = dryRun ? null : createClient(config);
+  if (noCrc) log(`[全量模式] 已跳过 CRC64 比较${dryRun ? '（仅预览，不上传）' : '，将上传全部构建文件'}。`);
   let skipped = 0;
   for (const file of files) {
     const key = [config.prefix, file].filter(Boolean).join('/');
     if (!dryRun) {
-      log(`[比较 CRC64] ${key}`);
-      const headers = await getRemoteHeaders(client, { Bucket: config.bucket, Region: config.region, Key: key });
-      const remoteCrc64 = headers && headers['x-cos-hash-crc64ecma'];
       const filename = path.join(directory, file);
-      if (typeof remoteCrc64 === 'string' && /^\d+$/.test(remoteCrc64)
-        && headers['content-length'] === String(fs.statSync(filename).size)
-        && remoteCrc64 === await calculateCrc64(filename)) {
-        skipped += 1;
-        log(`[跳过，内容未变] ${key}`);
-        continue;
+      if (!noCrc) {
+        log(`[比较 CRC64] ${key}`);
+        const headers = await getRemoteHeaders(client, { Bucket: config.bucket, Region: config.region, Key: key });
+        const remoteCrc64 = headers && headers['x-cos-hash-crc64ecma'];
+        if (typeof remoteCrc64 === 'string' && /^\d+$/.test(remoteCrc64)
+          && headers['content-length'] === String(fs.statSync(filename).size)
+          && remoteCrc64 === await calculateCrc64(filename)) {
+          skipped += 1;
+          log(`[跳过，内容未变] ${key}`);
+          continue;
+        }
       }
       await new Promise((resolve, reject) => {
         client.uploadFile({
@@ -118,13 +121,19 @@ async function deploy(config, { dryRun = false, build, createClient, log = conso
     : `部署完成，已上传 ${files.length - skipped} 个文件，跳过 ${skipped} 个未变化文件。`);
 }
 
+function parseOptions(args) {
+  if (args.some((arg) => !['--dry-run', '--no-crc'].includes(arg))) {
+    throw new Error('仅支持 --dry-run 和 --no-crc 参数；全量上传请使用 npm run deploy:full。');
+  }
+  return { dryRun: args.includes('--dry-run'), noCrc: args.includes('--no-crc') };
+}
+
 async function main() {
-  const args = process.argv.slice(2);
-  if (args.some((arg) => arg !== '--dry-run')) throw new Error('仅支持 --dry-run 参数。');
-  const dryRun = args.includes('--dry-run');
+  const { dryRun, noCrc } = parseOptions(process.argv.slice(2));
   const config = readConfig(path.join(root, 'config.yaml'), dryRun);
   await deploy(config, {
     dryRun,
+    noCrc,
     build() {
       const result = spawnSync(process.execPath, [process.env.npm_execpath || require.resolve('npm/bin/npm-cli.js'), 'run', 'build'], {
         cwd: root,
@@ -143,4 +152,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { readConfig, listFiles, calculateCrc64, deploy };
+module.exports = { readConfig, listFiles, calculateCrc64, parseOptions, deploy };
