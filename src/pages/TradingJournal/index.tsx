@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Button } from '@alifd/next';
+import { Button, Pagination } from '@alifd/next';
+import zhCN from '@alifd/next/lib/locale/zh-cn';
 import PageHeader from '@/components/PageHeader';
 import ToolDialog from '@/components/ToolPage/ToolDialog';
 import '@/components/ToolPage/style.css';
@@ -33,6 +34,8 @@ import { SyncQueue, completeSync } from './sync-queue';
 import { findRecordedSecurity, resolveSecurity, IdentityField } from './security-lookup';
 import StableTableArea from './StableTableArea';
 import TableNumber from './TableNumber';
+import AmountInput from '../MonthlyReview/AmountInput';
+import { rawAmount } from '../MonthlyReview/amount';
 import './style.css';
 
 interface Cache {
@@ -43,6 +46,7 @@ interface Cache {
 }
 const settingsKey = 'trading-journal:settings:v1';
 const localKey = 'trading-journal:local:v1';
+const pageSize = 5;
 function readJSON(key: string, fallback: any): any {
   try {
     return JSON.parse(localStorage.getItem(key) || 'null') || fallback;
@@ -98,6 +102,8 @@ export default function TradingJournal() {
   const [filter, setFilter] = useState('全部');
   const [holdingsSearch, setHoldingsSearch] = useState('');
   const [holdingsFilter, setHoldingsFilter] = useState('全部');
+  const [tradePage, setTradePage] = useState(1);
+  const [holdingsPage, setHoldingsPage] = useState(1);
   const [busy, setBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState('');
@@ -119,6 +125,14 @@ export default function TradingJournal() {
       (filter === '全部' || trade.type === filter) &&
       `${trade.code} ${trade.name} ${trade.reason}`.toLowerCase().includes(search.toLowerCase()),
   );
+  const tradePageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const holdingsPageCount = Math.max(1, Math.ceil(filteredHoldings.length / pageSize));
+  const currentTradePage = Math.min(tradePage, tradePageCount);
+  const currentHoldingsPage = Math.min(holdingsPage, holdingsPageCount);
+  const pageTrades = filtered.slice((currentTradePage - 1) * pageSize, currentTradePage * pageSize);
+  const pageHoldings = filteredHoldings.slice((currentHoldingsPage - 1) * pageSize, currentHoldingsPage * pageSize);
+  useEffect(() => setTradePage(page => Math.min(page, tradePageCount)), [tradePageCount]);
+  useEffect(() => setHoldingsPage(page => Math.min(page, holdingsPageCount)), [holdingsPageCount]);
   const automaticFee = isStock(draft.type);
   const fee = automaticFee
     ? calculateFee(Number(draft.amount), Number(draft.price), Number(draft.shares))
@@ -358,7 +372,7 @@ export default function TradingJournal() {
   const amountField = (
     <label className="j-field">
       交易总价（{draft.currency || '请选择币种'}） <em>*</em>
-      <input
+      <AmountInput
         aria-label="交易总价"
         onFocus={(e) => e.currentTarget.select()}
         onClick={(e) => e.currentTarget.select()}
@@ -367,7 +381,7 @@ export default function TradingJournal() {
         required
         placeholder="0.00"
         value={draft.amount}
-        onChange={(e) => field('amount', e.target.value)}
+        onChange={(e) => field('amount', rawAmount(e.target.value))}
       />
     </label>
   );
@@ -402,8 +416,11 @@ export default function TradingJournal() {
           </tr>
         </thead>
         <tbody>
-          {rows.map((trade) => (
-            <tr key={trade.id}>
+          {rows.map((trade) => {
+            const local = cache.pending.some(item => item.id === trade.id) ||
+              (cache.changes || []).some(change => change.id === trade.id);
+            const labels = [trade.brainstorm ? '头脑风暴 · 非实际成交' : '', local ? (drive ? '待同步' : '本机记录') : ''].filter(Boolean).join(' · ');
+            return <tr key={trade.id}>
               <td>
                 <span className="j-trade-date">{trade.date}</span>
                 <strong className="j-trade-identity">{trade.type} · {trade.code} · {trade.name}</strong>
@@ -427,11 +444,7 @@ export default function TradingJournal() {
                   <summary><span className="j-reason-preview">{trade.reason ? trade.reason.split('\n')[0] : '未填写原因'}</span></summary>
                   <p>{trade.reason}</p>
                 </details>
-                {trade.brainstorm && <span className="j-local-label">头脑风暴 · 非实际成交</span>}
-                {(cache.pending.some((item) => item.id === trade.id) ||
-                  (cache.changes || []).some((change) => change.id === trade.id)) && (
-                  <span className="j-local-label">{drive ? '待同步' : '本机记录'}</span>
-                )}
+                {labels && <span className="j-local-label">{labels}</span>}
               </td>
               <td className="journal-actions-column">
                 <div className="journal-row-actions">
@@ -455,8 +468,8 @@ export default function TradingJournal() {
                   </Button>
                 </div>
               </td>
-            </tr>
-          ))}
+            </tr>;
+          })}
         </tbody>
       </table>
     </div>
@@ -488,7 +501,7 @@ export default function TradingJournal() {
               <td><span className="j-asset-tag">{holding.type}</span></td>
               <td className="j-numeric"><strong>{holding.currency || '未标记'} <TableNumber value={holding.totalCost} /></strong></td>
               <td className="j-numeric">
-                <TableNumber value={holding.shares} minimumFractionDigits={0} maximumFractionDigits={8} />
+                <TableNumber value={holding.shares} minimumFractionDigits={2} maximumFractionDigits={2} />
                 {!!holding.missingShares && <span className="j-subtle">{holding.missingShares} 笔交易未填份额</span>}
               </td>
               <td className="j-numeric">
@@ -669,7 +682,7 @@ export default function TradingJournal() {
           <div className="journal-toolbar">
             <div className="j-tabs">
               {['全部', ...assetTypes].map((type) => (
-                <button key={type} className={filter === type ? 'active' : ''} onClick={() => setFilter(type)}>
+                <button key={type} className={filter === type ? 'active' : ''} onClick={() => { setFilter(type); setTradePage(1); }}>
                   {type}
                 </button>
               ))}
@@ -678,14 +691,18 @@ export default function TradingJournal() {
               aria-label="搜索交易"
               placeholder="搜索代码、名称或交易原因"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => { setSearch(e.target.value); setTradePage(1); }}
             />
           </div>
-          <StableTableArea isUnfiltered={filter === '全部' && !search} isEmpty={!filtered.length} baseline={renderTrades(all)} empty={tradeEmpty}>
-            {filtered.length ? renderTrades(filtered) : tradeEmpty}
+          <StableTableArea isUnfiltered={filter === '全部' && !search && currentTradePage === 1} isEmpty={!filtered.length} baseline={renderTrades(all.slice(0, pageSize))} empty={tradeEmpty}>
+            {filtered.length ? renderTrades(pageTrades) : tradeEmpty}
           </StableTableArea>
           <div className="journal-table-footer">
-            共 {filtered.length} 笔记录 <span>点击交易原因，展开完整思考</span>
+            <span className="journal-table-count">共 {filtered.length} 笔记录</span>
+            <div className="journal-pagination">
+              {filtered.length > pageSize && <nav aria-label="交易记录分页"><Pagination size="small" shape="arrow-only" pageShowCount={3} pageSize={pageSize} total={filtered.length} current={currentTradePage} onChange={setTradePage} locale={zhCN.Pagination} /></nav>}
+            </div>
+            <span className="journal-table-hint" title="点击交易原因，展开完整思考">点击交易原因，展开完整思考</span>
           </div>
         </section>
         <section className="j-panel journal-records journal-holdings" aria-labelledby="journal-holdings-heading">
@@ -702,7 +719,7 @@ export default function TradingJournal() {
                   key={type}
                   className={holdingsFilter === type ? 'active' : ''}
                   aria-pressed={holdingsFilter === type}
-                  onClick={() => setHoldingsFilter(type)}
+                  onClick={() => { setHoldingsFilter(type); setHoldingsPage(1); }}
                 >
                   {type}
                 </button>
@@ -712,14 +729,18 @@ export default function TradingJournal() {
               aria-label="搜索持仓"
               placeholder="搜索代码或名称"
               value={holdingsSearch}
-              onChange={(e) => setHoldingsSearch(e.target.value)}
+              onChange={(e) => { setHoldingsSearch(e.target.value); setHoldingsPage(1); }}
             />
           </div>
-          <StableTableArea isUnfiltered={holdingsFilter === '全部' && !holdingsSearch} isEmpty={!filteredHoldings.length} baseline={renderHoldings(holdings)} empty={holdingsEmpty}>
-            {filteredHoldings.length ? renderHoldings(filteredHoldings) : holdingsEmpty}
+          <StableTableArea isUnfiltered={holdingsFilter === '全部' && !holdingsSearch && currentHoldingsPage === 1} isEmpty={!filteredHoldings.length} baseline={renderHoldings(holdings.slice(0, pageSize))} empty={holdingsEmpty}>
+            {filteredHoldings.length ? renderHoldings(pageHoldings) : holdingsEmpty}
           </StableTableArea>
           <div className="journal-table-footer">
-            共 {filteredHoldings.length} 个持仓 <span>实时计算，不写入 Excel</span>
+            <span className="journal-table-count">共 {filteredHoldings.length} 个持仓</span>
+            <div className="journal-pagination">
+              {filteredHoldings.length > pageSize && <nav aria-label="当前持仓分页"><Pagination size="small" shape="arrow-only" pageShowCount={3} pageSize={pageSize} total={filteredHoldings.length} current={currentHoldingsPage} onChange={setHoldingsPage} locale={zhCN.Pagination} /></nav>}
+            </div>
+            <span className="journal-table-hint" title="实时计算，不写入 Excel">实时计算，不写入 Excel</span>
           </div>
           <details className="journal-holdings-details">
             <summary>持仓计算说明</summary>
@@ -858,7 +879,7 @@ export default function TradingJournal() {
               {!isStock(draft.type) && amountField}
               <label className="j-field">
                 单价（{draft.currency || '请选择币种'}） {isStock(draft.type) ? <em>*</em> : <span className="j-optional">选填</span>}
-                <input
+                <AmountInput
                   aria-label="单价"
                   onFocus={(e) => e.currentTarget.select()}
                   onClick={(e) => e.currentTarget.select()}
@@ -867,12 +888,12 @@ export default function TradingJournal() {
                   required={isStock(draft.type)}
                   placeholder={isStock(draft.type) ? '0.00' : '可留空'}
                   value={draft.price}
-                  onChange={(e) => field('price', e.target.value)}
+                  onChange={(e) => field('price', rawAmount(e.target.value))}
                 />
               </label>
               <label className="j-field">
                 份额 {isStock(draft.type) ? <em>*</em> : <span className="j-optional">选填</span>}
-                <input
+                <AmountInput
                   aria-label="份额"
                   required={isStock(draft.type)}
                   onFocus={(e) => e.currentTarget.select()}
@@ -881,13 +902,13 @@ export default function TradingJournal() {
                   inputMode="decimal"
                   placeholder="输入实际成交份额"
                   value={draft.shares}
-                  onChange={(e) => field('shares', e.target.value)}
+                  onChange={(e) => field('shares', rawAmount(e.target.value))}
                 />
               </label>
               {isStock(draft.type) && amountField}
               <label className="j-field">
                 交易费用 <span className="j-optional">{automaticFee ? '自动计算' : '可手填 · 默认 0'}</span>
-                <input
+                <AmountInput
                   aria-label="交易费用"
                   onFocus={(e) => e.currentTarget.select()}
                   onClick={(e) => e.currentTarget.select()}
@@ -896,7 +917,7 @@ export default function TradingJournal() {
                   required
                   readOnly={automaticFee}
                   value={automaticFee ? fee.toFixed(2) : draft.fee}
-                  onChange={(e) => field('fee', e.target.value)}
+                  onChange={(e) => field('fee', rawAmount(e.target.value))}
                   onBlur={() => {
                     if (!automaticFee && draft.fee.trim() && Number.isFinite(fee)) field('fee', fee.toFixed(2));
                   }}
