@@ -404,7 +404,7 @@
   display: block;
   width: 100%;
   border: 1px solid var(--color-line1-2, #e6e6e6);
-  background: var(--color-white, #fff);
+  background-color: var(--color-white, #fff);
   color: var(--color-text1-4, #333);
   border-radius: var(--corner-1, 3px);
   padding: 7px 8px;
@@ -412,15 +412,6 @@
   margin-top: 7px;
   min-width: 0;
   outline: none;
-}
-.journal-entry .j-field select {
-  -webkit-appearance: none;
-  appearance: none;
-  padding-right: 32px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='m3 4.5 3 3 3-3' stroke='%23666' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  background-size: 12px 12px;
 }
 .j-field input:focus,
 .j-field select:focus,

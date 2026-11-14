@@ -68,8 +68,7 @@
 .financial-calculator .sf-markets button:hover { background: #e9eef6; border: 0; }
 .financial-calculator .sf-markets button[aria-pressed='true'], .financial-calculator .sf-markets button[aria-pressed='true']:hover { background: #fff; color: #3577eb; box-shadow: 0 1px 4px #25344c12; }
 .financial-calculator .sf-field { display: flex; flex-direction: column; gap: 9px; font-size: 13px; color: #42516a; }
-.financial-calculator .sf-field input, .financial-calculator .sf-field select { width: 100%; min-width: 0; height: 42px; padding: 0 11px; border: 1px solid #dbe3ed; border-radius: 6px; background: #fff; color: #25344c; font-size: 14px; font-variant-numeric: tabular-nums; }
-.financial-calculator .sf-field select { appearance: auto; -webkit-appearance: auto; background-image: none; }
+.financial-calculator .sf-field input, .financial-calculator .sf-field select { width: 100%; min-width: 0; height: 42px; padding: 0 11px; border: 1px solid #dbe3ed; border-radius: 6px; background-color: #fff; color: #25344c; font-size: 14px; font-variant-numeric: tabular-nums; }
 .financial-calculator .sf-field input[aria-invalid='true'] { border-color: #c44949; }
 .financial-calculator .sf-field input[readonly] { background: #f5f7fa; color: #7a879a; }
 .financial-calculator .sf-input-grid { gap: 20px 16px; }

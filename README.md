@@ -3,6 +3,10 @@
 
 > 使用 TypeScript，包含大量 UI 区块，比如图表、表单等。
 
+## 编码规范
+
+开发前阅读 [编码规范](docs/CODING_GUIDELINES.md)；自动化开发约定见 [AGENTS.md](AGENTS.md)。下拉框必须复用全局箭头与文字留白规则，禁止业务样式将箭头重置为贴边的原生外观。
+
 ## 使用
 
 ```bash

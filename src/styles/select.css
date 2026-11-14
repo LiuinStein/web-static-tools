@@ -1,0 +1,15 @@
+/* All native single-select controls share the journal arrow geometry.
+   Root + attribute specificity keeps lazy page styles from resetting the arrow.
+   Listboxes and multi-selects deliberately keep their native presentation. */
+:root select:not([multiple]):not([size]),
+:root select:not([multiple])[size="0"],
+:root select:not([multiple])[size="1"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='m3 4.5 3 3 3-3' stroke='%23666' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--select-arrow-inset, 8px) center;
+  background-size: 12px 12px;
+  padding-right: calc(var(--select-arrow-inset, 8px) + 24px);
+  text-overflow: ellipsis;
+}
