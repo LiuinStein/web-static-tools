@@ -4,6 +4,7 @@ const { spawnSync } = require('node:child_process');
 const COS = require('cos-nodejs-sdk-v5');
 const mime = require('mime-types');
 const yaml = require('js-yaml');
+const { crc64 } = require('crc64-ecma182.js');
 
 const root = path.resolve(__dirname, '..');
 
@@ -51,6 +52,28 @@ function listFiles(directory, relative = '') {
   return files;
 }
 
+async function calculateCrc64(filename) {
+  // Keep the unsigned 64-bit value as a decimal string (Number loses precision).
+  let checksum = '0';
+  for await (const chunk of fs.createReadStream(filename)) {
+    checksum = crc64(chunk, checksum);
+  }
+  return checksum;
+}
+
+function getRemoteHeaders(client, params) {
+  return new Promise((resolve, reject) => {
+    client.headObject(params, (error, data) => {
+      if (error) {
+        if (error.statusCode === 404) return resolve(null);
+        // SDK errors can contain signing details; only show our own message.
+        return reject(new Error(`比较失败：${params.Key}，请检查 COS 读取权限、配置和网络。`));
+      }
+      resolve(Object.fromEntries(Object.entries(data.headers || {}).map(([key, value]) => [key.toLowerCase(), value])));
+    });
+  });
+}
+
 async function deploy(config, { dryRun = false, build, createClient, log = console.log, directory = path.join(root, 'build') } = {}) {
   // Build must succeed before any upload is attempted.
   build();
@@ -59,15 +82,27 @@ async function deploy(config, { dryRun = false, build, createClient, log = conso
   // Publish assets first so new HTML does not reference files that are not uploaded yet.
   files.sort((a, b) => Number(a.endsWith('.html')) - Number(b.endsWith('.html')) || a.localeCompare(b));
   const client = dryRun ? null : createClient(config);
+  let skipped = 0;
   for (const file of files) {
     const key = [config.prefix, file].filter(Boolean).join('/');
     if (!dryRun) {
+      log(`[比较 CRC64] ${key}`);
+      const headers = await getRemoteHeaders(client, { Bucket: config.bucket, Region: config.region, Key: key });
+      const remoteCrc64 = headers && headers['x-cos-hash-crc64ecma'];
+      const filename = path.join(directory, file);
+      if (typeof remoteCrc64 === 'string' && /^\d+$/.test(remoteCrc64)
+        && headers['content-length'] === String(fs.statSync(filename).size)
+        && remoteCrc64 === await calculateCrc64(filename)) {
+        skipped += 1;
+        log(`[跳过，内容未变] ${key}`);
+        continue;
+      }
       await new Promise((resolve, reject) => {
         client.uploadFile({
           Bucket: config.bucket,
           Region: config.region,
           Key: key,
-          FilePath: path.join(directory, file),
+          FilePath: filename,
           ContentType: mime.contentType(path.extname(file)) || 'application/octet-stream',
           CacheControl: 'no-cache',
         }, (error) => {
@@ -79,7 +114,8 @@ async function deploy(config, { dryRun = false, build, createClient, log = conso
     }
     log(`${dryRun ? '[预览]' : '[已上传]'} ${key}`);
   }
-  log(`${dryRun ? '预览完成，未上传' : '部署完成，已上传'} ${files.length} 个文件。`);
+  log(dryRun ? `预览完成，未上传 ${files.length} 个文件（未连接 COS，未比较 CRC64）。`
+    : `部署完成，已上传 ${files.length - skipped} 个文件，跳过 ${skipped} 个未变化文件。`);
 }
 
 async function main() {
@@ -107,4 +143,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { readConfig, listFiles, deploy };
+module.exports = { readConfig, listFiles, calculateCrc64, deploy };

@@ -52,7 +52,8 @@
     "@types/node": "^24.0.0",
     "cos-nodejs-sdk-v5": "^3.0.0",
     "mime-types": "^3.0.2",
-    "js-yaml": "^4.3.2"
+    "js-yaml": "^4.3.2",
+    "crc64-ecma182.js": "^1.0.0"
   },
   "scripts": {
     "start": "icejs start",

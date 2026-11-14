@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const yaml = require('js-yaml');
-const { readConfig, listFiles, deploy } = require('../scripts/deploy-cos.cjs');
+const { readConfig, listFiles, calculateCrc64, deploy } = require('../scripts/deploy-cos.cjs');
 
 function fixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-cos-'));
@@ -17,6 +17,93 @@ function fixture(t) {
 
 const config = { bucket: 'site-1250000000', region: 'ap-guangzhou', prefix: 'tools' };
 
+test('CRC64 uses COS-compatible decimal values, including empty and streamed files', async (t) => {
+  const filename = path.join(fixture(t), 'checksum');
+  fs.writeFileSync(filename, '123456789');
+  assert.equal(await calculateCrc64(filename), '11051210869376104954');
+  fs.writeFileSync(filename, '');
+  assert.equal(await calculateCrc64(filename), '0');
+  const data = Buffer.alloc(150000, '123456789');
+  fs.writeFileSync(filename, data);
+  // A multi-chunk stream must produce the same value as a single buffer.
+  assert.equal(await calculateCrc64(filename), require('crc64-ecma182.js').crc64(data));
+});
+
+test('repeated deployments skip unchanged objects and upload only edited content', async (t) => {
+  const directory = fixture(t);
+  fs.writeFileSync(path.join(directory, 'empty.txt'), '');
+  const remote = new Map();
+  const uploaded = [];
+  const messages = [];
+  const client = {
+    headObject(params, callback) {
+      if (remote.has(params.Key)) callback(null, { headers: remote.get(params.Key) });
+      else callback({ statusCode: 404 });
+    },
+    uploadFile(params, callback) {
+      uploaded.push(params.Key);
+      calculateCrc64(params.FilePath).then((checksum) => {
+        remote.set(params.Key, {
+          'X-Cos-Hash-Crc64ecma': checksum,
+          'Content-Length': String(fs.statSync(params.FilePath).size),
+          ETag: '"multipart-etag-3"',
+        });
+        callback(null);
+      }, callback);
+    },
+  };
+  const options = { directory, build() {}, createClient: () => client, log: (message) => messages.push(message) };
+  await deploy(config, options);
+  assert.equal(uploaded.length, 3);
+  uploaded.length = 0;
+  await deploy(config, options);
+  assert.deepEqual(uploaded, []);
+  assert.match(messages.at(-1), /已上传 0 个文件，跳过 3 个/);
+  assert.ok(messages.includes('[跳过，内容未变] tools/empty.txt'));
+  // Same-size edit must be detected by CRC64, not only length or mtime.
+  fs.writeFileSync(path.join(directory, 'js/app.js'), 'console.log(2);');
+  await deploy(config, options);
+  assert.deepEqual(uploaded, ['tools/js/app.js']);
+  assert.match(messages.at(-1), /已上传 1 个文件，跳过 2 个/);
+});
+
+test('objects without usable CRC64 or with inconsistent size are uploaded', async (t) => {
+  const directory = fixture(t);
+  for (const mode of ['missing', 'invalid', 'size']) {
+    const uploaded = [];
+    await deploy(config, {
+      directory, build() {}, log() {},
+      createClient: () => ({
+        headObject(params, callback) {
+          const filename = path.join(directory, params.Key.slice('tools/'.length));
+          calculateCrc64(filename).then((checksum) => callback(null, { headers: {
+            'x-cos-hash-crc64ecma': mode === 'missing' ? undefined : mode === 'invalid' ? 'not-a-crc64' : checksum,
+            'content-length': mode === 'size' ? '99999' : String(fs.statSync(filename).size),
+          } }), callback);
+        },
+        uploadFile(params, callback) { uploaded.push(params.Key); callback(null); },
+      }),
+    });
+    assert.deepEqual(uploaded, ['tools/js/app.js', 'tools/index.html'], mode);
+  }
+});
+
+test('HEAD permission and network errors stop deployment without exposing SDK details', async (t) => {
+  for (const statusCode of [403, 500, undefined]) {
+    await assert.rejects(deploy(config, {
+      directory: fixture(t), build() {}, log() {},
+      createClient: () => ({
+        headObject(params, callback) { callback({ statusCode, message: 'sensitive signature' }); },
+        uploadFile() { assert.fail('must not upload after HEAD failure'); },
+      }),
+    }), (error) => {
+      assert.match(error.message, /比较失败：tools\/js\/app.js/);
+      assert.doesNotMatch(error.message, /sensitive/);
+      return true;
+    });
+  }
+});
+
 test('uploads assets before HTML, preserving keys and browser headers', async (t) => {
   const directory = fixture(t);
   const uploads = [];
@@ -27,7 +114,14 @@ test('uploads assets before HTML, preserving keys and browser headers', async (t
     build() { built = true; },
     createClient() {
       assert.equal(built, true);
-      return { uploadFile(params, callback) { uploads.push(params); callback(null); } };
+      return {
+        headObject(params, callback) {
+          assert.equal(params.Bucket, config.bucket);
+          assert.equal(params.Region, config.region);
+          callback({ statusCode: 404 });
+        },
+        uploadFile(params, callback) { uploads.push(params); callback(null); },
+      };
     },
   });
   assert.deepEqual(uploads.map((item) => item.Key), ['tools/js/app.js', 'tools/index.html']);
@@ -61,7 +155,7 @@ test('upload failure stops before publishing HTML and hides SDK error details', 
   let count = 0;
   await assert.rejects(deploy(config, {
     directory: fixture(t), build() {}, log() {},
-    createClient: () => ({ uploadFile(params, callback) {
+    createClient: () => ({ headObject(params, callback) { callback({ statusCode: 404 }); }, uploadFile(params, callback) {
       count += 1;
       callback(new Error('sensitive signing details'));
     } }),
