@@ -145,3 +145,32 @@ test('only child-window Microsoft auth responses bypass the application hash rou
   assert.equal(isOneDriveAuthRequired({cause:new OneDriveAuthRequiredError()}),true);
   assert.equal(isOneDriveAuthRequired(new Error('network disconnected')),false);
 });
+test('shared factory persists login across reopened tabs and keeps explicit disconnect persistent', async () => {
+  const vm = require('node:vm');
+  const source = ts.transpileModule(fs.readFileSync(require.resolve('../src/services/onedrive-session.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+  const data = new Map(), configs = [];
+  const persistent = { getItem: key => data.get(key) ?? null, setItem: (key,value) => data.set(key,value) };
+  let popups = 0;
+  class FakeAuth {
+    constructor(config) { configs.push(config); this.store = config.cache.cacheLocation === 'localStorage' ? persistent : { getItem: () => null, setItem() {} }; }
+    async initialize() {}
+    getAllAccounts() { return JSON.parse(this.store.getItem('fake:accounts') || '[]'); }
+    setActiveAccount() {}
+    async acquireTokenSilent({account}) { return {account,accessToken:'fake'}; }
+    async loginPopup() { popups++; this.store.setItem('fake:accounts',JSON.stringify([accountA])); return {account:accountA}; }
+    async clearCache() { this.store.setItem('fake:accounts','[]'); }
+  }
+  function openTab() {
+    const module = {exports:{}};
+    vm.runInNewContext(source, { exports:module.exports, module, require: name => name === '@azure/msal-browser' ? { PublicClientApplication: FakeAuth, CacheLookupPolicy: {AccessTokenAndRefreshToken:1} } : require('../src/services/onedrive-auth.ts'),
+      window:{localStorage:persistent,sessionStorage:{getItem:()=>null,setItem(){}},location:{origin:'https://tools.test',pathname:'/'}} });
+    return module.exports.oneDriveSession('11111111-1111-1111-1111-111111111111');
+  }
+  const first = openTab(); await first.connect();
+  const reopened = openTab(); assert.equal((await reopened.restore()).homeAccountId,accountA.homeAccountId);
+  assert.equal(popups,1); assert.ok(configs.every(config=>config.cache.cacheLocation==='localStorage'));
+  assert.equal(JSON.parse(persistent.getItem('onedrive:session:v1:11111111-1111-1111-1111-111111111111')).accountId,accountA.homeAccountId);
+  await reopened.disconnect();
+  assert.equal(await openTab().restore(accountA.homeAccountId),null);
+  assert.equal(popups,1);
+});

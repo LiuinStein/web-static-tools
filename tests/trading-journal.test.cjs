@@ -63,6 +63,9 @@ test('OneDrive retries a version conflict, merges another device record and send
     const request = {
       header(name, value) { if (name === 'If-Match') headers.push(value); return request; },
       async put(data) {
+        assert.ok(data instanceof Blob);
+        assert.equal(data.type, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        data = await data.arrayBuffer();
         if (loads === 1) throw { statusCode: 412 };
         uploaded = (await readWorkbook(data)).trades;
       },
@@ -149,6 +152,9 @@ test('OneDrive edit/delete sync preserves unrelated remote rows and retries uplo
   };
   service.client = { api: () => {
     const request = { header() { return request; }, async put(data) {
+        assert.ok(data instanceof Blob);
+        assert.equal(data.type, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        data = await data.arrayBuffer();
       remote = (await readWorkbook(data)).trades;
       writes += 1;
     } };
@@ -268,6 +274,9 @@ async function versionedOneDrive() {
         return { ...state.item };
       },
       async put(data) {
+        assert.ok(data instanceof Blob);
+        assert.equal(data.type, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        data = await data.arrayBuffer();
         state.uploads += 1;
         if (state.failUpload) throw { statusCode: 403, message: 'Upload denied' };
         const result = await readWorkbook(data);
@@ -627,7 +636,7 @@ test('market-specific stock code input filters, casing and complete-format check
   assert.equal(normalizeCodeInput('A股', 'ab60051979'), '600519');
   assert.equal(normalizeCodeInput('港股', 'x00700y9'), '00700');
   assert.equal(normalizeCodeInput('美股', 'brk.b中1'), 'BRK.B');
-  assert.equal(normalizeCodeInput('股票基金', 'fund-123'), 'fund-123');
+  assert.equal(normalizeCodeInput('股票基金', 'fund-123'), 'FUND-123');
   for (const [type, codes] of [['A股', ['600519','000001','920001']], ['港股', ['00700','09988']], ['美股', ['A','AAPL','GOOGL','BRK.B','BF-B']]]) {
     for (const code of codes) assert.doesNotThrow(() => validateStockCode(type, code));
   }
@@ -655,4 +664,12 @@ test('stock identity lookup pads recorded, external query and reverse-lookup cod
   const external=await resolveSecurity([],'港股','code','700',signal,query);
   assert.equal(request,'00700');assert.equal(external.identity.code,'00700');
   assert.equal((await resolveSecurity([],'港股','name','腾讯',signal,query)).identity.code,'00700');
+});
+
+test('all asset types uppercase English letters without altering numeric padding rules', () => {
+  const { normalizeCodeInput, completeStockCode } = require('../src/pages/TradingJournal/model.ts');
+  for (const type of ['债券基金','股票基金']) assert.equal(normalizeCodeInput(type,'ab中-123z'),'AB中-123Z');
+  assert.equal(normalizeCodeInput('美股','brk.b'),'BRK.B');
+  assert.equal(completeStockCode('港股',normalizeCodeInput('港股','a700b')),'00700');
+  assert.equal(completeStockCode('A股',normalizeCodeInput('A股','x1y')),'000001');
 });

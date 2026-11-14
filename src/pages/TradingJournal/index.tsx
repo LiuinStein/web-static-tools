@@ -92,8 +92,6 @@ export default function TradingJournal() {
   const busyRef = useRef(false);
   const formRef = useRef<HTMLDivElement>(null);
   const backgroundRevision = useRef(0);
-  const cacheRef = useRef(cache);
-  cacheRef.current = cache;
   const all = visibleTrades(cache.remote, cache.pending, cache.changes || []);
   const holdings = calculateHoldings(all);
   const filteredHoldings = holdings.filter(
@@ -116,9 +114,8 @@ export default function TradingJournal() {
     ...cache.pending.map((trade) => trade.id),
     ...(cache.changes || []).map((change) => change.id),
   ]).size;
-  if (drive) syncLabel = syncing ? '正在同步…' : syncError ? '同步失败，待重试' : pendingCount ? `${pendingCount} 条待同步` : '已同步';
-  let saveLabel = drive ? '保存并同步到 OneDrive' : '保存到本机';
-  if (editing) saveLabel = drive ? '保存修改并同步到 OneDrive' : '保存修改';
+  if (drive) syncLabel = syncing ? '正在同步…' : syncError ? '同步失败，待重试' : pendingCount ? `${pendingCount} 条待同步` : cache.lastSync ? '本机无待同步' : '待首次同步';
+  const saveLabel = editing ? '保存修改' : '保存到本机';
   const connectionLabel = drive ? syncLabel : '仅本机保存';
   const stanceStyles = { 看多: 'bull', 看空: 'bear', 平仓: 'flat' };
   useEffect(() => {
@@ -127,8 +124,8 @@ export default function TradingJournal() {
     const active = () => !cancelled && revision === backgroundRevision.current;
     const saved = settings.current;
     if (saved.config.clientId) {
-      // Show the account-scoped local snapshot before any cloud I/O. Background
-      // restoration must not lock the entry form or open an authorization popup.
+      // Restore only identity and the account-scoped local snapshot.
+      // Cloud workbook access is reserved for the explicit sync button.
       (async () => {
         const service = initial.service;
         const user = await service.restore(saved.accountId);
@@ -137,31 +134,10 @@ export default function TradingJournal() {
         const local = readJSON(key, emptyCache) as Cache;
         setCache(local); setCacheKey(key); setDrive(service);
         setAccount(user.username || user.name || 'Microsoft 账户');
-        const remote = await service.read();
-        if (!active()) return;
-        // A save may have happened during refresh. Preserve its pending changes.
-        const latest = readJSON(key, local) as Cache;
-        if (latest.lastSync === local.lastSync) persist({ ...latest, remote, lastSync: new Date().toISOString() }, key);
-      })().catch(error => { if (active()) setSyncError(`后台刷新失败：${error.message}。本机记录已保留，可点击同步重试。`); });
+      })().catch(error => { if (active()) setSyncError(`登录恢复失败：${error.message}。本机记录已保留，请点击连接 OneDrive 重试。`); });
     }
     return () => { cancelled = true; };
   }, []);
-  useEffect(() => {
-    if (!drive) return undefined;
-    const refresh = () => {
-      if (document.visibilityState === 'visible' && navigator.onLine && !busyRef.current && !syncQueue.current.busy) {
-        synchronize(cacheRef.current, true).catch(() => {});
-      }
-    };
-    window.addEventListener('online', refresh);
-    document.addEventListener('visibilitychange', refresh);
-    const timer = window.setInterval(refresh, 60000);
-    return () => {
-      window.removeEventListener('online', refresh);
-      document.removeEventListener('visibilitychange', refresh);
-      window.clearInterval(timer);
-    };
-  }, [drive, cacheKey]);
   function persist(value: Cache, key = cacheKey) {
     localStorage.setItem(key, JSON.stringify(value));
     setCache(value);
@@ -224,7 +200,7 @@ export default function TradingJournal() {
       }
     }, 350);
   }
-  async function synchronize(current = cache, background = false) {
+  async function synchronize(current = cache) {
     if (!drive) throw new Error('请先连接 OneDrive');
     try {
       await syncQueue.current.run(async () => {
@@ -232,14 +208,14 @@ export default function TradingJournal() {
         const stored = readJSON(cacheKey, current) as Cache;
         const pending = stored.pending;
         const changes = stored.changes || [];
-        const remote = await drive.sync(pending, changes, !background);
+        const remote = await drive.sync(pending, changes, true);
         const latest = readJSON(cacheKey, stored) as Cache;
         persist({
           ...completeSync(latest, stored, remote),
           lastSync: new Date().toISOString(),
         });
         setSyncError('');
-        if (!background) setNotice('已同步到 OneDrive，Excel 文件已更新。');
+        setNotice('已同步到 OneDrive，Excel 文件已更新。');
       });
     } catch (err) {
       setSyncError(`同步失败：${err.message || '请稍后重试'}。本机记录已保留，可点击“立即同步”重试。`);
@@ -289,13 +265,7 @@ export default function TradingJournal() {
       persist(next);
       setEditing(null);
       resetDraft();
-      if (drive) {
-        try {
-          await synchronize(next);
-        } catch (err) {
-          throw new Error(`记录已保存到本机，云端未更新：${err.message}。请点击“立即同步”重试。`);
-        }
-      } else setNotice('记录已保存到本机。当前尚未连接 OneDrive，此记录不会自动出现在其他设备。');
+      setNotice(drive ? '记录已保存到本机，点击“立即同步”后更新 OneDrive。' : '记录已保存到本机。当前尚未连接 OneDrive，此记录不会自动出现在其他设备。');
     });
   }
   async function connect(switchAccount = false) {
@@ -306,17 +276,17 @@ export default function TradingJournal() {
         const user = await service.connect(switchAccount);
         const key = `trading-journal:cloud:v1:${service.config.clientId}:${user.homeAccountId}:${service.config.path}`;
         const saved = readJSON(key, emptyCache) as Cache;
-        const remote = await service.read();
         localStorage.setItem(settingsKey, JSON.stringify({ config: service.config, accountId: user.homeAccountId }));
-        persist({ ...saved, remote, lastSync: new Date().toISOString() }, key);
+        persist(saved, key);
         setCacheKey(key);
         setEditing(null);
         setDrive(service);
         setAccount(user.username || user.name || 'Microsoft 账户');
         setConfig(service.config);
         setShowSettings(false);
+        setSyncError('');
         resetDraft();
-        setNotice('已加载当前路径的云端日记。原路径待同步记录仍保存在原缓存中，不会上传到新路径。');
+        setNotice('OneDrive 已连接，当前显示此路径的本机快照。点击“立即同步”读取并更新云端 Excel；原路径的待同步记录仍保留在原缓存中。');
       });
     });
   }
@@ -360,13 +330,7 @@ export default function TradingJournal() {
         setEditing(null);
         resetDraft();
       }
-      if (drive) {
-        try {
-          await synchronize(next);
-        } catch (err) {
-          throw new Error(`本机已删除，云端删除尚未同步：${err.message}。请点击“立即同步”重试。`);
-        }
-      } else setNotice('交易记录已从本机日记删除。');
+      setNotice(drive ? '本机记录已删除，点击“立即同步”后更新 OneDrive。' : '交易记录已从本机日记删除。');
     });
   }
   const field = (key: keyof typeof draft, value: string) => setDraft(current =>
@@ -452,14 +416,14 @@ export default function TradingJournal() {
             </label>
             <p className="j-help">
               默认 /文档/BalanceSheet/TradingJournal.xlsx。请使用本页导出的 Excel
-              格式；目录和新文件会在首次保存时创建。与月度复盘共用登录，文件路径独立；连接后可修改路径并应用，无需重新登录。原路径的待同步记录会保留。
+              格式；目录和新文件会在首次点击“立即同步”时创建。与月度复盘共用登录，文件路径独立；连接后可修改路径并应用，无需重新登录。原路径的待同步记录会保留。
             </p>
             <div className="j-button-row">
               <Button className="j-btn" disabled={busy} type="normal" onClick={() => run(() => exportTrades([]))}>
                 下载空白 Excel 模板
               </Button>
               <Button className="j-btn j-btn-primary" disabled={busy || syncing} onClick={() => connect()} type="primary">
-                {drive ? '应用文件路径' : '连接并加载 Excel'}
+                {drive ? '应用文件路径' : '连接 OneDrive'}
               </Button>
               {drive && <Button className="j-btn" disabled={busy || syncing} onClick={() => connect(true)}>切换账户</Button>}
               {drive && (
@@ -531,7 +495,7 @@ export default function TradingJournal() {
           <p>
             {cache.lastSync && drive
               ? `最近同步 ${new Date(cache.lastSync).toLocaleString('zh-CN')}`
-              : '连接 OneDrive 后开启跨设备同步'}
+              : drive ? '点击“立即同步”读取并更新云端 Excel' : '连接 OneDrive 后可手动同步'}
           </p>
         </div>
       </div>
@@ -919,7 +883,7 @@ export default function TradingJournal() {
             </Button>
             <p className="journal-save-note">
               {drive
-                ? '先保存本机，再合并更新云端 Excel；同步失败可重试。'
+                ? '仅保存本机，点击“立即同步”才会更新云端 Excel。'
                 : '尚未连接 OneDrive，记录仅保存在当前浏览器。'}
             </p>
           </form>
@@ -941,7 +905,7 @@ export default function TradingJournal() {
         </p>
         <p>
           {drive
-            ? '确认后将从日记和 OneDrive Excel 中删除，无法在本页撤销。'
+            ? '确认后先从本机日记删除，点击“立即同步”后更新 OneDrive Excel；无法在本页撤销。'
             : '确认后将从本机日记中删除，无法在本页撤销。'}
         </p>
       </ToolDialog>

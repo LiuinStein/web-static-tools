@@ -181,7 +181,7 @@ export function stockCodeRule(type: AssetType): { pattern: string; placeholder: 
 export function normalizeCodeInput(type: AssetType, value: string): string {
   if (type === 'A股' || type === '港股') return value.replace(/[^0-9]/g, '').slice(0, type === 'A股' ? 6 : 5);
   if (type === '美股') return value.toUpperCase().replace(/[^A-Z.-]/g, '').slice(0, 9);
-  return value;
+  return value.toUpperCase();
 }
 export function validateStockCode(type: AssetType, code: string): void {
   const rule = stockCodeRule(type);

@@ -95,6 +95,9 @@ export class OneDriveJournal extends OneDriveConnection {
       const { workbook, trades, item } = await this.load();
       const merged = mergeForSync(trades, pending, changes);
       const data = await writeWorkbook(workbook, merged);
+      const type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      // Match MonthlyReview: Blob bypasses the SDK's JSON/Buffer serialization in browsers.
+      const content = new Blob([data], { type });
       try {
         // A failed/ambiguous upload must never leave an old version cached as current.
         this.cachedRead = undefined;
@@ -104,16 +107,16 @@ export class OneDriveJournal extends OneDriveConnection {
           uploaded = await this.client
             .api(`/me/drive/items/${item.id}/content`)
             .header('If-Match', item.eTag)
-            .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-            .put(data);
+            .header('Content-Type', type)
+            .put(content);
         } else {
           await this.ensureFolders();
           uploaded = await this.client
             .api(`${this.endpoint()}:/content`)
             .query({ '@microsoft.graph.conflictBehavior': 'fail' })
             .header('If-None-Match', '*')
-            .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-            .put(data);
+            .header('Content-Type', type)
+            .put(content);
         }
         // Graph returns the saved file's version. Without it, verify via a fresh read next time.
         this.assertScope(scope);

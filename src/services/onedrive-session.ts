@@ -145,8 +145,8 @@ export function oneDriveSession(clientId: string): OneDriveSession {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw new Error('请输入有效的 Microsoft 应用客户端 ID');
   let session = sessions.get(id);
   if (!session) {
-    const auth = new PublicClientApplication({ auth: { clientId: id, authority: 'https://login.microsoftonline.com/common', redirectUri: `${window.location.origin}${window.location.pathname}` }, cache: { cacheLocation: 'sessionStorage' } });
-    session = new OneDriveSession(id, auth, window.sessionStorage); sessions.set(id, session);
+    const auth = new PublicClientApplication({ auth: { clientId: id, authority: 'https://login.microsoftonline.com/common', redirectUri: `${window.location.origin}${window.location.pathname}` }, cache: { cacheLocation: 'localStorage' } });
+    session = new OneDriveSession(id, auth, window.localStorage); sessions.set(id, session);
   }
   return session;
 }
