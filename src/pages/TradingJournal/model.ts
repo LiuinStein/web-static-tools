@@ -2,10 +2,19 @@ import Decimal from 'decimal.js';
 
 export const assetTypes = ['港股', '美股', 'A股', '债券基金', '股票基金'] as const;
 export type AssetType = typeof assetTypes[number];
+export const currencies = ['HKD', 'USD', 'RMB'] as const;
+export type Currency = typeof currencies[number];
+export function stockCurrency(type: AssetType): Currency | undefined {
+  return ({ '港股': 'HKD', '美股': 'USD', 'A股': 'RMB' } as const)[type];
+}
+export function tradeCurrency(trade: Pick<Trade, 'type' | 'currency'>): Currency | undefined {
+  return stockCurrency(trade.type) || trade.currency;
+}
 export interface Trade {
   id: string;
   date: string;
   type: AssetType;
+  currency?: Currency;
   code: string;
   name: string;
   stance: '看多' | '看空' | '平仓';
@@ -43,6 +52,8 @@ export function validateTrade(trade: Trade): void {
     !['看多', '看空', '平仓'].includes(trade.stance) ||
     !['买入', '卖出'].includes(trade.direction)
   ) throw new Error('交易分类无效');
+  if (trade.currency !== undefined && !currencies.includes(trade.currency)) throw new Error('货币标记无效');
+  if (stockCurrency(trade.type) && trade.currency && trade.currency !== stockCurrency(trade.type)) throw new Error('股票货币标记与市场不匹配');
   if (!Number.isFinite(trade.amount) || trade.amount <= 0) throw new Error('金额必须大于 0');
   if (trade.price === undefined) {
     if (isStock(trade.type)) throw new Error('股票单价必填');
@@ -83,7 +94,7 @@ export function sameTrade(left: Trade | undefined, right: Trade | undefined): bo
     'fee',
     'reason',
   ];
-  return !!left.brainstorm === !!right.brainstorm && keys.every((key) => left[key] === right[key]);
+  return tradeCurrency(left) === tradeCurrency(right) && !!left.brainstorm === !!right.brainstorm && keys.every((key) => left[key] === right[key]);
 }
 export function applyChanges(trades: Trade[], changes: TradeChange[]): Trade[] {
   const records = new Map(trades.map((trade) => [trade.id, trade]));

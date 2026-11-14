@@ -1,9 +1,10 @@
-import { AssetType, Trade } from './model';
+import { AssetType, Trade, Currency, tradeCurrency, currencies } from './model';
 
 export interface Holding {
   code: string;
   name: string;
   type: AssetType;
+  currency?: Currency;
   totalCost: number;
   shares?: number;
   averagePrice?: number;
@@ -26,17 +27,18 @@ const emptyTotal = (): Total => ({ value: 0, correction: 0, magnitude: 0 });
 // Derived from visible trades only. Holdings are never persisted or written to Excel.
 export function calculateHoldings(trades: Trade[]): Holding[] {
   const groups = new Map<string, {
-    code: string; name: string; type: AssetType; latestDate: string;
+    code: string; name: string; type: AssetType; currency?: Currency; latestDate: string;
     cost: Total; shares: Total; missingShares: number;
   }>();
   trades.forEach((trade) => {
     if (trade.brainstorm) return;
     const code = trade.code.trim().toUpperCase();
-    const key = JSON.stringify([trade.type, code]);
+    const currency = tradeCurrency(trade);
+    const key = JSON.stringify([trade.type, code, currency]);
     let group = groups.get(key);
     if (!group) {
       group = {
-        code, name: trade.name, type: trade.type, latestDate: trade.date,
+        code, name: trade.name, type: trade.type, currency, latestDate: trade.date,
         cost: emptyTotal(), shares: emptyTotal(), missingShares: 0,
       };
       groups.set(key, group);
@@ -59,11 +61,20 @@ export function calculateHoldings(trades: Trade[]): Holding[] {
       code: group.code,
       name: group.name,
       type: group.type,
+      currency: group.currency,
       totalCost: group.cost.value,
       shares,
       averagePrice: shares === undefined ? undefined : group.cost.value / shares,
       missingShares: group.missingShares,
     });
   });
-  return holdings.sort((a, b) => a.code.localeCompare(b.code) || a.type.localeCompare(b.type));
+  return holdings.sort((a, b) => a.code.localeCompare(b.code) || a.type.localeCompare(b.type) || (a.currency || '').localeCompare(b.currency || ''));
+}
+
+export function summarizeHoldingCosts(holdings: Holding[]): Record<Currency, number> {
+  const totals = { HKD: emptyTotal(), USD: emptyTotal(), RMB: emptyTotal() };
+  holdings.forEach(holding => {
+    if (holding.currency && currencies.includes(holding.currency)) add(totals[holding.currency], holding.totalCost);
+  });
+  return { HKD: totals.HKD.value, USD: totals.USD.value, RMB: totals.RMB.value };
 }

@@ -400,7 +400,7 @@ test('both fund categories allow blank prices and roundtrip through Excel unchan
   const records = [
     { ...trade('bond-fund'), type: '债券基金', price: undefined, shares: undefined },
     { ...trade('equity-fund'), type: '股票基金', price: undefined, shares: 100 },
-    { ...trade('stock'), type: '美股', price: 10 },
+    { ...trade('stock'), type: '美股', currency: 'USD', price: 10 },
     trade('historical-fund'),
   ];
   records.forEach(row => assert.doesNotThrow(() => validateTrade(row)));
@@ -488,7 +488,7 @@ test('holdings immediately follow pending creates, edits and deletions and stay 
   const { workbook } = await readWorkbook();
   const imported = await readWorkbook(await writeWorkbook(workbook, visible));
   assert.deepEqual(imported.workbook.worksheets.map(sheet => sheet.name), ['交易记录']);
-  assert.equal(imported.workbook.getWorksheet('交易记录').columnCount, 13);
+  assert.equal(imported.workbook.getWorksheet('交易记录').columnCount, 14);
   assert.deepEqual(imported.trades, [edited]);
   assert.deepEqual(calculateHoldings(imported.trades), calculateHoldings(visible));
   assert.deepEqual(calculateHoldings([]), []);
@@ -497,7 +497,7 @@ test('holdings immediately follow pending creates, edits and deletions and stay 
 test('stock markets and brainstorm records roundtrip without affecting actual holdings', async () => {
   const { calculateHoldings } = require('../src/pages/TradingJournal/holdings.ts');
   const markets = ['港股', '美股', 'A股'];
-  const records = markets.map((type, index) => ({ ...trade(String(index)), type, brainstorm: true }));
+  const records = markets.map((type, index) => ({ ...trade(String(index)), type, currency: ['HKD','USD','RMB'][index], brainstorm: true }));
   records.forEach(validateTrade);
   records.forEach(row => assert.throws(() => validateTrade({ ...row, price: undefined }), /股票单价必填/));
   const { workbook } = await readWorkbook();
@@ -513,7 +513,7 @@ test('stock markets and brainstorm records roundtrip without affecting actual ho
 test('legacy twelve-column Excel remains readable and gains brainstorm column on save', async () => {
   const { workbook } = await readWorkbook();
   await writeWorkbook(workbook, [trade()]);
-  workbook.getWorksheet('交易记录').spliceColumns(13, 1);
+  workbook.getWorksheet('交易记录').spliceColumns(13, 2);
   const legacy = await readWorkbook(await workbook.xlsx.writeBuffer());
   assert.deepEqual(legacy.trades, [trade()]);
   const updated = await readWorkbook(await writeWorkbook(legacy.workbook, [{ ...trade(), brainstorm: true }]));
@@ -672,4 +672,59 @@ test('all asset types uppercase English letters without altering numeric padding
   assert.equal(normalizeCodeInput('美股','brk.b'),'BRK.B');
   assert.equal(completeStockCode('港股',normalizeCodeInput('港股','a700b')),'00700');
   assert.equal(completeStockCode('A股',normalizeCodeInput('A股','x1y')),'000001');
+});
+
+test('stock currencies are fixed by market and fund currency survives Excel, edits and sync conflicts', async () => {
+  const {tradeCurrency,sameTrade}=require('../src/pages/TradingJournal/model.ts');
+  for(const [type,currency] of [['港股','HKD'],['美股','USD'],['A股','RMB']]) {
+    assert.equal(tradeCurrency({...trade(),type}),currency);
+    assert.ok(sameTrade({...trade(),type},{...trade(),type,currency}));
+    assert.throws(()=>validateTrade({...trade(),type,currency:currency==='USD'?'HKD':'USD'}),/货币/);
+  }
+  const records=['HKD','USD','RMB'].map((currency,index)=>({...trade(String(index)),currency}));
+  const {workbook}=await readWorkbook();
+  const result=await readWorkbook(await writeWorkbook(workbook,records));
+  assert.deepEqual(result.trades,records);
+  assert.equal(result.workbook.getWorksheet('交易记录').getCell('N1').text,'货币标记');
+  assert.equal(result.workbook.getWorksheet('交易记录').getCell('N2').text,'HKD');
+  assert.equal(sameTrade(records[0],{...records[0],currency:'USD'}),false);
+  const change=queueChange(records,[],[],records[0],{...records[0],currency:'USD'});
+  assert.equal(mergeForSync(records,[],change)[0].currency,'USD');
+  assert.throws(()=>mergeForSync([{...records[0],currency:'RMB'},...records.slice(1)],[],change),/其他设备/);
+  assert.throws(()=>validateTrade({...trade(),currency:'EUR'}),/货币标记/);
+});
+test('older Excel records keep unknown fund currencies while deriving stock defaults when saved', async () => {
+  const {workbook}=await readWorkbook();
+  await writeWorkbook(workbook,[trade(),{...trade('stock'),type:'美股'}]);
+  workbook.getWorksheet('交易记录').spliceColumns(14,1);
+  const legacy=await readWorkbook(await workbook.xlsx.writeBuffer());
+  assert.equal(legacy.trades[0].currency,undefined);
+  assert.equal(legacy.trades[1].currency,undefined);
+  const saved=await readWorkbook(await writeWorkbook(legacy.workbook,legacy.trades));
+  assert.equal(saved.trades[0].currency,undefined);
+  assert.equal(saved.trades[1].currency,'USD');
+});
+test('holdings never merge different fund currencies or unknown historical currency', () => {
+  const {calculateHoldings}=require('../src/pages/TradingJournal/holdings.ts');
+  const records=[{...trade('usd'),currency:'USD'}, {...trade('rmb'),currency:'RMB'},trade('unknown')];
+  const holdings=calculateHoldings(records);
+  assert.equal(holdings.length,3);
+  for(const holding of holdings) assert.equal(holding.totalCost,trade().amount);
+  assert.deepEqual(new Set(holdings.map(row=>row.currency)),new Set(['USD','RMB',undefined]));
+});
+
+test('holding cost summary shows all currencies and excludes closed, brainstorm and unmarked positions', () => {
+  const {calculateHoldings,summarizeHoldingCosts}=require('../src/pages/TradingJournal/holdings.ts');
+  const records=[
+    {...trade('usd-buy'),type:'美股',code:'AAPL',amount:100,shares:10,fee:99},
+    {...trade('usd-sell'),type:'美股',code:'AAPL',direction:'卖出',amount:40,shares:4,fee:99},
+    {...trade('hk'),type:'港股',code:'00700',amount:200,shares:20},
+    {...trade('rmb'),currency:'RMB',amount:300,shares:30},
+    {...trade('closed-buy'),type:'美股',code:'IBM',amount:100,shares:10},
+    {...trade('closed-sell'),type:'美股',code:'IBM',direction:'卖出',amount:130,shares:10},
+    {...trade('idea'),type:'港股',code:'09988',amount:1000000,shares:100,brainstorm:true},
+    {...trade('legacy'),code:'LEGACY',amount:500,shares:50},
+  ];
+  assert.deepEqual(summarizeHoldingCosts(calculateHoldings(records)),{HKD:200,USD:60,RMB:300});
+  assert.deepEqual(summarizeHoldingCosts([]),{HKD:0,USD:0,RMB:0});
 });

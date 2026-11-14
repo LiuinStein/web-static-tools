@@ -1,5 +1,5 @@
 import type ExcelJS from 'exceljs';
-import { Trade, validateTrade } from './model';
+import { Trade, validateTrade, tradeCurrency } from './model';
 
 const sheetName = '交易记录';
 const columns: Array<[keyof Trade, string]> = [
@@ -16,6 +16,7 @@ const columns: Array<[keyof Trade, string]> = [
   ['fee', '交易费用'],
   ['reason', '交易原因'],
   ['brainstorm', '头脑风暴'],
+  ['currency', '货币标记'],
 ];
 export async function readWorkbook(data?: ArrayBuffer): Promise<{ workbook: ExcelJS.Workbook; trades: Trade[] }> {
   const Excel = (await import('exceljs')).default;
@@ -28,7 +29,7 @@ export async function readWorkbook(data?: ArrayBuffer): Promise<{ workbook: Exce
     sheet.addRow(columns.map(([, label]) => label));
   }
   columns.forEach(([, label], index) => {
-    if (label === '头脑风暴' && !sheet!.getRow(1).getCell(index + 1).text) return;
+    if (['头脑风暴', '货币标记'].includes(label) && !sheet!.getRow(1).getCell(index + 1).text) return;
     if (sheet!.getRow(1).getCell(index + 1).text !== label) throw new Error(`Excel 表头不匹配：第 ${index + 1} 列应为“${label}”`);
   });
   const trades: Trade[] = [];
@@ -37,7 +38,9 @@ export async function readWorkbook(data?: ArrayBuffer): Promise<{ workbook: Exce
     const trade: any = {};
     columns.forEach(([key], col) => {
       const cell = row.getCell(col + 1);
-      if (key === 'brainstorm') {
+      if (key === 'currency') {
+        if (cell.text.trim()) trade.currency = cell.text.trim().toUpperCase();
+      } else if (key === 'brainstorm') {
         if (!['', '是', '否'].includes(cell.text)) throw new Error(`Excel 第 ${index} 行：头脑风暴只能填写“是”或留空`);
         if (cell.text === '是') trade.brainstorm = true;
       } else if (['amount', 'price', 'shares', 'fee'].includes(key)) {
@@ -62,7 +65,8 @@ export async function writeWorkbook(workbook: ExcelJS.Workbook, trades: Trade[])
   const sheet = workbook.getWorksheet(sheetName)!;
   trades.forEach(validateTrade);
   sheet.getCell('M1').value = '头脑风暴';
-  const value = (trade: Trade, key: keyof Trade) => key === 'brainstorm' ? (trade.brainstorm ? '是' : null) : trade[key] === undefined ? null : trade[key]!;
+  sheet.getCell('N1').value = '货币标记';
+  const value = (trade: Trade, key: keyof Trade) => key === 'currency' ? tradeCurrency(trade) || null : key === 'brainstorm' ? (trade.brainstorm ? '是' : null) : trade[key] === undefined ? null : trade[key]!;
   const byId = new Map(trades.map((trade) => [trade.id, trade]));
   if (byId.size !== trades.length) throw new Error('记录 ID 重复，未保存 Excel');
   // Update matching rows and remove deleted rows, retaining other worksheets.

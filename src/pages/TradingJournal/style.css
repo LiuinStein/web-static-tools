@@ -105,13 +105,18 @@
 }
 .journal-stats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  row-gap: 0;
   border-radius: var(--corner-1, 3px);
   background: var(--color-white, #fff);
   margin-bottom: 20px;
   padding: 20px 0;
 }
 .journal-stats > div {
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: span 3;
+  min-width: 0;
   padding: 0 24px;
   border-right: 1px solid var(--color-line1-1, #eee);
 }
@@ -129,6 +134,7 @@
   color: var(--color-text1-4, #333);
   margin-top: 9px;
   font-variant-numeric: tabular-nums;
+  align-self: first baseline;
 }
 .journal-stats small {
   font-size: 12px;
@@ -248,7 +254,7 @@
 .journal-table td {
   padding: 18px 16px;
   border-bottom: 1px solid var(--color-line1-1, #eee);
-  vertical-align: top;
+  vertical-align: middle;
 }
 .journal-table td:first-child,
 .journal-table th:first-child {
@@ -257,7 +263,7 @@
 .journal-table td strong {
   display: block;
   font-weight: 400;
-  margin-bottom: 7px;
+  margin-bottom: 0;
 }
 .j-trade-date {
   display: block;
@@ -302,7 +308,7 @@
 .j-direction {
   display: block;
   font-size: 12px;
-  margin-top: 10px;
+  margin-top: 7px;
   white-space: nowrap;
 }
 .j-direction.buy {
@@ -316,16 +322,27 @@
   white-space: nowrap;
 }
 .journal-reason {
-  max-width: 190px;
+  width: 180px;
+  max-width: 100%;
   font-size: 12px;
   color: var(--color-text1-3, #666);
   line-height: 1.7;
 }
 .journal-reason summary {
   cursor: pointer;
-  overflow-wrap: anywhere;
+  list-style-position: inside;
+  white-space: nowrap;
+}
+.j-reason-preview {
+  display: inline-block;
+  max-width: calc(100% - 18px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 .journal-reason p {
+  margin: 7px 0 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -734,3 +751,25 @@
 .j-trade-identity { white-space: nowrap; }
 .journal-delete-dialog .next-dialog-header { padding-top: 20px; padding-bottom: 20px; }
 .journal-delete-dialog .next-dialog-body { padding-top: 0; }
+
+.j-direction-arrow { display: inline-block; vertical-align: -0.125em; flex-shrink: 0; }
+
+.journal-stats strong { line-height: 34px; }
+.journal-stats .j-holding-costs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.j-holding-costs > span { display: inline-flex; align-items: baseline; gap: 3px; min-width: 0; max-width: 100%; }
+.j-holding-costs b { display: block; font-size: 18px; font-weight: 400; line-height: 34px; white-space: nowrap; overflow-x: auto; scrollbar-width: none; }
+.journal-stats .j-holding-costs small { margin: 0; font-size: 11px; line-height: 16px; }
+.j-holding-costs b::-webkit-scrollbar { display: none; }
+
+.j-stable-table { position: relative; min-width: 0; }
+.j-table-reference { position: absolute; inset: 0 0 auto; visibility: hidden; pointer-events: none; overflow: hidden; }
+.j-stable-table.is-empty .j-stable-table-content { display: flex; align-items: center; justify-content: center; }
+.j-stable-table .journal-empty { width: 100%; }
+.j-table-number { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.j-number-fraction { font-size: 0.65em; }
+.journal-holdings .journal-table th,
+.journal-holdings .journal-table td { vertical-align: middle; }
+@media (max-width: 600px) {
+  .journal-table-footer { display: block; }
+  .journal-table-footer > span { display: block; margin-top: 6px; }
+}

@@ -7,6 +7,10 @@ import {
   Trade,
   assetTypes,
   isStock,
+  Currency,
+  currencies,
+  stockCurrency,
+  tradeCurrency,
   TradeChange,
   calculateFee,
   updatePricingDraft,
@@ -24,9 +28,11 @@ import { OneDriveJournal, journalDrive } from './onedrive';
 import type { DriveConfig } from './onedrive';
 import { exportTrades } from './workbook';
 import { oneDriveConfig } from './config';
-import { calculateHoldings } from './holdings';
+import { calculateHoldings, summarizeHoldingCosts } from './holdings';
 import { SyncQueue, completeSync } from './sync-queue';
 import { findRecordedSecurity, resolveSecurity, IdentityField } from './security-lookup';
+import StableTableArea from './StableTableArea';
+import TableNumber from './TableNumber';
 import './style.css';
 
 interface Cache {
@@ -48,6 +54,7 @@ const emptyCache: Cache = { remote: [], pending: [], lastSync: '' };
 const blank = () => ({
   date: today(),
   type: '美股' as Trade['type'],
+  currency: 'USD' as Currency | '',
   code: '',
   name: '',
   stance: '看多' as Trade['stance'],
@@ -56,11 +63,19 @@ const blank = () => ({
   amountManual: false,
   price: '',
   shares: '',
-  fee: '0',
+  fee: '0.00',
   reason: '',
   brainstorm: false,
 });
 const number = (value: number) => value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+
+function DirectionArrow({ buy }: { buy: boolean }) {
+  return (
+    <svg className="j-direction-arrow" viewBox="0 0 16 16" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      <path d={buy ? 'M4 12L12 4M4 4h8v8' : 'M4 4l8 8M4 12h8V4'} />
+    </svg>
+  );
+}
 
 export default function TradingJournal() {
   const settings = useRef(readJSON(settingsKey, { config: oneDriveConfig }));
@@ -108,7 +123,8 @@ export default function TradingJournal() {
   const fee = automaticFee
     ? calculateFee(Number(draft.amount), Number(draft.price), Number(draft.shares))
     : Number(draft.fee);
-  const totalFees = all.reduce((sum, trade) => sum + (trade.brainstorm ? 0 : trade.fee), 0);
+  const holdingCosts = summarizeHoldingCosts(holdings);
+  const unmarkedHoldings = holdings.filter(holding => !holding.currency).length;
   let syncLabel = '本机模式';
   const pendingCount = new Set([
     ...cache.pending.map((trade) => trade.id),
@@ -160,7 +176,7 @@ export default function TradingJournal() {
   function updateIdentity(type: Trade['type'], key: IdentityField, value: string) {
     cancelIdentity();
     if (key === 'code') value = normalizeCodeInput(type, value);
-    const base = updatePricingDraft(draft, 'type', type);
+    const base = { ...updatePricingDraft(draft, 'type', type), currency: stockCurrency(type) || (isStock(draft.type) ? 'RMB' as const : draft.currency) };
     const request = identityRequest.current;
     const counterpart = key === 'code' ? 'name' : 'code';
     // Once matched, allow editing the filled field without overwriting the original input.
@@ -240,10 +256,12 @@ export default function TradingJournal() {
   async function save(event: React.FormEvent) {
     event.preventDefault();
     await run(async () => {
+      if (!isStock(draft.type) && !draft.currency) throw new Error('请选择货币标记');
       const trade: Trade = {
         id: editing ? editing.id : crypto.randomUUID(),
         date: draft.date,
         type: draft.type,
+        currency: stockCurrency(draft.type) || draft.currency || undefined,
         code: completeStockCode(draft.type, draft.code.trim().toUpperCase()),
         name: draft.name.trim(),
         stance: draft.stance,
@@ -303,6 +321,7 @@ export default function TradingJournal() {
     setDraft({
       date: trade.date,
       type: trade.type,
+      currency: tradeCurrency(trade) || '',
       code: trade.code,
       name: trade.name,
       stance: trade.stance,
@@ -311,7 +330,7 @@ export default function TradingJournal() {
       amountManual: true,
       price: trade.price === undefined ? '' : String(trade.price),
       shares: trade.shares === undefined ? '' : String(trade.shares),
-      fee: String(trade.fee),
+      fee: trade.fee.toFixed(2),
       reason: trade.reason,
       brainstorm: !!trade.brainstorm,
     });
@@ -338,7 +357,7 @@ export default function TradingJournal() {
       ? updatePricingDraft(current, key, value) : { ...current, [key]: value });
   const amountField = (
     <label className="j-field">
-      交易总价 <em>*</em>
+      交易总价（{draft.currency || '请选择币种'}） <em>*</em>
       <input
         aria-label="交易总价"
         onFocus={(e) => e.currentTarget.select()}
@@ -351,6 +370,135 @@ export default function TradingJournal() {
         onChange={(e) => field('amount', e.target.value)}
       />
     </label>
+  );
+  const tradeEmpty = (
+    <div className="journal-empty">
+      <div>
+        <svg width="38" height="38" viewBox="0 0 38 38" fill="none" aria-hidden="true">
+          <path
+            d="M6 29V9m0 20h26M11 23l7-8 6 4 8-11"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </div>
+      <h3>{all.length ? '没有找到匹配的记录' : '从第一笔交易开始'}</h3>
+      <p>{all.length ? '试试其他关键词或交易类型。' : '记下买卖，也记下为什么。未来的你会感谢此刻的思考。'}</p>
+    </div>
+  );
+  const renderTrades = (rows: Trade[]) => (
+    <div className="journal-table-wrap">
+      <table className="journal-table">
+        <thead>
+          <tr>
+            <th>日期 / 标的</th>
+            <th>判断 / 方向</th>
+            <th>金额 / 单价</th>
+            <th>份额 / 费用</th>
+            <th>交易原因</th>
+            <th className="journal-actions-column">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((trade) => (
+            <tr key={trade.id}>
+              <td>
+                <span className="j-trade-date">{trade.date}</span>
+                <strong className="j-trade-identity">{trade.type} · {trade.code} · {trade.name}</strong>
+              </td>
+              <td>
+                <span className={`j-badge stance-${stanceStyles[trade.stance]}`}>{trade.stance}</span>
+                <span className={`j-direction ${trade.direction === '买入' ? 'buy' : 'sell'}`}>
+                  <DirectionArrow buy={trade.direction === '买入'} /> {trade.direction}
+                </span>
+              </td>
+              <td>
+                <strong className="j-numeric">{tradeCurrency(trade) || '未标记'} <TableNumber value={trade.amount} /></strong>
+                <span className="j-subtle">单价 {trade.price === undefined ? '—' : <>{tradeCurrency(trade) || '未标记'} <TableNumber value={trade.price} /></>}</span>
+              </td>
+              <td>
+                <span className="j-numeric"><TableNumber value={trade.shares} /></span>
+                <span className="j-subtle">费用 {tradeCurrency(trade) || '未标记'} <TableNumber value={trade.fee} /></span>
+              </td>
+              <td>
+                <details className="journal-reason">
+                  <summary><span className="j-reason-preview">{trade.reason ? trade.reason.split('\n')[0] : '未填写原因'}</span></summary>
+                  <p>{trade.reason}</p>
+                </details>
+                {trade.brainstorm && <span className="j-local-label">头脑风暴 · 非实际成交</span>}
+                {(cache.pending.some((item) => item.id === trade.id) ||
+                  (cache.changes || []).some((change) => change.id === trade.id)) && (
+                  <span className="j-local-label">{drive ? '待同步' : '本机记录'}</span>
+                )}
+              </td>
+              <td className="journal-actions-column">
+                <div className="journal-row-actions">
+                  <Button
+                    text
+                    type="primary"
+                    disabled={busy}
+                    aria-label={`编辑 ${trade.name} ${trade.date}`}
+                    onClick={() => startEdit(trade)}
+                  >
+                    编辑
+                  </Button>
+                  <Button
+                    text
+                    warning
+                    disabled={busy}
+                    aria-label={`删除 ${trade.name} ${trade.date}`}
+                    onClick={() => setDeleteTarget(trade)}
+                  >
+                    删除
+                  </Button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+  const holdingsEmpty = (
+    <div className="journal-empty">
+      <h3>{holdings.length ? '没有找到匹配的持仓' : '暂无持仓'}</h3>
+      <p>{holdings.length ? '试试其他关键词或持仓类型。' : '新增交易后自动汇总，已清仓标的不显示。'}</p>
+    </div>
+  );
+  const renderHoldings = (rows: typeof holdings) => (
+    <div className="journal-table-wrap">
+      <table className="journal-table" aria-label="当前持仓">
+        <thead>
+          <tr>
+            <th scope="col">代码</th>
+            <th scope="col">名称</th>
+            <th scope="col">类型</th>
+            <th scope="col">总成本</th>
+            <th scope="col">份额</th>
+            <th scope="col">摊薄均价</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((holding) => (
+            <tr key={JSON.stringify([holding.type, holding.code, holding.currency])}>
+              <td className="j-numeric">{holding.code}</td>
+              <td><strong>{holding.name}</strong></td>
+              <td><span className="j-asset-tag">{holding.type}</span></td>
+              <td className="j-numeric"><strong>{holding.currency || '未标记'} <TableNumber value={holding.totalCost} /></strong></td>
+              <td className="j-numeric">
+                <TableNumber value={holding.shares} minimumFractionDigits={0} maximumFractionDigits={8} />
+                {!!holding.missingShares && <span className="j-subtle">{holding.missingShares} 笔交易未填份额</span>}
+              </td>
+              <td className="j-numeric">
+                {holding.averagePrice === undefined ? '—' : <>{holding.currency || '未标记'} <TableNumber value={holding.averagePrice} maximumFractionDigits={8} /></>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
   return (
     <div className="journal">
@@ -484,12 +632,17 @@ export default function TradingJournal() {
           </strong>
           <p>股票与基金，统一记录</p>
         </div>
-        <div>
-          <span>累计交易费用</span>
-          <strong>{number(totalFees)}</strong>
-          <p>按记录的原始币种金额汇总</p>
+        <div className="journal-cost-stat">
+          <span>累计持仓成本</span>
+          <strong className="j-holding-costs">{currencies.map(currency => (
+            <span key={currency}>
+              <small>{currency}</small>
+              <b title={`${currency} ${number(holdingCosts[currency])}`}>{number(holdingCosts[currency])}</b>
+            </span>
+          ))}</strong>
+          <p>{unmarkedHoldings ? `${unmarkedHoldings} 个持仓未标记币种，未计入合计` : '按当前持仓分币种汇总，不进行换算'}</p>
         </div>
-        <div>
+        <div className="journal-sync-stat">
           <span>同步状态</span>
           <strong className="journal-status-text">{syncLabel}</strong>
           <p>
@@ -528,95 +681,9 @@ export default function TradingJournal() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          {!filtered.length ? (
-            <div className="journal-empty">
-              <div>
-                <svg width="38" height="38" viewBox="0 0 38 38" fill="none" aria-hidden="true">
-                  <path
-                    d="M6 29V9m0 20h26M11 23l7-8 6 4 8-11"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-              <h3>{all.length ? '没有找到匹配的记录' : '从第一笔交易开始'}</h3>
-              <p>{all.length ? '试试其他关键词或交易类型。' : '记下买卖，也记下为什么。未来的你会感谢此刻的思考。'}</p>
-            </div>
-          ) : (
-            <div className="journal-table-wrap">
-              <table className="journal-table">
-                <thead>
-                  <tr>
-                    <th>日期 / 标的</th>
-                    <th>判断 / 方向</th>
-                    <th>金额 / 单价</th>
-                    <th>份额 / 费用</th>
-                    <th>交易原因</th>
-                    <th className="journal-actions-column">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((trade) => (
-                    <tr key={trade.id}>
-                      <td>
-                        <span className="j-trade-date">{trade.date}</span>
-                        <strong className="j-trade-identity">{trade.code} · {trade.name}</strong>
-                        <span className="j-subtle">{trade.type}{trade.brainstorm ? ' · 头脑风暴' : ''}</span>
-                      </td>
-                      <td>
-                        <span className={`j-badge stance-${stanceStyles[trade.stance]}`}>{trade.stance}</span>
-                        <span className={`j-direction ${trade.direction === '买入' ? 'buy' : 'sell'}`}>
-                          {trade.direction === '买入' ? '↗' : '↘'} {trade.direction}
-                        </span>
-                      </td>
-                      <td>
-                        <strong className="j-numeric">{number(trade.amount)}</strong>
-                        <span className="j-subtle">单价 {trade.price === undefined ? '—' : number(trade.price)}</span>
-                      </td>
-                      <td>
-                        <span className="j-numeric">{trade.shares === undefined ? '—' : number(trade.shares)}</span>
-                        <span className="j-subtle">费用 {number(trade.fee)}</span>
-                      </td>
-                      <td>
-                        <details className="journal-reason">
-                          <summary>{trade.reason ? trade.reason.split('\n')[0].slice(0, 36) : '未填写原因'}</summary>
-                          <p>{trade.reason}</p>
-                        </details>
-                        {(cache.pending.some((item) => item.id === trade.id) ||
-                          (cache.changes || []).some((change) => change.id === trade.id)) && (
-                          <span className="j-local-label">{drive ? '待同步' : '本机记录'}</span>
-                        )}
-                      </td>
-                      <td className="journal-actions-column">
-                        <div className="journal-row-actions">
-                          <Button
-                            text
-                            type="primary"
-                            disabled={busy}
-                            aria-label={`编辑 ${trade.name} ${trade.date}`}
-                            onClick={() => startEdit(trade)}
-                          >
-                            编辑
-                          </Button>
-                          <Button
-                            text
-                            warning
-                            disabled={busy}
-                            aria-label={`删除 ${trade.name} ${trade.date}`}
-                            onClick={() => setDeleteTarget(trade)}
-                          >
-                            删除
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <StableTableArea isUnfiltered={filter === '全部' && !search} isEmpty={!filtered.length} baseline={renderTrades(all)} empty={tradeEmpty}>
+            {filtered.length ? renderTrades(filtered) : tradeEmpty}
+          </StableTableArea>
           <div className="journal-table-footer">
             共 {filtered.length} 笔记录 <span>点击交易原因，展开完整思考</span>
           </div>
@@ -648,50 +715,15 @@ export default function TradingJournal() {
               onChange={(e) => setHoldingsSearch(e.target.value)}
             />
           </div>
-          {!filteredHoldings.length ? (
-            <div className="journal-empty">
-              <h3>{holdings.length ? '没有找到匹配的持仓' : '暂无持仓'}</h3>
-              <p>{holdings.length ? '试试其他关键词或持仓类型。' : '新增交易后自动汇总，已清仓标的不显示。'}</p>
-            </div>
-          ) : (
-          <div className="journal-table-wrap">
-            <table className="journal-table" aria-label="当前持仓">
-              <thead>
-                <tr>
-                  <th scope="col">代码</th>
-                  <th scope="col">名称</th>
-                  <th scope="col">类型</th>
-                  <th scope="col">总成本</th>
-                  <th scope="col">份额</th>
-                  <th scope="col">摊薄均价</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredHoldings.map((holding) => (
-                  <tr key={JSON.stringify([holding.type, holding.code])}>
-                    <td className="j-numeric">{holding.code}</td>
-                    <td><strong>{holding.name}</strong></td>
-                    <td><span className="j-asset-tag">{holding.type}</span></td>
-                    <td className="j-numeric"><strong>{number(holding.totalCost)}</strong></td>
-                    <td className="j-numeric">
-                      {holding.shares === undefined ? '—' : holding.shares.toLocaleString('zh-CN', { maximumFractionDigits: 8 })}
-                      {!!holding.missingShares && <span className="j-subtle">{holding.missingShares} 笔交易未填份额</span>}
-                    </td>
-                    <td className="j-numeric">
-                      {holding.averagePrice === undefined ? '—' : holding.averagePrice.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          )}
+          <StableTableArea isUnfiltered={holdingsFilter === '全部' && !holdingsSearch} isEmpty={!filteredHoldings.length} baseline={renderHoldings(holdings)} empty={holdingsEmpty}>
+            {filteredHoldings.length ? renderHoldings(filteredHoldings) : holdingsEmpty}
+          </StableTableArea>
           <div className="journal-table-footer">
             共 {filteredHoldings.length} 个持仓 <span>实时计算，不写入 Excel</span>
           </div>
           <details className="journal-holdings-details">
             <summary>持仓计算说明</summary>
-            <p>按类型和代码汇总全部交易，不受交易列表搜索和筛选影响。买入增加成本和份额，卖出扣减卖出总价和份额；摊薄均价＝总成本÷份额，费用不重复计入。缺少份额时显示“—”，本机待同步变更也会计入。</p>
+            <p>按类型、代码和货币分别汇总交易，不受交易列表搜索和筛选影响。买入增加成本和份额，卖出扣减卖出总价和份额；摊薄均价＝总成本÷份额，费用不重复计入。缺少份额时显示“—”，本机待同步变更也会计入。</p>
           </details>
         </section>
         </div>
@@ -807,15 +839,25 @@ export default function TradingJournal() {
                     key={direction}
                     onClick={() => field('direction', direction)}
                   >
-                    {direction === '买入' ? '↗' : '↘'} {direction}
+                    <DirectionArrow buy={direction === '买入'} /> {direction}
                   </button>
                 ))}
               </div>
             </div>
+            {!isStock(draft.type) && (
+              <div className="j-field">
+                <span>货币标记 <em>*</em></span>
+                <div className="j-segment" role="group" aria-label="货币标记">
+                  {currencies.map(currency => (
+                    <button type="button" key={currency} aria-pressed={draft.currency === currency} className={draft.currency === currency ? 'selected' : ''} onClick={() => setDraft({ ...draft, currency })}>{currency}</button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="j-form-grid">
               {!isStock(draft.type) && amountField}
               <label className="j-field">
-                单价 {isStock(draft.type) ? <em>*</em> : <span className="j-optional">选填</span>}
+                单价（{draft.currency || '请选择币种'}） {isStock(draft.type) ? <em>*</em> : <span className="j-optional">选填</span>}
                 <input
                   aria-label="单价"
                   onFocus={(e) => e.currentTarget.select()}
@@ -853,8 +895,11 @@ export default function TradingJournal() {
                   inputMode="decimal"
                   required
                   readOnly={automaticFee}
-                  value={automaticFee ? fee : draft.fee}
+                  value={automaticFee ? fee.toFixed(2) : draft.fee}
                   onChange={(e) => field('fee', e.target.value)}
+                  onBlur={() => {
+                    if (!automaticFee && draft.fee.trim() && Number.isFinite(fee)) field('fee', fee.toFixed(2));
+                  }}
                 />
               </label>
             </div>
