@@ -2146,3 +2146,104 @@ test('batch note edits preserve review state and pending inputs without structur
   assert.equal(staged.book.value(product.sheet, 'E' + product.row), 1250);
   assert.equal(staged.book.value(product.sheet, 'N' + product.row), '金额也保留');
 });
+
+test('return timing hints use strict percentage-point thresholds, both directions and only finite numeric rates', () => {
+  const { returnTimingHint, parseTimingThreshold, validTimingThreshold } = require('../src/pages/MonthlyReview/return-timing.ts');
+  const drag = '追涨杀跌？操作时机正在拖累实际收益', good = '产品表现一般，但操作时机较好';
+  assert.equal(returnTimingHint(0.03, 0.04, 1), undefined);
+  assert.equal(returnTimingHint(0.04, 0.03, 1), undefined);
+  assert.equal(returnTimingHint(0.03, 0.04001), drag);
+  assert.equal(returnTimingHint(0.04001, 0.03), good);
+  assert.equal(returnTimingHint(0.03, 0.045, 2), undefined);
+  assert.equal(returnTimingHint(0.03, 0.045, 1.49), drag);
+  assert.equal(returnTimingHint(-0.05, -0.03), drag);
+  assert.equal(returnTimingHint(-0.03, -0.05), good);
+  assert.equal(returnTimingHint(0, 0.02), drag);
+  assert.equal(returnTimingHint(0, 0, 0), undefined);
+  assert.equal(returnTimingHint(0.01, 0, 0), good);
+  for (const value of [null, undefined, '0.03', 'N/A', '#NUM!', NaN, Infinity, true]) {
+    assert.equal(returnTimingHint(value, 0.1), undefined);
+    assert.equal(returnTimingHint(0.1, value), undefined);
+  }
+  for (const text of [null, 'bad', '-1', 'null', '"2"', '{}', '[]']) assert.equal(parseTimingThreshold(text), 1);
+  assert.equal(parseTimingThreshold('2.5'), 2.5); assert.equal(parseTimingThreshold('0'), 0);
+  assert.equal(validTimingThreshold(Infinity), false); assert.equal(validTimingThreshold(-1), false);
+});
+
+test('benchmark dialog validates the independent timing threshold and cancel does not save', () => {
+  const React = require('react'), original = { useState: React.useState, useEffect: React.useEffect };
+  const extension = require.extensions['.tsx'];
+  require.extensions['.tsx'] = (m, f) => m._compile(ts.transpileModule(fs.readFileSync(f, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React, esModuleInterop: true } }).outputText, f);
+  const { parseBenchmarks } = require('../src/pages/MonthlyReview/benchmarks.ts');
+  let states = [], cursor = 0, initialized = false, effects = [], saves = [], closed = 0;
+  React.useState = initial => { const index = cursor++; if (!(index in states)) states[index] = typeof initial === 'function' ? initial() : initial; return [states[index], next => { states[index] = typeof next === 'function' ? next(states[index]) : next; }]; };
+  React.useEffect = fn => { if (!initialized) effects.push(fn); };
+  const nodes = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(nodes) : [node, ...nodes(node.props?.children)];
+  try {
+    const Component = require('../src/pages/MonthlyReview/BenchmarkDialog.tsx').default;
+    const config = parseBenchmarks(null), before = JSON.stringify(config);
+    const props = { visible: true, categories: ['Stock'], categoryNames: {}, config, timingThreshold: 1, onClose: () => { closed++; }, onSave: (next, threshold) => { saves.push({ next, threshold }); } };
+    const render = () => { cursor = 0; return Component(props); };
+    render(); initialized = true; effects.forEach(fn => fn());
+    const field = () => nodes(render()).find(node => node.props?.['aria-label'] === '时机提醒差值阈值（百分点）');
+    const set = value => field().props.onChange({ target: { value } });
+    const submit = () => nodes(render()).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+    assert.equal(field().props.value, '1');
+    for (const value of ['', '-1', 'Infinity', 'abc']) { set(value); submit(); assert.equal(saves.length, 0); assert.ok(nodes(render()).some(node => node.props?.role === 'alert')); }
+    set('2.5'); nodes(render()).find(node => node.type === 'button' && node.props.children === '取消').props.onClick();
+    assert.equal(closed, 1); assert.equal(saves.length, 0);
+    submit(); assert.equal(saves[0].threshold, 2.5); assert.deepEqual(saves[0].next, config);
+    set('0'); submit(); assert.equal(saves[1].threshold, 0);
+    assert.equal(JSON.stringify(config), before);
+  } finally { Object.assign(React, original); if (extension) require.extensions['.tsx'] = extension; else delete require.extensions['.tsx']; }
+});
+
+test('negative return risk colors require at least one negative rate and share the strict configurable hint threshold', () => {
+  const { returnTimingRisk } = require('../src/pages/MonthlyReview/return-timing.ts');
+  assert.equal(returnTimingRisk(-0.04, -0.01), 'drag');
+  assert.equal(returnTimingRisk(-0.04, 0), 'drag');
+  assert.equal(returnTimingRisk(0.02, -0.02), 'better');
+  assert.equal(returnTimingRisk(-0.02, -0.04), 'better');
+  assert.equal(returnTimingRisk(0, -0.02), 'better');
+  assert.equal(returnTimingRisk(0.02, 0.04), undefined);
+  assert.equal(returnTimingRisk(0.04, 0.02), undefined);
+  assert.equal(returnTimingRisk(-0.03, -0.02), undefined);
+  assert.equal(returnTimingRisk(-0.02, -0.03), undefined);
+  assert.equal(returnTimingRisk(-0.04, -0.01, 3), undefined);
+  assert.equal(returnTimingRisk(-0.04, -0.01, 2.99), 'drag');
+  for (const value of [null, undefined, NaN, Infinity, -Infinity, '-0.01', '#NUM!']) {
+    assert.equal(returnTimingRisk(-0.05, value), undefined);
+    assert.equal(returnTimingRisk(value, -0.05), undefined);
+  }
+});
+
+test('asset negative timing risk marks exactly the requested columns and excludes notes and invalid batch rows', async () => {
+  const extension = require.extensions['.tsx'];
+  require.extensions['.tsx'] = (m, f) => m._compile(ts.transpileModule(fs.readFileSync(f, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React, esModuleInterop: true } }).outputText, f);
+  try {
+    const React = require('react'), { renderToStaticMarkup } = require('react-dom/server');
+    const AssetsTable = require('../src/pages/MonthlyReview/AssetsTable.tsx').default;
+    const { parseBenchmarks } = require('../src/pages/MonthlyReview/benchmarks.ts');
+    const book = await fixture();
+    const props = { book, products: book.products(), batch: null, busy: false, benchmarks: parseBenchmarks(null), reviewState: { changed: ['Assets:3'], reviewed: [] }, categoryNames: {}, money: n => typeof n === 'number' ? n.toFixed(2) : '—', pct: n => typeof n === 'number' ? (n * 100).toFixed(2) + '%' : '—', onBatch: () => {}, onError: () => {}, onEdit: () => {}, onTransactions: () => {}, onDelete: () => {} };
+    const render = patch => renderToStaticMarkup(React.createElement(AssetsTable, { ...props, ...patch }));
+    const cells = html => [...html.match(/<tbody><tr[^>]*>(.*?)<\/tr>/s)[1].matchAll(/<td\b([^>]*)>/g)].map(match => match[1]);
+    book.set('Assets', 'K3', -0.04); book.set('Assets', 'L3', -0.01);
+    let row = cells(render({}));
+    assert.deepEqual(row.map((attrs, index) => attrs.includes('mr-timing-risk-red') ? index : null).filter(index => index !== null), [3, 4, 5, 6]);
+    assert.ok(row[5].includes('mr-performance-below'), 'benchmark classes and explanations remain available');
+    book.set('Assets', 'K3', 0.03); book.set('Assets', 'L3', -0.01);
+    row = cells(render({}));
+    assert.ok(row[5].includes('mr-timing-risk-yellow'));
+    assert.ok(row[6].includes('mr-timing-risk-red'));
+    assert.ok(!row[3].includes('mr-timing-risk-') && !row[4].includes('mr-timing-risk-'));
+    assert.ok(row[5].includes('mr-performance-middle'), 'risk yellow can override a green benchmark');
+    assert.ok(!render({ notes: true }).includes('mr-timing-risk-'));
+    assert.ok(!cells(render({ timingThreshold: 4 })).some(attrs => attrs.includes('mr-timing-risk-')));
+    book.set('Assets', 'K3', -0.04); book.set('Assets', 'L3', -0.01);
+    const batch = new MonthlyBatch(book).stageBalances([['Assets:3', 'bad']]);
+    const invalidCells = cells(render({ batch, book: batch.book, products: batch.book.products() }));
+    assert.ok(!invalidCells.some(attrs => attrs.includes('mr-timing-risk-')));
+    assert.ok(!render({}).match(/<tfoot>.*mr-timing-risk-/s));
+  } finally { if (extension) require.extensions['.tsx'] = extension; else delete require.extensions['.tsx']; }
+});

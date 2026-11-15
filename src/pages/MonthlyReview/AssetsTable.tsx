@@ -1,4 +1,6 @@
 import NoteCell from './NoteCell';
+import HoverHint from '@/components/HoverHint';
+import { returnTimingHint, returnTimingRisk, DEFAULT_TIMING_THRESHOLD } from './return-timing';
 import { Benchmarks, benchmarkRating } from './benchmarks';
 import type { ReviewState } from './storage';
 import AmountInput from './AmountInput';
@@ -22,13 +24,14 @@ interface Props {
   onExitForward?: () => void;
   onSaveNote?: (p: Product, note: string) => Promise<void>;
   benchmarks?: Benchmarks;
+  timingThreshold?: number;
   reviewState?: ReviewState;
   notes?: boolean; book: MonthlyWorkbook; products: Product[]; batch: MonthlyBatch | null; busy: boolean;
   categoryNames: Record<string, string>; money: (n: Scalar) => string; pct: (n: Scalar) => string;
   onBatch: (batch: MonthlyBatch) => void; onError: (message: string) => void;
   onEdit: (p: Product) => void; onTransactions: (p: Product) => void; onDelete: (p: Product) => void;
 }
-export default function AssetsTable({ onExitForward, onSaveNote, benchmarks, reviewState, notes = false, book, products, batch, busy, categoryNames, money, pct, onBatch, onError, onEdit, onTransactions, onDelete }: Props) {
+export default function AssetsTable({ onExitForward, onSaveNote, benchmarks, timingThreshold = DEFAULT_TIMING_THRESHOLD, reviewState, notes = false, book, products, batch, busy, categoryNames, money, pct, onBatch, onError, onEdit, onTransactions, onDelete }: Props) {
   const table = useRef<HTMLDivElement>(null);
   const reviewOnBlur = useRef<string | null>(null);
   const allProducts = useMemo(() => book.products(), [book]);
@@ -49,6 +52,12 @@ export default function AssetsTable({ onExitForward, onSaveNote, benchmarks, rev
   const currentProfits = useMemo(() => new Map(notes ? [] : products.map(p => [productKey(p), invalid.has(productKey(p)) ? null : currentProductProfit(book, p)])), [book, products, notes, batch?.invalid.join('|')]);
   const currentProfit = (p: Product) => currentProfits.get(productKey(p)) ?? null;
   const value = (p: Product, column: string) => invalid.has(productKey(p)) || (isBalanceOnly(p.category) && ['K', 'L', 'M'].includes(column)) ? null : book.value(p.sheet, `${column}${p.row}`);
+  function returnCell(p: Product, metric: 'xirr' | 'twr', risk: ReturnType<typeof returnTimingRisk>) {
+    const rate = value(p, metric === 'xirr' ? 'K' : 'L'), rating = benchmarkRating(benchmarks, p.category, metric, rate);
+    const hint = notes ? undefined : returnTimingHint(value(p, 'K'), value(p, 'L'), timingThreshold);
+    const riskClass = risk === 'drag' || (risk === 'better' && metric === 'twr') ? 'mr-timing-risk-red' : risk === 'better' ? 'mr-timing-risk-yellow' : '';
+    return <HoverHint content={hint ? [hint, rating.title].filter(Boolean).join('\n') : undefined}><td {...rating} className={[rating.className, riskClass].filter(Boolean).join(' ') || undefined} title={rating.title || (metric === 'xirr' ? displayValue(rate) : undefined)}>{pct(rate)}</td></HoverHint>;
+  }
   function toggleSort(field: ProductSortField) {
     const next = nextProductSort(sort, field); setSort(next);
     if (batch) setBatchOrder(sortedProducts(allProducts, book, next, invalid).map(productKey));
@@ -88,13 +97,14 @@ export default function AssetsTable({ onExitForward, onSaveNote, benchmarks, rev
     {heading('较上次收益', 'gain')}{heading('XIRR', 'xirr')}{heading('年化 TWR', 'twr')}{!notes && <th>操作</th>}<th>净投入</th>{heading('本期余额', 'balance')}{notes && <><th>备注</th><th>操作</th></>}
   </tr></thead><tbody>{displayed.map(p => {
     const key = productKey(p), bad = invalidBalances.has(key), badFlow = invalidFlows.has(key);
+    const risk = notes ? undefined : returnTimingRisk(value(p, 'K'), value(p, 'L'), timingThreshold);
     return <tr key={key} className={changed.has(key) ? 'mr-balance-changed' : undefined}>
       {batch && <td><input type="checkbox" aria-label={`${p.name} 已核对`} checked={batch.reviewed.has(key)} disabled={busy || invalid.has(key)} onChange={e => onBatch(batch.check([key], e.target.checked))} /></td>}
       <td><strong className="mr-product-name"><span>{displayValue(p.name)}</span>{(batch || reviewState) && <span className={`mr-change-tag ${(batch ? batch.reviewed.has(key) : reviewState?.reviewed.includes(key)) ? 'reviewed' : ''}`}>{(batch ? batch.reviewed.has(key) : reviewState?.reviewed.includes(key)) ? '已核对' : changed.has(key) ? '已修改' : ''}</span>}</strong><small>{displayValue(p.account)} · {displayValue(categoryNames[p.category] || p.category)}</small></td>
       <td>{displayValue(p.member)}<small>{displayValue(p.currency)}</small></td>
       <td>{currencyMoney(p, p.previous)}</td>
-      {!notes && <td className={gainClass(currentProfit(p))}>{currencyMoney(p, currentProfit(p))}</td>}
-      <td className={gainClass(value(p, 'J'))}>{money(value(p, 'J'))}</td><td {...benchmarkRating(benchmarks, p.category, 'xirr', value(p, 'K'))} title={benchmarkRating(benchmarks, p.category, 'xirr', value(p, 'K')).title || displayValue(value(p, 'K'))}>{pct(value(p, 'K'))}</td><td {...benchmarkRating(benchmarks, p.category, 'twr', value(p, 'L'))}>{pct(value(p, 'L'))}</td>
+      {!notes && <td className={[gainClass(currentProfit(p)), risk === 'drag' ? 'mr-timing-risk-red' : ''].filter(Boolean).join(' ') || undefined}>{currencyMoney(p, currentProfit(p))}</td>}
+      <td className={[gainClass(value(p, 'J')), risk === 'drag' ? 'mr-timing-risk-red' : ''].filter(Boolean).join(' ') || undefined}>{money(value(p, 'J'))}</td>{returnCell(p, 'xirr', risk)}{returnCell(p, 'twr', risk)}
       {!notes && <td><div className="mr-row-actions"><button disabled={busy} onClick={() => onEdit(p)}>编辑</button><button disabled={busy || isBalanceOnly(p.category)} title={isBalanceOnly(p.category) ? '活期账户和定期存款不记录买卖流水，也不计算 XIRR / TWR' : undefined} onClick={() => onTransactions(p)}>买卖记录</button><button className="danger" disabled={busy} onClick={() => onDelete(p)}>删除</button></div></td>}
       <td>{batch ? <><AmountInput onFocus={selectAmount} onClick={selectAmount} data-flow-input={key} tabIndex={-1} aria-label={`${p.name} 净投入`} aria-invalid={badFlow} aria-describedby={badFlow ? `flow-error-${key}` : undefined} type="text" inputMode="decimal" autoComplete="off" readOnly={isCashAccount(p.category)} title={isCashAccount(p.category) ? '活期账户净投入 = 本期余额 − 上期余额，自动计算' : '投入为正，回款为负；保存买卖记录后会按流水重新汇总'} value={(batch.flows.get(key) ?? (typeof p.flow === 'number' ? String(p.flow) : ''))} placeholder={typeof p.flow === 'string' ? displayValue(p.flow) : '0'} disabled={busy} onChange={e => { if (!isCashAccount(p.category)) onBatch(batch.stageFlows([[key, rawAmount(e.target.value)]])); }} onBlur={() => finishInput(key)} onKeyDown={e => move(e, key)} />{badFlow && <small id={`flow-error-${key}`} className="mr-input-error">请输入有效的净投入金额</small>}</> : money(p.flow)}</td>
       <td>{batch ? <><span className="mr-currency-prefix">{currencyCode(p.currency)}</span><AmountInput onFocus={selectAmount} onClick={selectAmount} data-balance-input={key} aria-label={`${p.name} 本期余额`} aria-invalid={bad} aria-describedby={bad ? `balance-error-${key}` : undefined} type="text" inputMode="decimal" autoComplete="off" value={(batch.inputs.get(key) ?? String(p.balance))} disabled={busy} onChange={e => onBatch(batch.stageBalances([[key, rawAmount(e.target.value)]]))} onBlur={() => finishInput(key)} onKeyDown={e => move(e, key)} onPaste={e => {

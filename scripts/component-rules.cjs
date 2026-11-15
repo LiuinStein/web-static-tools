@@ -1,5 +1,6 @@
 // Add shared component contracts here. Owners are implementation files, never page exemptions.
 module.exports = [
+  { id: 'hover-hint', component: 'HoverHint', entry: 'src/components/HoverHint', owners: ['src/components/HoverHint/index.tsx'], styles: ['src/components/HoverHint/style.css'], classes: ['tool-hover-hint'], managedProps: ['style', 'className'], review: '验证 hover/focus、原生触发元素和气泡视口边界。' },
   { id: 'confirm-popover', component: 'ConfirmPopover', entry: 'src/components/ConfirmPopover', owners: ['src/components/ConfirmPopover/index.tsx'], styles: ['src/components/ConfirmPopover/style.css'], classes: ['tool-confirm-popover'], managedProps: ['style', 'className'], review: '验证确认前不执行、外部点击/Esc 关闭、浮层定位与键盘操作。' },
   { id: 'expandable-text', component: 'ExpandableText', entry: 'src/components/ExpandableText', owners: ['src/components/ExpandableText/index.tsx'], styles: ['src/components/ExpandableText/style.css'], classes: ['expandable-text'], managedProps: ['style', 'className'], review: '验证单行省略、完整换行和原生展开收起键盘行为。' },
   { id: 'sortable-header', component: 'SortableTableHeader', entry: 'src/components/ToolPage/SortableTableHeader', owners: ['src/components/ToolPage/SortableTableHeader.tsx'], styles: ['src/components/ToolPage/style.css'], classes: ['tool-sort-header'], managedProps: ['style', 'className'], review: '排序字段、空值置底和键盘激活需交互验证。' },

@@ -53,7 +53,7 @@
 .mr-assets-table input[aria-invalid=true] { border-color: #ce5749; background: #fff6f4; }
 .mr-assets-table .mr-input-error { color: #b54536; }
 .mr-assets-table input[type=checkbox], .mr-batch-help input[type=checkbox] { width: 15px; height: 15px; padding: 0; margin: 0; accent-color: #3577eb; cursor: pointer; }
-.mr-assets-table tr.mr-balance-changed td:not(:where(.mr-performance-high, .mr-performance-middle, .mr-performance-low, .mr-performance-below)) { background: #f3f8ff; }
+.mr-assets-table tr.mr-balance-changed td:not(:where(.mr-performance-high, .mr-performance-middle, .mr-performance-low, .mr-performance-below, .mr-timing-risk-red, .mr-timing-risk-yellow)) { background: #f3f8ff; }
 .monthly-review .mr-assets-table td .mr-product-name { display: flex; align-items: center; gap: 8px; }
 .mr-change-tag { display: inline-block; flex-shrink: 0; min-width: 3em; color: #3577eb; font-size: 10px; }
 .mr-change-tag.reviewed { color: #248774; }
@@ -114,6 +114,8 @@
 .mr-performance-middle { background: #f0f8e7; color: #568c28; }
 .mr-performance-low { background: #fff7d6; color: #986b00; }
 .mr-performance-below { background: #ffeded; color: #c53737; }
+.mr-assets-table td.mr-timing-risk-red { background: #ffeded; color: #c53737; }
+.mr-assets-table td.mr-timing-risk-yellow { background: #fff7d6; color: #986b00; }
 
 .mr-note-editor { min-width: 260px; white-space: normal; }
 .mr-note-editor textarea { box-sizing: border-box; width: 100%; min-height: 120px; resize: vertical; padding: 10px; border: 1px solid #dce3ed; border-radius: 6px; font: inherit; color: #35455e; }

@@ -17,7 +17,7 @@ const blocked = (text, id) => assert.ok(check(text).some(issue => issue.rule ===
 const clean = text => assert.deepEqual(check(text), [], text);
 
 test('registry covers every shared family, without exempting whole feature pages', () => {
-  assert.deepEqual(rules.map(x => x.id), ['confirm-popover', 'expandable-text', 'sortable-header', 'select', 'date-input', 'segmented', 'dialog', 'confirmation', 'page-header', 'tool-template', 'financial-template', 'comparison-table']);
+  assert.deepEqual(rules.map(x => x.id), ['hover-hint', 'confirm-popover', 'expandable-text', 'sortable-header', 'select', 'date-input', 'segmented', 'dialog', 'confirmation', 'page-header', 'tool-template', 'financial-template', 'comparison-table']);
   for (const rule of rules) {
     assert.ok(rule.entry && rule.review);
     assert.ok(fs.readFileSync(path.resolve(__dirname, '../docs/CODING_GUIDELINES.md'), 'utf8').includes('`' + rule.id + '`'), rule.id);
@@ -177,4 +177,9 @@ test('expandable text preserves its shared presentation and allows text and labe
 test('confirmation popovers protect their geometry and accept controlled confirmation callbacks', () => {
   clean(`import C from '@/components/ConfirmPopover'; const ui=<C visible={open} onVisibleChange={setOpen} message="确认？" onConfirm={save}><button>取消</button></C>;`);
   blocked(`import C from '@/components/ConfirmPopover'; const ui=<C style={{width:400}}/>;`, 'confirm-popover');
+});
+
+test('hover hints accept content while protecting shared presentation', () => {
+  clean(`import H from '@/components/HoverHint'; const ui=<H content="说明"><span>内容</span></H>;`);
+  blocked(`import H from '@/components/HoverHint'; const ui=<H style={{width:200}}/>;`, 'hover-hint');
 });

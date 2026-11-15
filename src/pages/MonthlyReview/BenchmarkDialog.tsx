@@ -2,12 +2,14 @@ import React, { useEffect, useState } from 'react';
 import Dialog from './MonthlyDialog';
 import AmountInput from './AmountInput';
 import { rawAmount } from './amount';
+import { validTimingThreshold } from './return-timing';
 import { BenchmarkMetric, Benchmarks, benchmarkFor, validBenchmark, BENCHMARK_BANDS, benchmarkIntervalLabel } from './benchmarks';
-interface Props { visible: boolean; categories: string[]; categoryNames: Record<string, string>; config: Benchmarks; onClose: () => void; onSave: (config: Benchmarks) => void; }
+interface Props { visible: boolean; categories: string[]; categoryNames: Record<string, string>; config: Benchmarks; timingThreshold: number; onClose: () => void; onSave: (config: Benchmarks, timingThreshold: number) => void; }
 interface Entry { metric: BenchmarkMetric; high: string; middle: string; low: string; }
-export default function BenchmarkDialog({ visible, categories, categoryNames, config, onClose, onSave }: Props) {
+export default function BenchmarkDialog({ visible, categories, categoryNames, config, timingThreshold, onClose, onSave }: Props) {
   const [entries, setEntries] = useState<Record<string, Entry>>({});
   const [error, setError] = useState('');
+  const [timingDifference, setTimingDifference] = useState(String(timingThreshold));
   useEffect(() => {
     if (!visible) return;
     setEntries(Object.fromEntries(categories.map(category => {
@@ -15,6 +17,7 @@ export default function BenchmarkDialog({ visible, categories, categoryNames, co
       return [category, { metric: rule.metric, high: String(rule.high), middle: String(rule.middle), low: String(rule.low) }];
     })));
     setError('');
+    setTimingDifference(String(timingThreshold));
   }, [visible]);
   const update = (category: string, patch: Partial<Entry>) => { setEntries(current => ({ ...current, [category]: { ...current[category], ...patch } })); setError(''); };
   return <Dialog visible={visible} title="业绩基准" footer={false} onClose={onClose} className="mr-dialog mr-wide-dialog mr-record-dialog mr-benchmark-dialog">
@@ -22,6 +25,8 @@ export default function BenchmarkDialog({ visible, categories, categoryNames, co
     {error && <div className="mr-message error" role="alert">{error}</div>}
     <form onSubmit={event => {
       event.preventDefault();
+      const threshold = Number(timingDifference);
+      if (!timingDifference.trim() || !validTimingThreshold(threshold)) { setError('请填写有效的非负收益率差值阈值（百分点）。'); return; }
       const next = { ...config };
       for (const category of categories) {
         const entry = entries[category];
@@ -31,7 +36,7 @@ export default function BenchmarkDialog({ visible, categories, categoryNames, co
         if ([entry.high, entry.middle, entry.low].some(value => !value.trim()) || !validBenchmark(rule)) { setError((categoryNames[category] || category) + '：请填写有效百分比，并确保高档大于中档、中档大于低档。'); return; }
         next[category] = rule;
       }
-      try { onSave(next); } catch (e) { setError('保存业绩基准失败：' + e.message); }
+      try { onSave(next, threshold); } catch (e) { setError('保存业绩基准失败：' + e.message); }
     }}>
       <div className="mr-table-wrap"><table><thead><tr><th>产品类型</th><th>评价指标（单选）</th><th>高档</th><th>中档</th><th>低档</th></tr></thead><tbody>{categories.map(category => {
         const entry = entries[category];
@@ -41,6 +46,8 @@ export default function BenchmarkDialog({ visible, categories, categoryNames, co
       })}</tbody></table></div>
       <div className="mr-benchmark-legend">{BENCHMARK_BANDS.map(band => <span key={band} className={'mr-performance-' + band}>{benchmarkIntervalLabel(band)}</span>)}</div>
       <p>配置保存在当前浏览器，应用于资产表对应的收益率列；缺失或待核实的收益率不着色。</p>
+      <label className="mr-field"><span>XIRR / TWR 时机提醒阈值（百分点）</span><AmountInput aria-label="时机提醒差值阈值（百分点）" value={timingDifference} onChange={event => { setTimingDifference(rawAmount(event.target.value)); setError(''); }} /></label>
+      <p>默认 1 个百分点，例如 4% 与 3% 的差值为 1 个百分点；仅差值严格超过阈值时提醒。适用于资产表所有产品，与各类型的基准指标选择独立。</p>
       <div className="mr-actions"><button type="button" onClick={onClose}>取消</button><button className="primary" type="submit">保存并生效</button></div>
     </form>
   </Dialog>;
