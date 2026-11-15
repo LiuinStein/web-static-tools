@@ -69,7 +69,7 @@ import Select, { CompactSelect, SelectAutoComplete } from '@/components/Select';
 
 ### 分段选择
 
-市场、币种和工资输入模式等分段选项统一使用 `@/components/SegmentedControl`。组件复用股票页港美股切换的灰色底槽、白底蓝字选中项、圆角、间距和交互状态。页面仅负责摆放位置，不复制按钮样式；选项、当前值和业务回调仍由页面提供。
+市场、币种和工资输入模式等分段选项统一使用 `@/components/SegmentedControl`。默认变体复用股票页港美股切换的灰色底槽、白底蓝字选中项、圆角、间距和交互状态。现有其他外观保持原样；新增规范与检查不得附带迁移现有控件或修改其样式。页面仅负责摆放位置，不复制按钮样式；选项、当前值和业务回调仍由页面提供。
 
 ### 日期输入必须复用 DateInput
 
@@ -106,14 +106,46 @@ import DateInput from '@/components/DateInput';
 
 组件接口与边界见 [DateInput 说明](../src/components/DateInput/README.md)。
 
-### 下拉组件的自动检查
+## 统一组件规范检查
 
-- `npm run check:selects` 扫描业务代码，禁止原生 `<select>`、直接导入 Fusion Select（含别名与子路径）、通过组件库命名空间或 createElement 创建选择控件等常见绕过方式。
-- `npm run typecheck` 和 `npm run build` 自动执行组件检查，违规时停止。
-- `npm run test:selects` 验证检查器对正常组件用法的放行，以及对直接实现选择控件的拦截。
-- 原生下拉框和 Fusion Select 适配仅允许出现在 `src/components/Select` 内。不要为单个业务页面增加检查白名单。
+统一入口为 `npm run check:components`，覆盖复用清单中的全部已登记组件／模板。`npm run typecheck` 和 `npm run build` 先执行此检查，新增违规时停止。
 
-上述自动检查目前覆盖下拉组件。日期组件及其他公共组件的复用要求由前述规范约束，尚未接入同类自动扫描，不得声称已自动拦截。
+规则登记在 `scripts/component-rules.cjs`，检查实现位于 `scripts/check-components.cjs`。新增公共组件或变体时，同步登记组件入口、合法实现文件、私有样式、公开属性限制和静态检查的边界，并增加测试；不允许用页面白名单掩盖新增违规。
+
+| 规则 ID | 组件／模板 | 自动检查范围 |
+| --- | --- | --- |
+| `select` | Select 系列 | 原生 select、库导入及别名/子路径/命名空间/重新导出绕过、右侧留白与箭头属性、私有 CSS/变量 |
+| `date-input` | DateInput | 原生日期框、动态 type 和属性展开、组件固定属性、尺寸变体、WebKit 几何样式与变量 |
+| `segmented` | SegmentedControl | 业务侧原生 aria-pressed 按钮、私有结构样式和公开变体；正常 radio/checkbox 保留原有语义 |
+| `dialog` | ToolDialog | 原生 dialog、组件库 Dialog 绕过、强制布局属性和私有外壳样式；允许弹窗内容定义业务布局 |
+| `confirmation` | useToolConfirm | 原生浏览器 confirm（含 window/globalThis 调用）；正常本地回调与 hook 返回的 confirm 放行 |
+| `page-header` | PageHeader | 私有 CSS 导入和不支持的样式属性；不把所有 h1 都强行判为通用标题 |
+| `tool-template` | 工具页基础模板 | 禁止在业务样式中重新定义共享 tool-page 选择器；公开模板仍可导入 |
+| `financial-template` | CalculatorLayout | 金融共享布局选择器的归属；业务专属布局保留在自身类名中 |
+| `comparison-table` | FeeComparisonTable | 私有比较表结构类、样式和不支持的外部样式属性；其他用途的普通表格仍可使用 |
+
+`npm run check:components -- --list` 查看当前登记范围及每类规则的检查边界。检查仅报告 Git 差异中的新增或修改行，未跟踪新文件按全部新增处理；历史代码不报错，不维护历史违规清单，不强制迁移现有 UI。
+
+- 默认以 `HEAD` 为比较起点，合并检查暂存、未暂存与未跟踪新文件的最终工作区内容。
+- 提交后、分支审查或 CI 使用 `npm run check:components -- --base <提交或分支>` 指定本次变更之前的提交（例如合并基点）；也可设置 `COMPONENT_CHECK_BASE`。干净工作区默认没有新增行，需要指定范围才能检查已提交代码。
+- 修改历史文件时，仅检查新增或替换行；其余行不报告。只删除代码不触发违规。
+- 可读取既有代码中的导入、组件类名作为判断新增代码的上下文，但历史诊断不会输出或阻止构建。
+- 无法获取 Git 差异或比较引用无效时，检查报错，不能静默跳过。
+- 仅调整规范与检查时，不得为通过检查修改现有组件样式、交互或布局。既有控件迁移须另行明确安排。
+
+### 不得绕过检查
+
+- 不通过导入别名、组件库子路径、命名空间、重新导出、require、动态导入或 createElement 绕开公共入口。
+- 不通过组件私有类名或传入的业务类名改写其按钮、日期内部区域等结构。组件根节点可使用自身业务类做外部宽度、边距等布局，公开 props 和组件变体负责内部变化。
+- 不直接导入组件私有 CSS；ToolPage 和 CalculatorLayout 明确公开的模板可以导入。
+- 不向 Select 传入无法确认只有布局属性的 style 对象；DateInput、分段选项和弹窗的固定属性按各自公开接口使用。
+- 新增变体先在组件中实现，再登记并测试；不得增加逐页豁免或为了让检查通过重命名一套重复实现。
+
+### 验证与边界
+
+运行 `npm run test:components`，验证所有登记规则、正常组合、误报场景和 CLI 退出状态；选择组件原有契约测试继续保留。只改文案、浏览器普通输入框、日期范围选择器、弹窗里的业务内容不应被误拦截。
+
+静态检查能发现**已登记的语法与样式边界**，不能可靠判断任意不同名称、不同结构的控件是否语义重复，也不能验证真实渲染效果。因此，“检查通过”不等于所有规范已经得到证明。是否该扩展已有组件、页面是否重写了同类功能，仍需代码评审；字体居中、宽度溢出、菜单位置、键盘与 Safari 行为仍需下方浏览器回归。
 
 ### 功能与视觉回归
 

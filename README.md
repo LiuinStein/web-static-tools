@@ -5,7 +5,17 @@
 
 ## 编码规范
 
-开发前阅读 [编码规范](docs/CODING_GUIDELINES.md)；自动化开发约定见 [AGENTS.md](AGENTS.md)。下拉框必须统一使用 `@/components/Select`；类型检查和构建会自动拦截业务代码中的原生下拉框与 Fusion Select 直接导入。
+开发前阅读 [编码规范](docs/CODING_GUIDELINES.md)；自动化开发约定见 [AGENTS.md](AGENTS.md)。下拉框必须统一使用 `@/components/Select`；类型检查和构建会自动执行统一组件规范检查，覆盖下拉框、日期、分段选项、弹窗及共享样式边界。
+
+## 组件规范检查
+
+```bash
+npm run check:components           # 全部登记组件规则，违规时退出码为 1
+npm run check:components -- --list # 查看覆盖范围与边界
+npm run test:components            # 规则拦截、正常组合及组件契约测试
+```
+
+`typecheck` 和 `build` 已自动接入。新增共享组件时维护 `scripts/component-rules.cjs`，不要增加页面白名单。只检查相对 HEAD 的新增或修改行（包含暂存、未暂存与未跟踪新文件），历史代码不报错。提交后或 CI 使用 `npm run check:components -- --base <提交或分支>` 指定比较起点，或设置 `COMPONENT_CHECK_BASE`。不为检查迁移或调整现有 UI。静态检查不替代页面视觉及浏览器交互验证。
 
 ## 使用
 

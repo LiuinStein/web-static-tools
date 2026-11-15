@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { findViolations, checkProject } = require('../scripts/check-select-components.cjs');
+const { findCodeViolations: findViolations, checkProject } = require('../scripts/check-components.cjs');
 const check = code => findViolations(code, 'Feature.tsx');
 
 test('allows shared components, option groups, callbacks and layout props', () => {
@@ -19,7 +19,7 @@ test('blocks native selects and aliases of Fusion Select', () => {
 test('does not reject non-select imports, strings or comments', () => {
   assert.deepEqual(check(`import { Input, Card } from '@alifd/next'; const s = '<select>'; // <select />`), []);
 });
-test('all existing feature controls use the component boundary', () => {
+test('new code introduces no component violations', () => {
   assert.deepEqual(checkProject(), []);
 });
 
