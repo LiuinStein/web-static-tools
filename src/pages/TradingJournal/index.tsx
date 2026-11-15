@@ -25,7 +25,12 @@ import {
   queueChange,
   visibleTrades,
   today,
-  validateTrade,
+  validateTradeEntry,
+  calculateRiskExposure,
+  hasHistoricalStopBreach,
+  stopWarning,
+  reasonWithoutStopWarning,
+  withStopWarning,
 } from './model';
 import { OneDriveJournal, journalDrive } from './onedrive';
 import type { DriveConfig } from './onedrive';
@@ -69,6 +74,7 @@ const blank = () => ({
   amountManual: false,
   price: '',
   shares: '',
+  stopPrice: '',
   fee: '0.00',
   reason: '',
   brainstorm: false,
@@ -139,6 +145,10 @@ export default function TradingJournal() {
   const fee = automaticFee
     ? calculateFee(Number(draft.amount), Number(draft.price), Number(draft.shares))
     : Number(draft.fee);
+  const riskExposure = calculateRiskExposure(draft.stopPrice, draft.shares, draft.amount);
+  const showStopWarning = isStock(draft.type) && (!!editing?.reason.includes(stopWarning) || hasHistoricalStopBreach(
+    all, { type: draft.type, code: draft.code, date: draft.date, price: Number(draft.price) }, editing?.id,
+  ));
   const holdingCosts = summarizeHoldingCosts(holdings);
   const unmarkedHoldings = holdings.filter(holding => !holding.currency).length;
   let syncLabel = '本机模式';
@@ -286,14 +296,18 @@ export default function TradingJournal() {
         amount: Number(draft.amount),
         price: draft.price === '' ? undefined : Number(draft.price),
         shares: draft.shares === '' ? undefined : Number(draft.shares),
+        stopPrice: isStock(draft.type) && draft.stopPrice !== '' ? Number(draft.stopPrice) : undefined,
         fee,
-        reason: draft.reason.trim(),
+        reason: reasonWithoutStopWarning(draft.reason).trim(),
         brainstorm: draft.brainstorm || undefined,
       };
       if (!trade.reason) throw new Error('请填写交易原因');
       validateStockCode(trade.type, trade.code);
-      validateTrade(trade);
+      validateTradeEntry(trade);
       const stored = readJSON(cacheKey, cache) as Cache;
+      const historicalTrades = visibleTrades(stored.remote, stored.pending, stored.changes || []);
+      trade.reason = withStopWarning(trade.reason, isStock(trade.type) &&
+        (!!editing?.reason.includes(stopWarning) || hasHistoricalStopBreach(historicalTrades, trade, editing?.id)));
       let next = { ...stored, pending: stored.pending };
       if (editing) next = { ...stored, changes: queueChange(stored.remote, stored.pending, stored.changes || [], editing, trade) };
       else next.pending = mergeTrades(stored.pending, [trade]);
@@ -347,8 +361,9 @@ export default function TradingJournal() {
       amountManual: true,
       price: trade.price === undefined ? '' : String(trade.price),
       shares: trade.shares === undefined ? '' : String(trade.shares),
+      stopPrice: trade.stopPrice === undefined ? '' : String(trade.stopPrice),
       fee: trade.fee.toFixed(2),
-      reason: trade.reason,
+      reason: reasonWithoutStopWarning(trade.reason),
       brainstorm: !!trade.brainstorm,
     });
     setError('');
@@ -413,6 +428,7 @@ export default function TradingJournal() {
             <th>日期 / 标的</th>
             <th>判断 / 方向</th>
             <th>金额 / 单价</th>
+            <th>止损单价</th>
             <th>份额 / 费用</th>
             <th>交易原因</th>
             <th className="journal-actions-column">操作</th>
@@ -423,6 +439,7 @@ export default function TradingJournal() {
             const local = cache.pending.some(item => item.id === trade.id) ||
               (cache.changes || []).some(change => change.id === trade.id);
             const labels = [trade.brainstorm ? '头脑风暴 · 非实际成交' : '', local ? (drive ? '待同步' : '本机记录') : ''].filter(Boolean).join(' · ');
+            const reason = withStopWarning(trade.reason, trade.reason.includes(stopWarning));
             return <tr key={trade.id}>
               <td>
                 <span className="j-trade-date">{trade.date}</span>
@@ -438,14 +455,17 @@ export default function TradingJournal() {
                 <strong className="j-numeric">{tradeCurrency(trade) || '未标记'} <TableNumber value={trade.amount} /></strong>
                 <span className="j-subtle">单价 {trade.price === undefined ? '—' : <>{tradeCurrency(trade) || '未标记'} <TableNumber value={trade.price} /></>}</span>
               </td>
+              <td className="j-numeric">
+                {trade.stopPrice === undefined ? '—' : <>{tradeCurrency(trade) || '未标记'} <TableNumber value={trade.stopPrice} maximumFractionDigits={8} /></>}
+              </td>
               <td>
                 <span className="j-numeric"><TableNumber value={trade.shares} /></span>
                 <span className="j-subtle">费用 {tradeCurrency(trade) || '未标记'} <TableNumber value={trade.fee} /></span>
               </td>
               <td>
                 <details className="journal-reason">
-                  <summary><span className="j-reason-preview">{trade.reason ? trade.reason.split('\n')[0] : '未填写原因'}</span></summary>
-                  <p>{trade.reason}</p>
+                  <summary><span className="j-reason-preview">{reason ? reason.split('\n')[0] : '未填写原因'}</span></summary>
+                  <p>{reason}</p>
                 </details>
                 {labels && <span className="j-local-label">{labels}</span>}
               </td>
@@ -494,6 +514,7 @@ export default function TradingJournal() {
             <th scope="col">总成本</th>
             <th scope="col">份额</th>
             <th scope="col">摊薄均价</th>
+            <th scope="col">止损单价</th>
           </tr>
         </thead>
         <tbody>
@@ -509,6 +530,9 @@ export default function TradingJournal() {
               </td>
               <td className="j-numeric">
                 {holding.averagePrice === undefined ? '—' : <>{holding.currency || '未标记'} <TableNumber value={holding.averagePrice} maximumFractionDigits={8} /></>}
+              </td>
+              <td className="j-numeric">
+                {holding.stopPrice === undefined ? '—' : <>{holding.currency || '未标记'} <TableNumber value={holding.stopPrice} maximumFractionDigits={8} /></>}
               </td>
             </tr>
           ))}
@@ -932,8 +956,29 @@ export default function TradingJournal() {
                 ? '单价与份额必填；总价默认 = 单价 × 份额，可手动调整；费用 = 总价 − 单价 × 份额。'
                 : '基金费用默认 0，请按实际成交费用填写。'}
             </p>
+            {isStock(draft.type) && (<>
+              <div className="j-form-grid">
+                <label className="j-field">
+                  <span>止损单价（{stockCurrency(draft.type)}） <em>*</em></span>
+                  <AmountInput aria-label="止损单价" type="text" inputMode="decimal" required
+                    onFocus={(e) => e.currentTarget.select()}
+                    onClick={(e) => e.currentTarget.select()}
+                    placeholder="输入止损单价" value={draft.stopPrice}
+                    onChange={e => field('stopPrice', rawAmount(e.target.value))} />
+                </label>
+                <label className="j-field">
+                  <span>风险敞口（{stockCurrency(draft.type)}）</span>
+                  <AmountInput aria-label="风险敞口" type="text" readOnly value={riskExposure}
+                    onFocus={(e) => e.currentTarget.select()}
+                    onClick={(e) => e.currentTarget.select()}
+                    placeholder="自动计算" />
+                </label>
+              </div>
+              <p className="j-fee-help">风险敞口自动计算：止损单价 × 份额 − 交易总价。</p>
+            </>)}
             <label className="j-field">
               <span>交易原因 <em>*</em></span>
+              {showStopWarning && <strong className="j-stop-warning" role="alert">{stopWarning}</strong>}
               <textarea
                 aria-label="交易原因"
                 required

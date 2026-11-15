@@ -1,4 +1,4 @@
-import { AssetType, Trade, Currency, tradeCurrency, currencies } from './model';
+import { AssetType, Trade, Currency, tradeCurrency, currencies, compareTrades } from './model';
 
 export interface Holding {
   code: string;
@@ -8,6 +8,7 @@ export interface Holding {
   totalCost: number;
   shares?: number;
   averagePrice?: number;
+  stopPrice?: number;
   missingShares: number;
 }
 interface Total {
@@ -52,6 +53,12 @@ export function calculateHoldings(trades: Trade[]): Holding[] {
     if (trade.shares === undefined) group.missingShares += 1;
     else add(group.shares, sign * trade.shares);
   });
+  const latestStops = new Map<string, number>();
+  [...trades].sort(compareTrades).forEach(trade => {
+    if (trade.brainstorm || trade.stopPrice === undefined) return;
+    const key = JSON.stringify([trade.type, trade.code.trim().toUpperCase(), tradeCurrency(trade)]);
+    if (!latestStops.has(key)) latestStops.set(key, trade.stopPrice);
+  });
   const holdings: Holding[] = [];
   groups.forEach((group) => {
     const shares = group.missingShares ? undefined : group.shares.value;
@@ -63,6 +70,8 @@ export function calculateHoldings(trades: Trade[]): Holding[] {
       type: group.type,
       currency: group.currency,
       totalCost: group.cost.value,
+      ...(latestStops.has(JSON.stringify([group.type, group.code, group.currency]))
+        ? { stopPrice: latestStops.get(JSON.stringify([group.type, group.code, group.currency])) } : {}),
       shares,
       averagePrice: shares === undefined ? undefined : group.cost.value / shares,
       missingShares: group.missingShares,

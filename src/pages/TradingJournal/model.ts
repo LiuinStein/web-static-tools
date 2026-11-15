@@ -23,6 +23,7 @@ export interface Trade {
   amount: number;
   price?: number;
   shares?: number;
+  stopPrice?: number;
   fee: number;
   reason: string;
   brainstorm?: boolean;
@@ -63,6 +64,7 @@ export function validateTrade(trade: Trade): void {
   if (trade.price === undefined) {
     if (isStock(trade.type)) throw new Error('股票单价必填');
   } else if (!Number.isFinite(trade.price) || trade.price <= 0) throw new Error('单价必须大于 0，基金可留空');
+  if (trade.stopPrice !== undefined && (!Number.isFinite(trade.stopPrice) || trade.stopPrice <= 0)) throw new Error('止损单价必须大于 0');
   if (!Number.isFinite(trade.fee)) throw new Error('交易费用无效');
   if (isStock(trade.type) && trade.shares === undefined) throw new Error('股票份额必填');
   if (trade.shares !== undefined && (!Number.isFinite(trade.shares) || trade.shares <= 0)) throw new Error(isStock(trade.type) ? '股票份额必须大于 0' : '份额需大于 0，或留空');
@@ -96,6 +98,7 @@ export function sameTrade(left: Trade | undefined, right: Trade | undefined): bo
     'amount',
     'price',
     'shares',
+    'stopPrice',
     'fee',
     'reason',
   ];
@@ -208,4 +211,33 @@ export function completeStockCode(type: AssetType, value: string): string {
   const code = value.trim();
   const width = type === 'A股' ? 6 : type === '港股' ? 5 : 0;
   return width && /^[0-9]+$/.test(code) && code.length <= width ? code.padStart(width, '0') : code;
+}
+
+export const stopWarning = '当前已跌破历史止损单价';
+export function reasonWithoutStopWarning(reason: string): string {
+  return reason.split('\n').filter(line => line.trim() !== stopWarning && line.trim() !== `！！！${stopWarning}！！！`).join('\n');
+}
+export function withStopWarning(reason: string, warning: boolean): string {
+  const text = reasonWithoutStopWarning(reason).trim();
+  return warning ? `${stopWarning}\n${text}` : text;
+}
+export function calculateRiskExposure(stopPrice: string, shares: string, amount: string): string {
+  try {
+    if (![stopPrice, shares, amount].every(value => value.trim())) return '';
+    const stop = new Decimal(stopPrice), quantity = new Decimal(shares), total = new Decimal(amount);
+    if (!stop.isFinite() || !quantity.isFinite() || !total.isFinite() || stop.lte(0) || quantity.lte(0) || total.lte(0)) return '';
+    return stop.times(quantity).minus(total).toString();
+  } catch { return ''; }
+}
+export function hasHistoricalStopBreach(trades: Trade[], draft: Pick<Trade, 'type' | 'code' | 'date' | 'price'>, excludeId?: string): boolean {
+  if (!isStock(draft.type) || !Number.isFinite(draft.price) || draft.price! <= 0) return false;
+  const code = completeStockCode(draft.type, draft.code.trim().toUpperCase());
+  return trades.some(trade => trade.id !== excludeId && !trade.brainstorm && trade.type === draft.type &&
+    completeStockCode(trade.type, trade.code.trim().toUpperCase()) === code && trade.date <= draft.date &&
+    trade.shares !== undefined && trade.shares > 0 && trade.stopPrice !== undefined && trade.stopPrice > draft.price!);
+}
+export function validateTradeEntry(trade: Trade): void {
+  validateTrade(trade);
+  // Legacy rows remain readable; every newly saved stock entry needs a stop price.
+  if (isStock(trade.type) && trade.stopPrice === undefined) throw new Error('股票止损单价必填');
 }

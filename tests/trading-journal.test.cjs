@@ -488,7 +488,7 @@ test('holdings immediately follow pending creates, edits and deletions and stay 
   const { workbook } = await readWorkbook();
   const imported = await readWorkbook(await writeWorkbook(workbook, visible));
   assert.deepEqual(imported.workbook.worksheets.map(sheet => sheet.name), ['交易记录']);
-  assert.equal(imported.workbook.getWorksheet('交易记录').columnCount, 15);
+  assert.equal(imported.workbook.getWorksheet('交易记录').columnCount, 16);
   assert.deepEqual(imported.trades, [edited]);
   assert.deepEqual(calculateHoldings(imported.trades), calculateHoldings(visible));
   assert.deepEqual(calculateHoldings([]), []);
@@ -513,7 +513,7 @@ test('stock markets and brainstorm records roundtrip without affecting actual ho
 test('legacy twelve-column Excel remains readable and gains brainstorm column on save', async () => {
   const { workbook } = await readWorkbook();
   await writeWorkbook(workbook, [trade()]);
-  workbook.getWorksheet('交易记录').spliceColumns(13, 3);
+  workbook.getWorksheet('交易记录').spliceColumns(13, 4);
   const legacy = await readWorkbook(await workbook.xlsx.writeBuffer());
   assert.deepEqual(legacy.trades, [trade()]);
   const updated = await readWorkbook(await writeWorkbook(legacy.workbook, [{ ...trade(), brainstorm: true }]));
@@ -696,7 +696,7 @@ test('stock currencies are fixed by market and fund currency survives Excel, edi
 test('older Excel records keep unknown fund currencies while deriving stock defaults when saved', async () => {
   const {workbook}=await readWorkbook();
   await writeWorkbook(workbook,[trade(),{...trade('stock'),type:'美股'}]);
-  workbook.getWorksheet('交易记录').spliceColumns(14,2);
+  workbook.getWorksheet('交易记录').spliceColumns(14,3);
   const legacy=await readWorkbook(await workbook.xlsx.writeBuffer());
   assert.equal(legacy.trades[0].currency,undefined);
   assert.equal(legacy.trades[1].currency,undefined);
@@ -765,7 +765,7 @@ test('recording timestamps roundtrip through Excel while date-only history stays
   imported = await readWorkbook(await imported.workbook.xlsx.writeBuffer());
   assert.equal(imported.trades[0].createdAt, recorded.createdAt);
   sheet = imported.workbook.getWorksheet('交易记录');
-  sheet.spliceColumns(15, 1);
+  sheet.spliceColumns(15, 2);
   imported = await readWorkbook(await imported.workbook.xlsx.writeBuffer());
   assert.ok(imported.trades.every(row => row.createdAt === undefined));
   imported = await readWorkbook(await writeWorkbook(imported.workbook, imported.trades));
@@ -778,4 +778,69 @@ test('recording timestamps roundtrip through Excel while date-only history stays
   imported = await readWorkbook(await writeWorkbook(imported.workbook, imported.trades));
   assert.equal(imported.workbook.getWorksheet('交易记录').getCell('O1').text, '记录时间');
   assert.equal(imported.workbook.getWorksheet('交易记录').getCell('O2').text, '');
+});
+
+test('stock entry requires stop price while legacy stock rows remain readable', () => {
+  const { validateTradeEntry } = require('../src/pages/TradingJournal/model.ts');
+  for (const type of ['港股', '美股', 'A股']) {
+    const row = { ...trade(), type };
+    assert.doesNotThrow(() => validateTrade(row));
+    assert.throws(() => validateTradeEntry(row), /止损单价必填/);
+    for (const stopPrice of [0, -1, NaN, Infinity]) assert.throws(() => validateTradeEntry({ ...row, stopPrice }), /止损单价/);
+    assert.doesNotThrow(() => validateTradeEntry({ ...row, stopPrice: 0.85 }));
+  }
+  assert.doesNotThrow(() => validateTradeEntry(trade()));
+});
+test('risk exposure uses exact decimal arithmetic and updates signed result', () => {
+  const { calculateRiskExposure } = require('../src/pages/TradingJournal/model.ts');
+  assert.equal(calculateRiskExposure('0.1', '3', '0.4'), '-0.1');
+  assert.equal(calculateRiskExposure('100', '10', '900'), '100');
+  assert.equal(calculateRiskExposure('90', '10', '900'), '0');
+  assert.equal(calculateRiskExposure('90', '10', '1005'), '-105');
+  for (const values of [['', '10', '100'], ['90', '', '100'], ['90', '10', ''], ['NaN', '10', '100'], ['-1', '10', '100']]) {
+    assert.equal(calculateRiskExposure(...values), '');
+  }
+});
+test('historical stop breach matches market and normalized code, keeps closed history and excludes ideas and edited row', () => {
+  const { hasHistoricalStopBreach, withStopWarning, reasonWithoutStopWarning, stopWarning } = require('../src/pages/TradingJournal/model.ts');
+  const row = { ...trade(), type: '港股', code: '00700', stopPrice: 100 };
+  const draft = { type: '港股', code: '700', price: 99, date: '2026-10-30' };
+  assert.equal(hasHistoricalStopBreach([row], draft), true);
+  assert.equal(hasHistoricalStopBreach([row], { ...draft, price: 100 }), false);
+  assert.equal(hasHistoricalStopBreach([row], { ...draft, price: 101 }), false);
+  assert.equal(hasHistoricalStopBreach([row], { ...draft, type: 'A股' }), false);
+  assert.equal(hasHistoricalStopBreach([row], { ...draft, code: '5' }), false);
+  assert.equal(hasHistoricalStopBreach([row], { ...draft, price: NaN }), false);
+  assert.equal(hasHistoricalStopBreach([row], { ...draft, type: '债券基金' }), false);
+  assert.equal(hasHistoricalStopBreach([row], { ...draft, date: '2026-10-28' }), false);
+  assert.equal(hasHistoricalStopBreach([{ ...row, brainstorm: true }], draft), false);
+  assert.equal(hasHistoricalStopBreach([row], draft, row.id), false);
+  assert.equal(hasHistoricalStopBreach([{ ...row, stopPrice: undefined }], draft), false);
+  const closed = [row, { ...row, id: 'close', direction: '卖出' }];
+  assert.equal(hasHistoricalStopBreach(closed, draft), true);
+  assert.equal(withStopWarning('理由\n第二行', true), `${stopWarning}\n理由\n第二行`);
+  assert.equal(withStopWarning(`${stopWarning}\n理由`, true), `${stopWarning}\n理由`);
+  assert.equal(reasonWithoutStopWarning(`${stopWarning}\n理由`), '理由');
+  assert.equal(reasonWithoutStopWarning(`！！！${stopWarning}！！！\n理由`), '理由');
+  assert.equal(withStopWarning(`！！！${stopWarning}！！！\n理由`, true), `${stopWarning}\n理由`);
+});
+test('stop price roundtrips Excel, detects sync conflicts and tolerates legacy missing column', async () => {
+  const { workbook } = await readWorkbook();
+  const row = { ...trade(), type: '美股', code: 'AAPL', currency: 'USD', stopPrice: 0.98765432 };
+  let result = await readWorkbook(await writeWorkbook(workbook, [row]));
+  assert.deepEqual(result.trades, [row]);
+  assert.equal(result.workbook.getWorksheet('交易记录').getCell('P1').text, '止损单价');
+  const { sameTrade } = require('../src/pages/TradingJournal/model.ts');
+  assert.equal(sameTrade(row, { ...row, stopPrice: 2 }), false);
+  assert.throws(() => applyChanges([{ ...row, stopPrice: 2 }], [{ id: row.id, before: row, after: { ...row, stopPrice: 3 } }]), /其他设备/);
+  result.workbook.getWorksheet('交易记录').spliceColumns(16, 1);
+  result = await readWorkbook(await result.workbook.xlsx.writeBuffer());
+  assert.equal(result.trades[0].stopPrice, undefined);
+});
+test('holdings use latest actual stop price regardless of input order', () => {
+  const { calculateHoldings } = require('../src/pages/TradingJournal/holdings.ts');
+  const row = { ...trade(), type: '美股', code: 'AAPL', stopPrice: 80, createdAt: '2026-10-29T01:00:00.000Z' };
+  const latest = { ...row, id: 'latest', stopPrice: 90, createdAt: '2026-10-29T02:00:00.000Z' };
+  const idea = { ...latest, id: 'idea', stopPrice: 200, brainstorm: true, date: '2026-10-30' };
+  for (const rows of [[latest, row, idea], [row, idea, latest]]) assert.equal(calculateHoldings(rows)[0].stopPrice, 90);
 });

@@ -767,3 +767,9 @@
   .journal-pagination { grid-row: 1; }
   .journal-table-hint { grid-row: 3; }
 }
+
+.j-stop-warning {
+  color: #c62828;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
