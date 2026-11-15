@@ -1,0 +1,6 @@
+.app-select { min-width: 0; max-width: 100%; }
+:root .app-select--compact { width: 132px; position: relative; background: #fafafa; }
+:root .app-select--compact::after { content: ""; visibility: visible; clear: none; z-index: 1; position: absolute; right: 12px; top: 12px; width: 6px; height: 6px; border-right: 1px solid #666; border-bottom: 1px solid #666; transform: rotate(45deg); pointer-events: none; }
+:root .app-select--compact .next-input { border-radius: 3px 0 0 3px; background: #fafafa; }
+:root .app-select--compact .next-select-values { justify-content: flex-start; padding-left: 8px; padding-right: 36px; text-align: left; }
+:root .app-select--compact .next-input-control { display: none; }

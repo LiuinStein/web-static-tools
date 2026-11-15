@@ -1,3 +1,6 @@
+import DateInput from '@/components/DateInput';
+import SegmentedControl from '@/components/SegmentedControl';
+import Select from '@/components/Select';
 import React, { useMemo, useState } from 'react';
 import { BondBroker, BondCurrency, BondType, bondLabels, bondPlans, currencies, getBondPlan, reviewedOn, supportedBondTypes } from './rates';
 import { BondInput, calculateBond, compareBondBrokers, parseBondNumber } from './model';
@@ -58,18 +61,18 @@ export default function BondCalculator() {
     <div className="sf-heading"><div><span className="sf-eyebrow">BOND RETURN</span><h2>持有到期，算清收益。</h2><p>选择券商与债券，查看到期收益和持有成本。</p></div><span className="sf-currency">{currency} · {currencyPlan.label}</span></div>
     <div className="sf-workspace">
       <div className="sf-input-panel">
-        <div className="sf-markets" role="group" aria-label="债券计价币种">{currencies.map(item => <button key={item.value} type="button" aria-pressed={currency === item.value} onClick={() => setCurrency(item.value)}>{item.value === 'CNH' ? '人民币' : item.label}<small>{item.value}</small></button>)}</div>
-        <label className="sf-field"><span>券商</span><select value={broker} onChange={event => setBrokers({ ...brokers, [currency]: event.target.value as BondBroker })}>{bondPlans.filter(item => item.currencies.includes(currency)).map(item => <option key={item.broker} value={item.broker}>{item.name}</option>)}</select></label>
+        <SegmentedControl<BondCurrency> className="sf-markets" aria-label="债券计价币种" value={currency} onChange={setCurrency} options={currencies.map(item => ({ value: item.value, label: <>{item.value === 'CNH' ? '人民币' : item.label}<small>{item.value}</small></> }))} />
+        <label className="sf-field"><span>券商</span><Select value={broker} onChange={event => setBrokers({ ...brokers, [currency]: event.target.value as BondBroker })}>{bondPlans.filter(item => item.currencies.includes(currency)).map(item => <option key={item.broker} value={item.broker}>{item.name}</option>)}</Select></label>
         <p className="sf-plan">{plan.plan}</p>
         <div className="sf-input-grid">
           {input('buyPrice', '买入价格', currency)}
           {input('unitFace', '每张票面价格', currency)}
           {input('couponRate', '票面年利率', '% / 年')}
           {input('faceAmount', '持有面值总额', currency)}
-          <label className="sf-field"><span>债券类型</span><select value={bondType} onChange={event => setType(event.target.value as BondType)}>{types.map(type => <option key={type} value={type}>{bondLabels[type]}</option>)}</select></label>
-          <label className="sf-field"><span>派息频率</span><select value={frequency} onChange={event => setFrequency(Number(event.target.value))}>{[1, 2, 4, 12].map(value => <option key={value} value={value}>每年 {value} 次</option>)}</select></label>
-          <label className="sf-field" htmlFor="bond-settlement"><span>买入交割日</span><input id="bond-settlement" type="date" min="1900-01-01" max="9999-12-31" value={fields.settlementDate} onChange={event => setFields({ ...fields, settlementDate: event.target.value })} aria-invalid={Boolean(error) && !fields.settlementDate} aria-describedby={error ? 'bond-error' : undefined} /></label>
-          <label className="sf-field" htmlFor="bond-maturity"><span>到期日期</span><input id="bond-maturity" type="date" min={fields.settlementDate || '1900-01-01'} max="9999-12-31" value={fields.maturityDate} onChange={event => setFields({ ...fields, maturityDate: event.target.value })} aria-invalid={Boolean(error) && (!fields.maturityDate || fields.maturityDate <= fields.settlementDate)} aria-describedby={error ? 'bond-error' : undefined} /></label>
+          <label className="sf-field"><span>债券类型</span><Select value={bondType} onChange={event => setType(event.target.value as BondType)}>{types.map(type => <option key={type} value={type}>{bondLabels[type]}</option>)}</Select></label>
+          <label className="sf-field"><span>派息频率</span><Select value={frequency} onChange={event => setFrequency(Number(event.target.value))}>{[1, 2, 4, 12].map(value => <option key={value} value={value}>每年 {value} 次</option>)}</Select></label>
+          <label className="sf-field" htmlFor="bond-settlement"><span>买入交割日</span><DateInput id="bond-settlement" min="1900-01-01" max="9999-12-31" value={fields.settlementDate} onChange={event => setFields({ ...fields, settlementDate: event.target.value })} aria-invalid={Boolean(error) && !fields.settlementDate} aria-describedby={error ? 'bond-error' : undefined} /></label>
+          <label className="sf-field" htmlFor="bond-maturity"><span>到期日期</span><DateInput id="bond-maturity" min={fields.settlementDate || '1900-01-01'} max="9999-12-31" value={fields.maturityDate} onChange={event => setFields({ ...fields, maturityDate: event.target.value })} aria-invalid={Boolean(error) && (!fields.maturityDate || fields.maturityDate <= fields.settlementDate)} aria-describedby={error ? 'bond-error' : undefined} /></label>
           {input('otherFees', '其他费用', `${currency} · 选填`)}
         </div>
         {broker === 'usmart' && bondType === 'corporate' && <p className="sf-hint">企业债赎回、公司行动等服务可能另收 100 USD / 指令，请将适用金额填入其他费用。</p>}

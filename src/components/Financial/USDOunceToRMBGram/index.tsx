@@ -1,7 +1,8 @@
 import * as React from 'react';
-import { Card, Input, Select, Button } from '@alifd/next';
+import { Card, Input, Button } from '@alifd/next';
 import { convertPrice, fetchExchangeRate, ExchangeRate, isPositiveNumber } from './model';
 import './index.css';
+import { CompactSelect } from '@/components/Select';
 
 export default function USDOunceToRMBGram() {
     const [mode, setMode] = React.useState<'auto' | 'manual'>('auto');
@@ -66,12 +67,11 @@ export default function USDOunceToRMBGram() {
                     state={invalidRate ? 'error' : undefined}
                     aria-describedby="gold-rate-status"
                     aria-invalid={invalidRate}
-                    addonBefore={<Select
+                    addonBefore={<CompactSelect
                         aria-label="汇率来源"
                         className="gold-rate-mode"
                         value={mode}
                         onChange={changeMode}
-                        hasArrow={false}
                         dataSource={[{ value: 'auto', label: <span className="gold-source-label"><img src="./frankfurter.ico" alt="" width={16} height={16} />Frankfurter</span> }, { value: 'manual', label: '手动输入' }]}
                     />}
                 />

@@ -1,5 +1,6 @@
 import * as React from 'react';
-import { Form, Card, Input, Select } from '@alifd/next';
+import { SelectAutoComplete } from '@/components/Select';
+import { Form, Card, Input } from '@alifd/next';
 
 export default function () {
     const FormItem = Form.Item;
@@ -21,7 +22,7 @@ export default function () {
                 labelAlign="top"
             >
                 <FormItem {...formItemLayout} label="时长（天）" required requiredMessage="必填">
-                    <Select.AutoComplete
+                    <SelectAutoComplete
                         onChange={(v) => {
                             setPp2Pa({ ...pp2pa, period: v })
                         }}

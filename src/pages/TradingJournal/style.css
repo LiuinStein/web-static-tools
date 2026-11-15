@@ -619,33 +619,6 @@
     font-size: 16px;
     line-height: normal;
   }
-  .journal .j-field input[type=date] {
-    -webkit-appearance: none;
-    appearance: none;
-    display: flex;
-    align-items: center;
-    min-width: 0;
-    padding: 0 8px;
-    line-height: 42px;
-    text-align: left;
-  }
-  /* iOS Safari renders the date text in its own native value element. */
-  .journal .j-field input[type=date]::-webkit-date-and-time-value {
-    display: block;
-    height: 42px;
-    min-height: 0;
-    margin: 0;
-    padding: 0;
-    line-height: 42px;
-    text-align: left;
-  }
-  .journal .j-field input[type=date]::-webkit-datetime-edit {
-    display: inline-flex;
-    align-items: center;
-    height: 42px;
-    padding: 0;
-    line-height: normal;
-  }
   .journal-stats {
     grid-template-columns: 1fr 1fr;
     padding: 4px 0;

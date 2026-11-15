@@ -1,3 +1,4 @@
+import Select from '@/components/Select';
 import AmountInput from './AmountInput';
 import { rawAmount } from './amount';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -26,7 +27,7 @@ export default function AssetGroupDialog({ visible, busy, book, error, categoryN
   useEffect(() => { if (form.account !== '__new__' && !options.account.includes(form.account)) update('account', '__new__'); }, [form.member, form.newMember, form.currency, form.newCurrency, products]);
   const selectAll = (event: React.SyntheticEvent<HTMLInputElement>) => event.currentTarget.select();
   const choice = (label: string, key: 'member' | 'currency' | 'category' | 'account', custom: string) => <React.Fragment key={key}>
-    <label className="mr-field"><span>{label}</span><select aria-label={`分组${label}`} value={form[key]} disabled={busy} onChange={e => update(key, e.target.value)}>{options[key].map(option => <option key={option} value={option}>{key === 'category' ? categoryNames[option] || option : option}</option>)}<option value="__new__">＋ 新增{label}</option></select></label>
+    <label className="mr-field"><span>{label}</span><Select aria-label={`分组${label}`} value={form[key]} disabled={busy} onChange={e => update(key, e.target.value)}>{options[key].map(option => <option key={option} value={option}>{key === 'category' ? categoryNames[option] || option : option}</option>)}<option value="__new__">＋ 新增{label}</option></Select></label>
     {form[key] === '__new__' && <label className="mr-field"><span>{custom}</span><input aria-label={custom} required disabled={busy} value={form[`new${key[0].toUpperCase()}${key.slice(1)}`]} maxLength={key === 'currency' ? 8 : 100} onChange={e => update(`new${key[0].toUpperCase()}${key.slice(1)}`, key === 'currency' ? e.target.value.toUpperCase() : e.target.value)} /></label>}
   </React.Fragment>;
   return <Dialog visible={visible} title="新增分组与资产" footer={false} onClose={onClose} className="mr-dialog mr-product-dialog">

@@ -8,13 +8,13 @@
 2. 页面根节点添加 `tool-page`。
 3. 新工具可使用 `tool-heading`、`tool-eyebrow`、`tool-panel`、`tool-fields`、`tool-field`、`tool-columns`、`tool-summary`、`tool-summary-row`。已有 `mr-*`、`salary-*`、`sf-*` 对应结构通过模板的别名选择器接入，无需影响组件状态和计算代码。
 
-模板统一管理色彩变量、标题、按钮、输入框、卡片、表格及移动端断点；下拉箭头由全局 `src/styles/select.css` 统一管理。页面样式仅负责业务布局、特殊状态和专用控件；不要在各页面重新复制基础样式。股票和债券继续通过 `Financial/CalculatorLayout/style.css` 共用金融专属布局，再由该文件引入基础模板。
+模板统一管理色彩变量、标题、按钮、输入框、卡片、表格及移动端断点；下拉框通过 `components/Select` 组件统一管理。页面样式仅负责业务布局、特殊状态和专用控件；不要在各页面重新复制基础样式。股票和债券继续通过 `Financial/CalculatorLayout/style.css` 共用金融专属布局，再由该文件引入基础模板。
 
-下拉框的接入、禁止覆盖项和回归检查必须遵守项目 [编码规范](../../../docs/CODING_GUIDELINES.md#下拉框)。
+新增页面先查阅项目 [组件复用清单](../../../docs/CODING_GUIDELINES.md#现有复用清单)，直接组合现有组件；不得复制基础控件和样式。下拉框、日期框等组件的接入与回归要求以 [编码规范](../../../docs/CODING_GUIDELINES.md) 为准。
 
 ## 配置
 
-CSS 变量限定在 `.tool-page` 内，不影响其他页面。可覆写 `--tool-panel-padding` 等明确的布局变量。原生单选下拉框统一使用全局 `src/styles/select.css`（由 `src/global.css` 引入），以交易日记为基准：12px 箭头、距右侧 8px、右侧文字留白 32px，桌面和移动端一致。所有页面及弹窗自动生效，新工具无需单独接入。工资页与其他页面执行同一规则，不保留页面例外；`--select-arrow-inset` 仅由共享样式维护，业务页面和组件不得单独赋值。不要在业务样式中覆盖 `appearance`、箭头背景或右侧留白；背景颜色使用 `background-color`。多选和列表框不显示该箭头。
+CSS 变量限定在 `.tool-page` 内，不影响其他页面。可覆写 `--tool-panel-padding` 等明确的布局变量。所有下拉框必须从 `@/components/Select` 导入，组件内部固定管理 12px 箭头间距和 36px 文字留白，页面不再配置间距变量或单独绘制箭头。普通选择、紧凑富文本选择和自动补全分别使用 `Select`、`CompactSelect`、`SelectAutoComplete`，功能与事件保持各自原有约定。组件样式内部引入，弹窗内同样生效；业务样式只负责布局。接口见 [组件说明](../Select/README.md)。
 
 窄屏标题与列布局使用月度复盘的 1050px / 600px 断点；表格可横向滚动。弹窗通过 `ToolDialog` 挂载；弹窗根节点携带 `tool-page tool-dialog`，即使挂到页面外也复用相同的样式变量。月度复盘的 `MonthlyDialog` 只是兼容入口，业务专属的表格列宽、收益图表规则仍留在页面内。
 
@@ -25,4 +25,4 @@ CSS 变量限定在 `.tool-page` 内，不影响其他页面。可覆写 `--tool
 
 使用 `useToolConfirm()` 获取 `confirm` 和 `confirmationDialog`，将后者渲染在页面中。执行修改前先 `await confirm({ title, message, confirmLabel, danger })`；只有返回 `true` 才执行动作。取消、Esc、点击遮罩和页面卸载均返回 `false`，重复调用不会替换正在等待的确认。浏览器自身的关闭页面 / 刷新警告不属于应用内对话框。
 
-股票、债券的市场切换保留原计算工具样式，下拉箭头复用全局规则；金融表单的尺寸、边框和颜色统一放在 `Financial/CalculatorLayout/style.css`，通过 `.financial-calculator` 限定作用域和优先级。左右输入与结果采用独立卡片，列间距和窄屏断点仍使用基础模板。
+股票、债券与工资输入模式的分段切换复用 `SegmentedControl`，下拉框复用 `Select`；金融表单的尺寸、边框和颜色统一放在 `Financial/CalculatorLayout/style.css`，通过 `.financial-calculator` 限定作用域和优先级。左右输入与结果采用独立卡片，列间距和窄屏断点仍使用基础模板。

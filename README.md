@@ -5,7 +5,7 @@
 
 ## 编码规范
 
-开发前阅读 [编码规范](docs/CODING_GUIDELINES.md)；自动化开发约定见 [AGENTS.md](AGENTS.md)。下拉框必须复用全局箭头与文字留白规则，禁止业务样式将箭头重置为贴边的原生外观。
+开发前阅读 [编码规范](docs/CODING_GUIDELINES.md)；自动化开发约定见 [AGENTS.md](AGENTS.md)。下拉框必须统一使用 `@/components/Select`；类型检查和构建会自动拦截业务代码中的原生下拉框与 Fusion Select 直接导入。
 
 ## 使用
 

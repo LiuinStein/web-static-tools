@@ -1,3 +1,4 @@
+import Select from '@/components/Select';
 import React, { useEffect, useMemo, useState } from 'react';
 import Dialog from './MonthlyDialog';
 import type { MonthlyWorkbook, Product } from './workbook';
@@ -52,10 +53,10 @@ export default function LiquidityAnalysis({ book, products, invalidKeys, templat
   return <section className="mr-panel mr-liquidity-analysis" aria-label="流动性分析">
     <div className="mr-section-heading"><div><h2>流动性分析</h2><p>以当前日期 {bounds ? isoDate(bounds.asOf) : '—'} 为基准，按产品已登记到期日分组。</p></div><button onClick={() => open('all')}>查看产品明细</button></div>
     <div className="mr-filters">
-      <select aria-label="流动性获利筛选" value={filters.profit} onChange={e => update({ profit: e.target.value as ProfitFilter })}>{(Object.keys(profitNames) as ProfitFilter[]).map(value => <option key={value} value={value}>{profitNames[value]}</option>)}</select>
-      <select aria-label="流动性成员筛选" value={filters.member} onChange={e => update({ member: e.target.value })}><option value="全部">全部成员</option>{options.members.map(value => <option key={value}>{value}</option>)}</select>
-      <select aria-label="流动性币种筛选" value={filters.currency} onChange={e => update({ currency: e.target.value })}><option value="全部">全部币种</option>{options.currencies.map(value => <option key={value}>{value}</option>)}</select>
-      <select aria-label="流动性产品类型筛选" value={filters.category} onChange={e => update({ category: e.target.value })}><option value="">全部产品类型</option>{categories.map(value => <option key={value} value={value}>{categoryNames[value] || value}</option>)}</select>
+      <Select aria-label="流动性获利筛选" value={filters.profit} onChange={e => update({ profit: e.target.value as ProfitFilter })}>{(Object.keys(profitNames) as ProfitFilter[]).map(value => <option key={value} value={value}>{profitNames[value]}</option>)}</Select>
+      <Select aria-label="流动性成员筛选" value={filters.member} onChange={e => update({ member: e.target.value })}><option value="全部">全部成员</option>{options.members.map(value => <option key={value}>{value}</option>)}</Select>
+      <Select aria-label="流动性币种筛选" value={filters.currency} onChange={e => update({ currency: e.target.value })}><option value="全部">全部币种</option>{options.currencies.map(value => <option key={value}>{value}</option>)}</Select>
+      <Select aria-label="流动性产品类型筛选" value={filters.category} onChange={e => update({ category: e.target.value })}><option value="">全部产品类型</option>{categories.map(value => <option key={value} value={value}>{categoryNames[value] || value}</option>)}</Select>
       <label className="mr-return-checkbox"><input type="checkbox" checked={filters.holdingOnly} onChange={e => update({ holdingOnly: e.target.checked })} />仅看持有产品</label>
       <button onClick={() => setFilters({ ...DEFAULT_LIQUIDITY_FILTERS })}>重置筛选</button>
     </div>

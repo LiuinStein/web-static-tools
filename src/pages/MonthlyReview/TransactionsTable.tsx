@@ -1,3 +1,4 @@
+import Select from '@/components/Select';
 import AmountInput from './AmountInput';
 import { rawAmount } from './amount';
 import React from 'react';
@@ -14,7 +15,7 @@ export default function TransactionsTable({ rows, onChange, date, disabled = fal
       const label = `${labelPrefix}${i + 1}`;
       return <tr key={i}>
         <td><input aria-label={`${label}日期`} disabled={disabled} type="date" value={row.date} onChange={e => update({ date: e.target.value })} /></td>
-        <td><select aria-label={`${label}类型`} disabled={disabled} value={row.kind} onChange={e => update({ kind: e.target.value as Transaction['kind'], shares: e.target.value === 'dividend' ? 0 : row.shares })}><option value="buy">买入</option><option value="sell">卖出</option><option value="dividend">分红</option></select></td>
+        <td><Select aria-label={`${label}类型`} disabled={disabled} value={row.kind} onChange={e => update({ kind: e.target.value as Transaction['kind'], shares: e.target.value === 'dividend' ? 0 : row.shares })}><option value="buy">买入</option><option value="sell">卖出</option><option value="dividend">分红</option></Select></td>
         <td><AmountInput aria-label={`${label}金额`} disabled={disabled} onFocus={selectAmount} onClick={selectAmount} type="text" inputMode="decimal" step="any" min="0" value={(row.amount)} onChange={e => { const amount = Number(rawAmount(e.target.value)); update({ amount, price: row.shares ? amount / row.shares : row.price }); }} /></td>
         <td><AmountInput aria-label={`${label}份额`} disabled={disabled || row.kind === 'dividend'} onFocus={selectAmount} onClick={selectAmount} type="text" inputMode="decimal" step="any" min="0" value={(row.shares)} onChange={e => { const shares = Number(rawAmount(e.target.value)); update({ shares, price: shares ? row.amount / shares : row.price }); }} /></td>
         <td><AmountInput aria-label={`${label}价格`} disabled={disabled} onFocus={selectAmount} onClick={selectAmount} type="text" inputMode="decimal" step="any" min="0" value={(row.price)} onChange={e => update({ price: Number(rawAmount(e.target.value)) })} /></td>

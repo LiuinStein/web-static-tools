@@ -1,3 +1,5 @@
+import DateInput from '@/components/DateInput';
+import Select from '@/components/Select';
 import React, { useEffect, useRef, useState } from 'react';
 import { Button, Pagination } from '@alifd/next';
 import zhCN from '@alifd/next/lib/locale/zh-cn';
@@ -769,9 +771,9 @@ export default function TradingJournal() {
             <div className="j-form-grid">
               <label className="j-field">
                 <span>日期 <em>*</em></span>
-                <input
+                <DateInput
                   aria-label="日期"
-                  type="date"
+                  density="responsive"
                   required
                   value={draft.date}
                   onChange={(e) => field('date', e.target.value)}
@@ -779,13 +781,13 @@ export default function TradingJournal() {
               </label>
               <label className="j-field">
                 <span>类型 <em>*</em></span>
-                <select
+                <Select
                   aria-label="类型"
                   value={draft.type}
                   onChange={(e) => updateIdentity(e.target.value as Trade['type'], draft.code ? 'code' : 'name', draft.code || draft.name)}
                 >
                   {assetTypes.map((type) => <option key={type}>{type}</option>)}
-                </select>
+                </Select>
               </label>
               <label className="j-field">
                 代码 <em>*</em>

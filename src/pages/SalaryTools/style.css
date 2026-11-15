@@ -24,9 +24,6 @@
 .salary-page li { margin: 7px 0; font-size: 12px; line-height: 1.8; }
 .salary-income { grid-column: 1/-1; border-top: 1px solid #edf1f6; padding-top: 20px; }
 .salary-income-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; font-size: 14px; font-weight: 500; }
-.salary-mode { display: inline-flex; border: 1px solid var(--tool-control-border); border-radius: 6px; padding: 3px; gap: 3px; background: #f6f8fb; }
-.salary-mode button { border: 0; border-radius: 4px; background: transparent; color: var(--tool-muted); font-size: 12px; padding: 6px 9px; }
-.salary-mode button[aria-pressed=true] { background: #e9f1ff; color: var(--tool-accent); font-weight: 600; }
 .salary-conversion { font-size: 12px; color: var(--tool-muted); margin: 8px 0 0; }
 .salary-field-wide, .salary-auto-bases { grid-column: 1/-1; }
 .salary-auto-bases { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #60738e; cursor: pointer; }
@@ -45,5 +42,4 @@
   .salary-total-split { grid-template-columns: 1fr; gap: 16px; }
   .salary-income-heading { align-items: flex-start; flex-direction: column; }
   .salary-mode { width: 100%; }
-  .salary-mode button { flex: 1; }
 }

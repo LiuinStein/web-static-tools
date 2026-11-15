@@ -56,7 +56,7 @@
   },
   "scripts": {
     "start": "icejs start",
-    "build": "icejs build",
+    "build": "npm run check:selects && icejs build",
     "prepublishOnly": "npm run build",
     "lint": "npm run eslint && npm run stylelint",
     "eslint": "eslint --cache --ext .js,.jsx,.ts,.tsx ./",
@@ -65,11 +65,13 @@
     "test:journal": "node --test tests/trading-journal.test.cjs",
     "test:monthly": "node tests/monthly-review.test.cjs",
     "test:onedrive": "node --test tests/onedrive-session.test.cjs tests/onedrive-cache.test.cjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "npm run check:selects && tsc --noEmit",
     "test:stock": "node --test tests/stock-fees.test.cjs",
     "test:bond": "node --test tests/bond-calculator.test.cjs",
     "deploy": "node scripts/deploy-cos.cjs",
-    "test:deploy": "node --test tests/deploy-cos.test.cjs"
+    "test:deploy": "node --test tests/deploy-cos.test.cjs",
+    "check:selects": "node scripts/check-select-components.cjs",
+    "test:selects": "node --test tests/select-components.test.cjs"
   },
   "publishConfig": {
     "access": "public"

@@ -1,3 +1,4 @@
+import Select from '@/components/Select';
 import React, { useState } from 'react';
 import { severance } from './severance';
 const money = (n: number) => n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -18,7 +19,7 @@ export default function SeveranceCalculator({ monthlyAverage }: { monthlyAverage
   const numberField = (label: string, value: string | number, set: (value: string) => void, placeholder?: string) => <label className="salary-field"><span>{label}</span><input type="text" inputMode="decimal" value={value} placeholder={placeholder} onFocus={e => e.currentTarget.select()} onClick={e => e.currentTarget.select()} onChange={e => { if (/^\d*(?:\.\d*)?$/.test(e.target.value)) set(e.target.value); }} /></label>;
   return <section className="salary-section salary-severance"><h2>裁员补偿计算器</h2><p className="salary-help">N 按在本单位的工作年限折算，不是入职年份。按税前金额测算，解除日期视为最后在职日并计入工龄。</p>
     <div className="salary-layout salary-severance-layout"><div className="salary-panel salary-severance-inputs"><h3>补偿信息</h3><div className="salary-fields"><label className="salary-field"><span>入职日期</span><input type="date" value={start} max={end || undefined} onChange={e => setStart(e.target.value)} /></label><label className="salary-field"><span>解除 / 终止日期</span><input type="date" value={end} min={start || undefined} onChange={e => setEnd(e.target.value)} /></label>
-    <label className="salary-field salary-field-wide"><span>补偿方案</span><select value={mode} onChange={e => setMode(e.target.value)}><option value="nm">N+M：经济补偿 + 协商额外补偿</option><option value="double">2N：违法解除 / 终止赔偿金</option></select></label>
+    <label className="salary-field salary-field-wide"><span>补偿方案</span><Select value={mode} onChange={e => setMode(e.target.value)}><option value="nm">N+M：经济补偿 + 协商额外补偿</option><option value="double">2N：违法解除 / 终止赔偿金</option></Select></label>
     {mode === 'nm' && <>{numberField('额外补偿 M（个月）', extraMonths, setExtraMonths)}{numberField('额外补偿每月基数（元）', extraBase === null ? extraBaseValue : extraBase, setExtraBase)}</>}
     {numberField('解除前 12 个月平均应得月工资（元）', average === null ? averageValue : average, setAverage)}
     {numberField('当地上年度职工月平均工资（元，用于三倍封顶）', localAverage, setLocalAverage, '请按解除地、适用年度的经济补偿口径填写')}

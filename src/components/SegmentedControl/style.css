@@ -1,0 +1,7 @@
+.segmented-control { display: flex; gap: 6px; background: #f1f4f9; padding: 4px; border-radius: 7px; }
+.segmented-control.segmented-control > button { flex: 1; min-width: 0; border: 0; background: transparent; color: #718096; padding: 10px; border-radius: 5px; cursor: pointer; font: inherit; font-size: 14px; font-weight: 600; white-space: normal; }
+.segmented-control.segmented-control > button:hover { background: #e9eef6; border: 0; }
+.segmented-control.segmented-control > button[aria-pressed='true'], .segmented-control.segmented-control > button[aria-pressed='true']:hover { background: #fff; color: #3577eb; box-shadow: 0 1px 4px #25344c12; }
+.segmented-control.segmented-control > button:focus-visible { outline: 2px solid #3577eb; outline-offset: 2px; }
+.segmented-control.segmented-control > button:disabled { cursor: not-allowed; opacity: .5; }
+.segmented-control small { font-weight: 400; margin-left: 7px; font-size: 11px; }

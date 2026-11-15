@@ -1,0 +1,10 @@
+.app-date-input { --date-input-height: 42px; }
+.app-date-input--responsive { --date-input-height: 34px; }
+/* iOS Safari exposes the date text through a separate native value element.
+   Its height and line height must track the control's inner height together. */
+:root .app-date-input::-webkit-date-and-time-value { display: block; height: calc(var(--date-input-height) - 2px); min-height: 0; min-width: 0; margin: 0; padding: 0; line-height: calc(var(--date-input-height) - 2px); text-align: left; }
+:root .app-date-input::-webkit-datetime-edit { display: inline-flex; align-items: center; height: calc(var(--date-input-height) - 2px); min-width: 0; padding: 0; line-height: normal; }
+:root .app-date-input::-webkit-calendar-picker-indicator { flex: none; margin-inline-start: auto; }
+@media (max-width: 600px) {
+  .app-date-input--responsive { --date-input-height: 44px; }
+}

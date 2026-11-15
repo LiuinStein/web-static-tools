@@ -1,3 +1,5 @@
+import SegmentedControl from '@/components/SegmentedControl';
+import Select from '@/components/Select';
 import React, { useMemo, useState } from 'react';
 import { Broker, Instrument, Market, getPlan, plans, reviewedOn } from './rates';
 import { TradeInput, breakEvenPrice, calculateRoundTrip, parseTradeNumber, compareStockBrokers } from './model';
@@ -52,14 +54,14 @@ export default function StockCommission({ fixedMarket }: { fixedMarket?: Market 
     <div className="sf-heading"><div><span className="sf-eyebrow">TRADING COST</span><h2>每笔交易，算清成本。</h2><p>选择市场与券商，查看买卖费用和回本参考价。</p></div><span className="sf-currency">{currency} · {market === 'HK' ? '港元' : '美元'}</span></div>
     <div className="sf-workspace">
       <div className="sf-input-panel">
-        {!fixedMarket && <div className="sf-markets" role="group" aria-label="交易市场">{(['HK', 'US'] as Market[]).map(value => <button key={value} type="button" aria-pressed={market === value} onClick={() => setMarket(value)}>{value === 'HK' ? '港股' : '美股'}<small>{value}</small></button>)}</div>}
-        <label className="sf-field"><span>券商</span><select value={broker} onChange={event => setBrokers({ ...brokers, [market]: event.target.value as Broker })}>{plans[market].map(item => <option key={item.broker} value={item.broker}>{item.name}</option>)}</select></label>
+        {!fixedMarket && <SegmentedControl<Market> className="sf-markets" aria-label="交易市场" value={market} onChange={setMarket} options={(['HK', 'US'] as Market[]).map(value => ({ value, label: <>{value === 'HK' ? '港股' : '美股'}<small>{value}</small></> }))} />}
+        <label className="sf-field"><span>券商</span><Select value={broker} onChange={event => setBrokers({ ...brokers, [market]: event.target.value as Broker })}>{plans[market].map(item => <option key={item.broker} value={item.broker}>{item.name}</option>)}</Select></label>
         <p className="sf-plan">{plan.plan}</p>
         <div className="sf-input-grid">
           <label className="sf-field" htmlFor={`${id}-buy`}><span>买入股价 <small>{currency}</small></span><input id={`${id}-buy`} type="text" inputMode="decimal" autoComplete="off" value={buyText} onChange={event => setBuyText(event.target.value)} onFocus={selectOnFocus} aria-invalid={buyPrice === null} aria-describedby={error ? `${id}-error` : undefined} /></label>
           <label className="sf-field" htmlFor={`${id}-sell`}><span>卖出股价 <small>{currency}</small></span><input id={`${id}-sell`} type="text" inputMode="decimal" autoComplete="off" value={sellText} placeholder="留空按买入价" onChange={event => setSellText(event.target.value)} onFocus={selectOnFocus} aria-invalid={sellPrice === null} aria-describedby={error ? `${id}-error` : undefined} /></label>
           <label className="sf-field" htmlFor={`${id}-shares`}><span>交易股数 <small>股</small></span><input id={`${id}-shares`} type="text" inputMode="numeric" autoComplete="off" value={sharesText} onChange={event => setSharesText(event.target.value)} onFocus={selectOnFocus} aria-invalid={shares === null} aria-describedby={error ? `${id}-error` : undefined} /></label>
-          <label className="sf-field"><span>证券类型</span><select value={instrument} onChange={event => setInstrument(event.target.value as Instrument)}><option value="stock">普通股票</option><option value="etf">ETF</option></select></label>
+          <label className="sf-field"><span>证券类型</span><Select value={instrument} onChange={event => setInstrument(event.target.value as Instrument)}><option value="stock">普通股票</option><option value="etf">ETF</option></Select></label>
         </div>
         {broker === 'futu' && <label className="sf-check"><input type="checkbox" checked={commissionFree} onChange={event => setCommissionFree(event.target.checked)} />免佣优惠 <small>仅减免佣金</small></label>}
         {broker === 'za' && market === 'HK' && <label className="sf-check"><input type="checkbox" checked={oddLotSell} onChange={event => setOddLotSell(event.target.checked)} />卖出为不足一手的碎股订单 <small>免卖出平台费</small></label>}

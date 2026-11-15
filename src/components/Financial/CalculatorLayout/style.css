@@ -1,7 +1,7 @@
 @import "../../ToolPage/style.css";
 
+.sf-markets { margin-bottom: 24px; }
 .sf-currency { flex-shrink: 0; border: 1px solid #dce6f7; background: #f0f5ff; color: #3577eb; border-radius: 6px; padding: 8px 12px; font-size: 12px; }
-.sf-markets small { font-weight: 400; margin-left: 7px; font-size: 11px; }
 
 .sf-field > span { display: flex; justify-content: space-between; gap: 8px; }
 .sf-field small { color: #8793a5; font-size: 11px; font-weight: 400; }
@@ -63,18 +63,14 @@
 
 /* Stock and bond controls retain their original shared calculator appearance.
    Scope above ToolPage defaults so lazy stylesheet load order cannot change them. */
-.financial-calculator .sf-markets { display: flex; gap: 6px; background: #f1f4f9; padding: 4px; border-radius: 7px; margin-bottom: 24px; }
-.financial-calculator .sf-markets button { flex: 1; border: 0; background: transparent; color: #718096; padding: 10px; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: 600; }
-.financial-calculator .sf-markets button:hover { background: #e9eef6; border: 0; }
-.financial-calculator .sf-markets button[aria-pressed='true'], .financial-calculator .sf-markets button[aria-pressed='true']:hover { background: #fff; color: #3577eb; box-shadow: 0 1px 4px #25344c12; }
-.financial-calculator .sf-field { display: flex; flex-direction: column; gap: 9px; font-size: 13px; color: #42516a; }
+.financial-calculator .sf-field { min-width: 0; display: flex; flex-direction: column; gap: 9px; font-size: 13px; color: #42516a; }
 .financial-calculator .sf-field input, .financial-calculator .sf-field select { width: 100%; min-width: 0; height: 42px; padding: 0 11px; border: 1px solid #dbe3ed; border-radius: 6px; background-color: #fff; color: #25344c; font-size: 14px; font-variant-numeric: tabular-nums; }
 .financial-calculator .sf-field input[aria-invalid='true'] { border-color: #c44949; }
 .financial-calculator .sf-field input[readonly] { background: #f5f7fa; color: #7a879a; }
 .financial-calculator .sf-input-grid { gap: 20px 16px; }
 /* Independent input and result cards, using the same column rhythm as salary. */
 .financial-calculator .sf-workspace { background: transparent; border: 0; border-radius: 0; overflow: visible; align-items: start; }
-.financial-calculator .sf-input-panel { padding: var(--tool-panel-padding); background: var(--tool-surface); border: 1px solid var(--tool-border); border-radius: var(--tool-radius); }
+.financial-calculator .sf-input-panel { min-width: 0; padding: var(--tool-panel-padding); background: var(--tool-surface); border: 1px solid var(--tool-border); border-radius: var(--tool-radius); }
 .financial-calculator .sf-results { display: flex; flex-direction: column; min-width: 0; padding: 22px; background: var(--tool-highlight); border: 1px solid #d5e4ff; border-radius: var(--tool-radius); gap: 24px; }
 .financial-calculator .sf-fee-overview { padding: 0; }
 .financial-calculator .sf-result-divider { display: flex; align-items: center; flex: none; min-height: 1px; margin: 0; }
