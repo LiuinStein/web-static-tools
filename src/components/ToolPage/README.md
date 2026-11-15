@@ -28,3 +28,7 @@ CSS 变量限定在 `.tool-page` 内，不影响其他页面。可覆写 `--tool
 使用 `useToolConfirm()` 获取 `confirm` 和 `confirmationDialog`，将后者渲染在页面中。执行修改前先 `await confirm({ title, message, confirmLabel, danger })`；只有返回 `true` 才执行动作。取消、Esc、点击遮罩和页面卸载均返回 `false`，重复调用不会替换正在等待的确认。浏览器自身的关闭页面 / 刷新警告不属于应用内对话框。
 
 股票、债券与工资输入模式的分段切换复用 `SegmentedControl`，下拉框复用 `Select`；金融表单的尺寸、边框和颜色统一放在 `Financial/CalculatorLayout/style.css`，通过 `.financial-calculator` 限定作用域和优先级。左右输入与结果采用独立卡片，列间距和窄屏断点仍使用基础模板。
+
+## 可排序表头
+
+使用 `SortableTableHeader` 传入 `label`、`direction`（`asc` / `desc` / `null`）及 `onClick`。组件统一管理箭头、按钮样式、键盘激活和 `aria-sort`；业务负责排序数据和方向切换，不覆盖组件内部样式。

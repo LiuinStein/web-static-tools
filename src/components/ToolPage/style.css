@@ -44,6 +44,9 @@
 .tool-page table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
 .tool-page th { font-size: 11px; font-weight: 500; color: #8190a5; background: #f6f8fb; padding: 13px 12px; white-space: nowrap; }
 .tool-page td { border-bottom: 1px solid #edf1f6; padding: 15px 12px; line-height: 1.6; }
+.tool-page .tool-sort-header button { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; border-radius: 0; color: inherit; background: transparent; font: inherit; white-space: nowrap; }
+.tool-page .tool-sort-header button:hover { color: var(--tool-accent); background: transparent; }
+.tool-page .tool-sort-header[aria-sort=ascending], .tool-page .tool-sort-header[aria-sort=descending] { color: var(--tool-accent); }
 :where(.tool-page) :is(.tool-columns, .salary-layout, .sf-workspace) { display: grid; grid-template-columns: minmax(0,1.1fr) minmax(0,1fr); gap: 22px; align-items: start; }
 :where(.tool-page) :is(.tool-summary, .salary-total, .salary-severance-result) { background: var(--tool-highlight); border: 1px solid #d5e4ff; border-radius: var(--tool-radius); padding: 22px; }
 :where(.tool-page) :is(.tool-summary, .salary-total, .salary-severance-result) > strong { display: block; font-size: 24px; font-weight: 600; margin: 16px 0 12px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }

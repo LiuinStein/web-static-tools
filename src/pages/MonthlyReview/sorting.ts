@@ -25,3 +25,8 @@ export function sortedProducts(products: Product[], book: MonthlyWorkbook, sort:
     return (sort.direction === 'asc' ? compare : -compare) || a.index - b.index;
   }).map(row => row.product);
 }
+
+export function sortedProductRows<T extends { product: Product }>(rows: T[], book: MonthlyWorkbook, sort: ProductSort | null, invalid = new Set<string>()): T[] {
+  const byProduct = new Map(rows.map(row => [row.product, row]));
+  return sortedProducts(rows.map(row => row.product), book, sort, invalid).map(product => byProduct.get(product)!);
+}

@@ -1,9 +1,15 @@
 import Decimal from 'decimal.js';
 import type { MonthlyWorkbook, Product } from './workbook';
-import { benchmarkBand, benchmarkFor, Benchmarks, BenchmarkBand } from './benchmarks';
+import { benchmarkBand, benchmarkFor, Benchmarks, BenchmarkBand, DEFAULT_BENCHMARKS } from './benchmarks';
 import { sumAvailableAmounts } from './totals';
 
 export type ReturnMetric = 'xirr' | 'twr';
+// Overview follows its selected metric without changing the saved asset rules.
+export function overviewBenchmarks(config: Benchmarks, metric: ReturnMetric): Benchmarks {
+  return Object.fromEntries(Object.entries({ ...DEFAULT_BENCHMARKS, ...config }).map(([category, rule]) => [
+    category, { ...rule, metric: rule.metric === 'none' ? 'none' : metric },
+  ]));
+}
 export type ReturnDimension = 'category' | 'member' | 'currency';
 export type ReturnRange = 'high' | 'middle' | 'low' | 'base' | 'negative' | 'missing';
 export type BenchmarkBucket = BenchmarkBand | 'unconfigured' | 'missing';

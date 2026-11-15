@@ -4,6 +4,14 @@ const fs = require('node:fs');
 const ts = require('typescript');
 const ExcelJS = require('exceljs');
 const JSZip = require('jszip');
+// Match the application's @/ alias and CSS handling when loading TSX in Node.
+const Module = require('node:module');
+const resolveFilename = Module._resolveFilename;
+Module._resolveFilename = function (request, ...args) {
+  return resolveFilename.call(this, request.startsWith('@/') ? require('node:path').join(__dirname, '../src', request.slice(2)) : request, ...args);
+};
+require.extensions['.css'] = () => {};
+
 require.extensions['.ts'] = (m, f) => m._compile(ts.transpileModule(fs.readFileSync(f, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true } }).outputText, f);
 const { FormulaEngine, serialDate, xirr } = require('../src/pages/MonthlyReview/formula.ts');
 const { MonthlyWorkbook, rewriteReferences } = require('../src/pages/MonthlyReview/workbook.ts');
@@ -964,6 +972,35 @@ test('benchmark return analysis respects type-specific metrics and keeps unconfi
   assert.equal(groups.find(g => g.key === 'missing').count, 1);
 });
 
+test('overview benchmark metrics follow the selection without changing saved asset rules', () => {
+  const { parseBenchmarks, benchmarkRating } = require('../src/pages/MonthlyReview/benchmarks.ts');
+  const { overviewBenchmarks, benchmarkBucket, returnDetailRows } = require('../src/pages/MonthlyReview/return-analysis.ts');
+  const saved = parseBenchmarks(null);
+  saved['Equity Fund'].metric = 'twr';
+  saved.Custom = { metric: 'xirr', high: 12, middle: 8, low: 4 };
+  const before = JSON.stringify(saved);
+  Object.values(saved).forEach(Object.freeze); Object.freeze(saved);
+  const rows = [
+    { id: 'stock', product: { category: 'Stock' }, xirr: 0.2, twr: -0.1 },
+    { id: 'fund', product: { category: 'Equity Fund' }, xirr: 0.2, twr: 0.1 },
+    { id: 'missing', product: { category: 'Stock' }, xirr: 0.2, twr: null },
+    { id: 'deposit', product: { category: 'Time Deposit' }, xirr: 1, twr: 1 },
+    { id: 'custom', product: { category: 'Custom' }, xirr: 0.01, twr: 0.12 },
+  ];
+  const twr = overviewBenchmarks(saved, 'twr');
+  assert.deepEqual(rows.map(row => benchmarkBucket(row, twr)), ['below', 'middle', 'missing', 'unconfigured', 'high']);
+  assert.deepEqual(returnDetailRows(rows, twr, { kind: 'benchmark', key: 'missing' }).map(row => row.id), ['missing']);
+  assert.equal(benchmarkRating(twr, 'Stock', 'twr', -0.1).className, 'mr-performance-below');
+  assert.equal(benchmarkRating(twr, 'Stock', 'xirr', 0.2).className, undefined);
+  const xirr = overviewBenchmarks(saved, 'xirr');
+  assert.deepEqual(rows.map(row => benchmarkBucket(row, xirr)), ['high', 'high', 'high', 'unconfigured', 'below']);
+  assert.equal(benchmarkRating(saved, 'Stock', 'xirr', 0.2).className, 'mr-performance-high');
+  assert.equal(benchmarkRating(saved, 'Equity Fund', 'twr', 0.1).className, 'mr-performance-middle');
+  assert.equal(JSON.stringify(saved), before);
+  assert.equal(twr.Custom.high, 12);
+  assert.equal(overviewBenchmarks({}, 'twr').Stock.metric, 'twr');
+});
+
 test('return analysis overview renders all three analysis views and handles empty and missing data', async () => {
   const oldExtension = require.extensions['.tsx'];
   require.extensions['.tsx'] = (m, f) => m._compile(ts.transpileModule(fs.readFileSync(f, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React, esModuleInterop: true } }).outputText, f);
@@ -1009,7 +1046,7 @@ test('distribution detail selection matches the clicked bucket and retains all s
 
 test('clicking return and benchmark distribution entries opens scoped product details with balances and rates', async () => {
   const book = await fixture();
-  book.set('Assets', 'K3', 0.2); book.set('WTH', 'K3', 0.1);
+  book.set('Assets', 'K3', 0.2); book.set('Assets', 'L3', 0.01); book.set('WTH', 'K3', 0.1); book.set('WTH', 'E3', 2200);
   const React = require('react');
   const original = { useState: React.useState, useMemo: React.useMemo, useEffect: React.useEffect };
   const extension = require.extensions['.tsx'];
@@ -1026,8 +1063,8 @@ test('clicking return and benchmark distribution entries opens scoped product de
     return memos[index].value;
   };
   React.useEffect = () => {};
-  const nodes = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(nodes) : [node, ...nodes(node.props?.children)];
-  const text = node => Array.isArray(node) ? node.map(text).join('') : node && typeof node === 'object' ? text(node.props?.children) : node == null || node === false ? '' : String(node);
+  const nodes = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(nodes) : node.type?.name === 'SortableTableHeader' ? nodes(node.type(node.props)) : node.type?.render ? nodes(node.type.render(node.props, null)) : [node, ...nodes(node.props?.children)];
+  const text = node => Array.isArray(node) ? node.map(text).join('') : node && typeof node === 'object' ? node.type?.name === 'SortableTableHeader' ? text(node.type(node.props)) : text(node.props?.children) : node == null || node === false ? '' : String(node);
   const analysis = require('../src/pages/MonthlyReview/return-analysis.ts');
   const watched = ['returnRows', 'returnSummary', 'distribution', 'compareReturns', 'rankReturns', 'returnDetailRows'];
   const counters = {}, functions = {};
@@ -1131,6 +1168,57 @@ test('clicking return and benchmark distribution entries opens scoped product de
     assert.equal(prevented, true);
     assert.equal(dialog(render()).props.visible, true);
     assert.deepEqual(counters, beforeMedianClose);
+    modal.props.onClose('maskClick');
+    const savedBenchmarks = JSON.stringify(props.benchmarks);
+    nodes(render()).find(node => node.type === 'button' && node.props.children === '年化 TWR').props.onClick();
+    tree = render();
+    assert.ok(text(charts(tree)[9]).includes('年化 TWR＜低档'));
+    assert.ok(text(charts(tree)[9]).includes('1 个产品'));
+    assert.ok(text(charts(tree)[11]).includes('1 个产品'), 'missing TWR must not fall back to XIRR');
+    filter(tree).props.onChange({ target: { value: 'band:below' } });
+    assert.equal(countRows(render()), 1);
+    const ratings = scope => nodes(scope).filter(node => node.type === 'td' && node.props.className?.startsWith('mr-performance-'));
+    assert.equal(ratings(ranking(render()))[0].props.children, '1.00%');
+    comparison(render()).props.onClick();
+    modal = dialog(render());
+    assert.ok(modal.props.title.includes('年化 TWR'));
+    assert.equal(ratings(modal).length, 1);
+    assert.equal(ratings(modal)[0].props.children, '1.00%');
+    assert.ok(ratings(modal)[0].props.title.includes('年化 TWR'));
+    modal.props.onClose('maskClick');
+    charts(render())[9].props.onClick();
+    modal = dialog(render());
+    assert.ok(modal.props.title.includes('年化 TWR'));
+    assert.equal(nodes(modal).find(node => node.type === 'tbody').props.children.length, 1);
+    assert.ok(text(modal).includes('Assets 示例产品'));
+    modal.props.onClose('maskClick');
+    nodes(render()).find(node => node.type === 'button' && node.props.children === 'XIRR').props.onClick();
+    assert.equal(ratings(ranking(render())).length, 2);
+    assert.ok(ratings(ranking(render())).every(node => node.props.title.includes('XIRR')));
+    assert.equal(JSON.stringify(props.benchmarks), savedBenchmarks);
+    charts(render())[6].props.onClick();
+    const names = () => nodes(dialog(render())).filter(node => node.type === 'strong').map(text).filter(value => value.includes('示例产品'));
+    const clickSort = label => nodes(dialog(render())).find(node => node.type === 'button' && node.props['aria-label'] === '按' + label + '排序').props.onClick();
+    assert.deepEqual(names(), ['Assets 示例产品', 'WTH 示例产品']);
+    assert.equal(nodes(dialog(render())).filter(node => node.type === 'th' && node.props['aria-sort']).length, 3);
+    clickSort('XIRR');
+    assert.deepEqual(names(), ['WTH 示例产品', 'Assets 示例产品']);
+    assert.ok(nodes(dialog(render())).some(node => node.type === 'th' && node.props['aria-sort'] === 'ascending'));
+    clickSort('XIRR');
+    assert.deepEqual(names(), ['Assets 示例产品', 'WTH 示例产品']);
+    clickSort('XIRR');
+    assert.deepEqual(names(), ['Assets 示例产品', 'WTH 示例产品']);
+    clickSort('当期金额（原币）');
+    clickSort('当期金额（原币）');
+    assert.deepEqual(names(), ['WTH 示例产品', 'Assets 示例产品']);
+    clickSort('当期金额（原币）');
+    assert.deepEqual(names(), ['Assets 示例产品', 'WTH 示例产品']);
+    for (let i = 0; i < 2; i++) {
+      clickSort('年化 TWR');
+      assert.deepEqual(names(), ['Assets 示例产品', 'WTH 示例产品'], 'missing TWR remains last in either direction');
+    }
+    assert.equal(filter(render()).props.value, 'all', 'detail sorting does not filter the overview ranking');
+
 
   } finally {
     Object.assign(React, original);
@@ -1256,8 +1344,8 @@ test('liquidity profit filters drive scoped popup details and closing reuses dat
     };
     React.useEffect = () => {};
     book.value = (...args) => { reads++; return value(...args); };
-    const nodes = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(nodes) : [node, ...nodes(node.props?.children)];
-    const text = node => Array.isArray(node) ? node.map(text).join('') : node && typeof node === 'object' ? text(node.props?.children) : node == null || node === false ? '' : String(node);
+    const nodes = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(nodes) : node.type?.name === 'SortableTableHeader' ? nodes(node.type(node.props)) : node.type?.render ? nodes(node.type.render(node.props, null)) : [node, ...nodes(node.props?.children)];
+    const text = node => Array.isArray(node) ? node.map(text).join('') : node && typeof node === 'object' ? node.type?.name === 'SortableTableHeader' ? text(node.type(node.props)) : text(node.props?.children) : node == null || node === false ? '' : String(node);
     const render = () => { cursor = 0; return Component(props); };
     const modal = tree => nodes(tree).find(node => node.props?.className?.includes('mr-liquidity-details'));
     const profit = tree => nodes(tree).find(node => node.type === 'select' && node.props['aria-label'] === '流动性获利筛选');
@@ -1724,4 +1812,34 @@ test('export removes blank account padding, restores XIRR labels and splits mixe
   const again=new ExcelJS.Workbook();await again.xlsx.load(await loaded.export());assert.equal(again.getWorksheet('XIRR').getCell('B'+mergeStart).value,'ZA Bank');
   assert.deepEqual(again.getWorksheet('XIRR').model.merges,sheet.model.merges,'repeated export removes no additional rows');
   const withContent=book.clone();withContent.set('XIRR','D'+mergeStart,'Keep this note');const retained=new ExcelJS.Workbook();await retained.xlsx.load(await withContent.export());assert.equal(retained.getWorksheet('XIRR').getCell('D'+mergeStart).value,'Keep this note');
+});
+
+test('overview detail sorting compares numeric values, keeps missing values last and preserves source/group membership', async () => {
+  const { sortedProductRows, nextProductSort } = require('../src/pages/MonthlyReview/sorting.ts');
+  const book = await fixture();
+  book.set('Assets', 'K3', 0.2); book.set('Assets', 'L3', -0.3);
+  book.set('WTH', 'K3', -0.1); book.set('WTH', 'L3', 0);
+  const [a, b] = book.products();
+  const rows = [
+    { id: 'a', product: { ...a, balance: 100 } },
+    { id: 'b', product: { ...b, balance: 2000 } },
+    { id: 'equal', product: { ...a, balance: 100 } },
+    { id: 'missing', product: { ...a, row: 99, balance: NaN } },
+  ];
+  const ids = (field, direction, source = rows, invalid = new Set()) => sortedProductRows(source, book, { field, direction }, invalid).map(row => row.id);
+  assert.deepEqual(ids('balance', 'asc'), ['a', 'equal', 'b', 'missing']);
+  assert.deepEqual(ids('balance', 'desc'), ['b', 'a', 'equal', 'missing']);
+  assert.deepEqual(ids('xirr', 'asc'), ['b', 'a', 'equal', 'missing']);
+  assert.deepEqual(ids('xirr', 'desc'), ['a', 'equal', 'b', 'missing']);
+  assert.deepEqual(ids('twr', 'asc'), ['a', 'equal', 'b', 'missing']);
+  assert.deepEqual(ids('twr', 'desc'), ['b', 'a', 'equal', 'missing']);
+  assert.deepEqual(ids('balance', 'desc', rows, new Set(['WTH:3'])), ['a', 'equal', 'b', 'missing']);
+  assert.deepEqual(ids('balance', 'desc', rows.slice(0, 1)), ['a'], 'sorting stays inside the given median group');
+  assert.deepEqual(sortedProductRows(rows, book, null), rows);
+  let sort = nextProductSort(null, 'balance');
+  assert.equal(sort.direction, 'asc');
+  sort = nextProductSort(sort, 'balance'); assert.equal(sort.direction, 'desc');
+  assert.equal(nextProductSort(sort, 'balance'), null);
+  assert.equal(nextProductSort(sort, 'twr').direction, 'asc');
+  assert.deepEqual(rows.map(row => row.id), ['a', 'b', 'equal', 'missing']);
 });

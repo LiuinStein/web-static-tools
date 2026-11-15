@@ -17,7 +17,7 @@ const blocked = (text, id) => assert.ok(check(text).some(issue => issue.rule ===
 const clean = text => assert.deepEqual(check(text), [], text);
 
 test('registry covers every shared family, without exempting whole feature pages', () => {
-  assert.deepEqual(rules.map(x => x.id), ['select', 'date-input', 'segmented', 'dialog', 'confirmation', 'page-header', 'tool-template', 'financial-template', 'comparison-table']);
+  assert.deepEqual(rules.map(x => x.id), ['sortable-header', 'select', 'date-input', 'segmented', 'dialog', 'confirmation', 'page-header', 'tool-template', 'financial-template', 'comparison-table']);
   for (const rule of rules) {
     assert.ok(rule.entry && rule.review);
     assert.ok(fs.readFileSync(path.resolve(__dirname, '../docs/CODING_GUIDELINES.md'), 'utf8').includes('`' + rule.id + '`'), rule.id);
@@ -160,4 +160,10 @@ test('only Git-added lines are checked, including staged changes, untracked file
     fs.unlinkSync(added);
     assert.deepEqual(checkProject(directory), []); // Deleted code does not create a violation.
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('sortable headers protect their shared layout and allow sorting callbacks', () => {
+  clean(`import H from '@/components/ToolPage/SortableTableHeader'; const ui=<H label="XIRR" direction="asc" onClick={toggle}/>;`);
+  blocked(`import H from '@/components/ToolPage/SortableTableHeader'; const ui=<H label="XIRR" style={{padding:0}}/>;`, 'sortable-header');
+  assert.ok(css('.tool-sort-header button { padding: 10px; }', 'src/pages/Example/style.css').some(issue => issue.rule === 'sortable-header'));
 });

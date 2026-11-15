@@ -22,6 +22,7 @@
 | 预设与自由输入 | `@/components/Select` 的 `SelectAutoComplete` |
 | 原生单日期输入 | [`@/components/DateInput`](../src/components/DateInput/README.md) |
 | 市场、币种、输入模式分段选项 | `@/components/SegmentedControl` |
+| 可排序表头 | `@/components/ToolPage/SortableTableHeader` |
 | 工具页弹窗 | `@/components/ToolPage/ToolDialog` |
 | 工具页操作确认 | `@/components/ToolPage/useToolConfirm` |
 | 通用页面标题 | `@/components/PageHeader` |
@@ -114,6 +115,7 @@ import DateInput from '@/components/DateInput';
 
 | 规则 ID | 组件／模板 | 自动检查范围 |
 | --- | --- | --- |
+| `sortable-header` | SortableTableHeader | 表头按钮私有样式、受保护的 style/className；业务只提供列名、方向与回调 |
 | `select` | Select 系列 | 原生 select、库导入及别名/子路径/命名空间/重新导出绕过、右侧留白与箭头属性、私有 CSS/变量 |
 | `date-input` | DateInput | 原生日期框、动态 type 和属性展开、组件固定属性、尺寸变体、WebKit 几何样式与变量 |
 | `segmented` | SegmentedControl | 业务侧原生 aria-pressed 按钮、私有结构样式和公开变体；正常 radio/checkbox 保留原有语义 |

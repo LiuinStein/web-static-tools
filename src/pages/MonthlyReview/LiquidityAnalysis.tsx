@@ -1,4 +1,6 @@
 import Select from '@/components/Select';
+import SortableTableHeader from '@/components/ToolPage/SortableTableHeader';
+import { ProductSort, nextProductSort, sortedProductRows } from './sorting';
 import React, { useEffect, useMemo, useState } from 'react';
 import Dialog from './MonthlyDialog';
 import type { MonthlyWorkbook, Product } from './workbook';
@@ -16,6 +18,7 @@ interface Props { book: MonthlyWorkbook; products: Product[]; invalidKeys: strin
 export default function LiquidityAnalysis({ book, products, invalidKeys, templateSummary, categoryNames, onViewProduct }: Props) {
   const [filters, setFilters] = useState<LiquidityFilters>({ ...DEFAULT_LIQUIDITY_FILTERS });
   const [bucket, setBucket] = useState<LiquidityBucket | 'all' | null>(null), [visible, setVisible] = useState(false);
+  const [detailSort, setDetailSort] = useState<ProductSort | null>(null);
   const [today, setToday] = useState(() => liquidityToday());
   useEffect(() => {
     const refresh = () => setToday(liquidityToday());
@@ -42,13 +45,13 @@ export default function LiquidityAnalysis({ book, products, invalidKeys, templat
   const missingDetailBalance = useMemo(() => details.some(row => row.balanceRmb === null), [details]);
   const open = (value: LiquidityBucket | 'all') => { setBucket(value); setVisible(true); };
   const range = (value: LiquidityBucket) => value === 'undated' ? '无固定 / 未登记到期日，视为随时可支取' : !bounds ? '请核对当前日期' : value === 'matured' ? '截至 ' + isoDate(bounds.asOf) : value === 'thisMonth' ? isoDate(bounds.asOf) + ' 之后至 ' + isoDate(bounds.monthEnd) : value === 'nextThreeMonths' ? isoDate(bounds.monthEnd) + ' 之后至 ' + isoDate(bounds.threeMonthEnd) : value === 'later' ? isoDate(bounds.threeMonthEnd) + ' 之后' : '到期信息无法识别';
-  const table = useMemo(() => <div className="mr-table-wrap"><table><thead><tr><th>产品 / 账户</th><th>成员 / 币种</th><th>到期日</th><th>流动性区间</th><th>当前总成本（原币）</th><th>总收益（原币）</th><th>当期金额（原币）</th><th /></tr></thead><tbody>{details.map(row => <tr key={row.id}>
+  const table = useMemo(() => <div className="mr-table-wrap"><table><thead><tr><th>产品 / 账户</th><th>成员 / 币种</th><th>到期日</th><th>流动性区间</th><th>当前总成本（原币）</th><th>总收益（原币）</th><SortableTableHeader label="当期金额（原币）" direction={detailSort?.direction || null} onClick={() => setDetailSort(current => nextProductSort(current, 'balance'))} /><th /></tr></thead><tbody>{sortedProductRows(details, book, detailSort, new Set(invalidKeys)).map(row => <tr key={row.id}>
     <td><strong>{row.product.name}</strong><small>{row.product.account} · {categoryNames[row.product.category] || row.product.category}</small></td>
     <td>{row.product.member}<small>{row.product.currency}</small></td>
     <td title={String(row.rawDue ?? '')}>{row.date || (row.bucket === 'undated' ? '随时可支取' : '待核实')}<small>{row.days !== null ? row.days === 0 ? '今天到期' : row.days > 0 ? '距今天 ' + row.days + ' 天' : '已到期 ' + (-row.days) + ' 天' : row.bucket === 'unknown' ? String(row.rawDue ?? '') : ''}</small></td>
     <td>{LIQUIDITY_NAMES[row.bucket]}</td><td>{currencyCode(row.product.currency)} {money(row.cost)}</td><td className={row.gain !== null && row.gain > 0 ? 'mr-profit-positive' : row.gain !== null && row.gain < 0 ? 'mr-profit-negative' : ''}>{money(row.gain)}{row.deposit && <small>存款按已获利</small>}</td>
     <td>{currencyCode(row.product.currency)} {money(invalidKeys.includes(row.id) ? null : row.product.balance)}</td><td><button onClick={() => { setVisible(false); onViewProduct(row.product); }}>查看资产</button></td>
-  </tr>)}</tbody></table></div>, [details, categoryNames, invalidKeys.join('|'), onViewProduct]);
+  </tr>)}</tbody></table></div>, [details, book, detailSort, categoryNames, invalidKeys.join('|'), onViewProduct]);
 
   return <section className="mr-panel mr-liquidity-analysis" aria-label="流动性分析">
     <div className="mr-section-heading"><div><h2>流动性分析</h2><p>以当前日期 {bounds ? isoDate(bounds.asOf) : '—'} 为基准，按产品已登记到期日分组。</p></div><button onClick={() => open('all')}>查看产品明细</button></div>
