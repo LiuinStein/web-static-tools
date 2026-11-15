@@ -12,6 +12,7 @@ import { isOneDriveAuthRequired } from '../../services/onedrive-auth';
 import { ReviewAccount, reviewAccounts, nextReviewAccount } from './account-navigation';
 import { linkedOptions } from './filters';
 import { rawAmount, currencyCode } from './amount';
+import { productQuickNotes } from './quick-notes';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Dialog from './MonthlyDialog';
 import { Prompt } from 'react-router-dom';
@@ -302,6 +303,7 @@ export default function MonthlyReview() {
   const selectedCategory = selected?.category || groupOptions.find(g => g.key === anchorKey)?.category || '';
   const automaticFlow = isCashAccount(selectedCategory), balanceOnly = isBalanceOnly(selectedCategory);
   const formAutomaticFlow = [productForm.balance, ...(selected ? [productForm.previous] : [])].every(v => v.trim() !== '' && Number.isFinite(Number(v))) ? new Decimal(productForm.balance).minus(selected ? productForm.previous : 0).toNumber() : NaN;
+  const quickNotes = useMemo(() => book && selected ? productQuickNotes(book, selected, productForm.balance) : null, [book, selected, productForm.balance]);
   const categories = useMemo(() => [...new Set(products.map(p => p.category))].sort((a, b) => (categoryNames[a] || a).localeCompare(categoryNames[b] || b, 'zh-CN')), [products]);
   useEffect(() => {
     if (book && categoryFilter && !products.some(p => p.category === categoryFilter)) setCategoryFilter('');
@@ -472,7 +474,13 @@ export default function MonthlyReview() {
           {selected && field('上期余额', productForm.previous, v => setProductForm({ ...productForm, previous: v }), 'number')}
           {selected && field('期间净投入（投入为正，回款为负）', automaticFlow ? Number.isFinite(formAutomaticFlow) ? String(formAutomaticFlow) : '' : productForm.flow, v => setProductForm({ ...productForm, flow: v }), 'number', automaticFlow)}
           {field('到期日（可留空）', productForm.due, v => setProductForm({ ...productForm, due: v }), 'date')}
-          {field('备注', productForm.note, v => setProductForm({ ...productForm, note: v }))}
+          <div className="mr-note-field">
+            {field('备注', productForm.note, v => setProductForm({ ...productForm, note: v }))}
+            {selected && quickNotes && <>
+              <div className="mr-toolbar-group mr-quick-notes" role="group" aria-label="快捷备注">{quickNotes.options.map(option => <button key={option.label} className={`tool-button--small tool-button--${option.tone}`} type="button" disabled={busy || Boolean(option.disabledReason)} title={option.disabledReason || option.text || undefined} onClick={() => { const note = option.text; if (!option.disabledReason && note !== null) setProductForm(current => ({ ...current, note })); }}>{option.label}</button>)}</div>
+              {quickNotes.error && <p role="status">{quickNotes.error}</p>}
+            </>}
+          </div>
         </div>
         {!selected && <fieldset disabled={automaticFlow || busy} aria-disabled={automaticFlow} className="mr-product-flow">
           <h3>{balanceOnly ? '本期净投入' : '本期交易与净投入'}</h3>

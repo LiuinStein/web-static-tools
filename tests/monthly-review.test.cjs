@@ -1843,3 +1843,69 @@ test('overview detail sorting compares numeric values, keeps missing values last
   assert.equal(nextProductSort(sort, 'twr').direction, 'asc');
   assert.deepEqual(rows.map(row => row.id), ['a', 'b', 'equal', 'missing']);
 });
+
+test('quick product notes use actual currency, net transaction cost and the current edit balance without mutating the workbook', async () => {
+  const { productQuickNotes } = require('../src/pages/MonthlyReview/quick-notes.ts');
+  const book = await fixture();
+  let product = book.products()[0];
+  book.saveTransactions(product, [{ date: '2026-10-01', amount: 1000, shares: 100, price: 10, kind: 'buy' }]);
+  product = { ...book.products()[0], currency: 'HKD' };
+  book.set(product.sheet, 'K' + product.row, 0.03); book.set(product.sheet, 'L' + product.row, 0.03);
+  const beforeNote = book.value(product.sheet, 'N' + product.row);
+  const beforeBalance = book.value(product.sheet, 'E' + product.row);
+  const notes = productQuickNotes(book, product, '900');
+  assert.equal(notes.error, '');
+  assert.deepEqual(notes.options.map(option => option.tone), ['danger', 'warning', 'success']);
+  assert.deepEqual(notes.options.map(option => Boolean(option.disabledReason)), [false, true, true], 'a losing product only supports stopping loss');
+  for (const [balance, expected] of [
+    ['900', [false, true, true]], ['1100', [true, false, false]],
+    ['1000', [true, false, true]], ['0', [false, true, true]],
+    ['999.999', [false, true, true]],
+  ]) assert.deepEqual(productQuickNotes(book, product, balance).options.map(option => Boolean(option.disabledReason)), expected, balance);
+
+  assert.deepEqual(notes.options.map(({ label, text }) => ({ label, text })), [
+    { label: '止损清仓', text: '止损清仓，XIRR 3%，TWR 3%，预计本金损失 HKD 100.00。' },
+    { label: '效益差淘汰', text: '效益差淘汰，XIRR 3%，TWR 3%，预计盈利 HKD -100.00。' },
+    { label: '止盈清仓', text: '止盈清仓，XIRR 3%，TWR 3%，预计盈利 HKD -100.00。' },
+  ]);
+  const profit = productQuickNotes(book, { ...product, currency: 'USD' }, '1,234.56');
+  assert.equal(profit.options[1].text, '效益差淘汰，XIRR 3%，TWR 3%，预计盈利 USD 234.56。');
+  assert.equal(profit.options[2].text, '止盈清仓，XIRR 3%，TWR 3%，预计盈利 USD 234.56。');
+  assert.equal(productQuickNotes(book, { ...product, currency: 'CNY' }, '1233.04').options[2].text, '止盈清仓，XIRR 3%，TWR 3%，预计盈利 RMB 233.04。');
+  assert.equal(productQuickNotes(book, { ...product, currency: 'CNY' }, '1000').options[0].text, '止损清仓，XIRR 3%，TWR 3%，预计本金损失 RMB 0.00。');
+  assert.equal(productQuickNotes(book, product, '999.999').options[1].text, '效益差淘汰，XIRR 3%，TWR 3%，预计盈利 HKD 0.00。');
+  book.set(product.sheet, 'K' + product.row, 0);
+  book.set(product.sheet, 'L' + product.row, -0.03456);
+  assert.equal(productQuickNotes(book, product, '1233.04').options[2].text, '止盈清仓，XIRR 0%，TWR -3.46%，预计盈利 HKD 233.04。');
+  for (const missing of [null, '#NUM!', 'N/A', 'Check inputs']) {
+    book.set(product.sheet, 'K' + product.row, missing);
+    assert.ok(productQuickNotes(book, product, '1100').options[2].text.includes('XIRR 待核实，TWR -3.46%'));
+  }
+  book.set(product.sheet, 'K' + product.row, 0.03); book.set(product.sheet, 'L' + product.row, 0.03);
+  assert.equal(book.value(product.sheet, 'N' + product.row), beforeNote);
+  assert.equal(book.value(product.sheet, 'E' + product.row), beforeBalance);
+  for (const balance of ['', ' ', '-1', 'NaN', 'Infinity', 'invalid']) {
+    const result = productQuickNotes(book, product, balance);
+    assert.ok(result.error.includes('余额'));
+    assert.ok(result.options.every(option => option.text === null && option.disabledReason));
+  }
+  assert.ok(productQuickNotes(book, { ...product, block: undefined }, '900').error.includes('成本'));
+  assert.ok(productQuickNotes(book, { ...product, currency: '' }, '900').error.includes('币种'));
+  book.saveTransactions(product, [
+    { date: '2026-10-01', amount: 1000, shares: 100, price: 10, kind: 'buy' },
+    { date: '2026-10-10', amount: 200, shares: 20, price: 10, kind: 'sell' },
+    { date: '2026-10-12', amount: 25, shares: 0, price: 10, kind: 'dividend' },
+  ]);
+  product = { ...book.products()[0], currency: 'HKD' };
+  book.set(product.sheet, 'K' + product.row, 0.03); book.set(product.sheet, 'L' + product.row, 0.03);
+  assert.equal(productQuickNotes(book, product, '700').options[0].text, '止损清仓，XIRR 3%，TWR 3%，预计本金损失 HKD 75.00。');
+  assert.equal(productQuickNotes(book, product, '875').options[1].text, '效益差淘汰，XIRR 3%，TWR 3%，预计盈利 HKD 100.00。');
+  const shared = { ...product, block: { ...product.block, shared: true, sourceRows: [product.block.start] } };
+  book.set(shared.block.sheet, 'E' + shared.block.start, 500);
+  assert.equal(productQuickNotes(book, shared, '400').options[0].text, '止损清仓，XIRR 3%，TWR 3%，预计本金损失 HKD 100.00。');
+  const savedNote = productQuickNotes(book, product, '875').options[1].text;
+  const batch = new MonthlyBatch(book);
+  const edited = batch.apply(next => next.updateProductNote(product, savedNote));
+  assert.equal(book.value(product.sheet, 'N' + product.row), beforeNote, 'batch edits remain isolated until saved');
+  assert.equal(edited.book.value(product.sheet, 'N' + product.row), savedNote);
+});

@@ -24,6 +24,14 @@
 :where(.tool-page) button { font: inherit; cursor: pointer; background: var(--tool-surface); border: 1px solid var(--tool-control-border); border-radius: 6px; color: #40516a; padding: 9px 14px; transition: background .15s; }
 :where(.tool-page) button:where(:hover) { background: #f0f5ff; border-color: #aac7f8; }
 .tool-page button:disabled { opacity: .5; cursor: not-allowed; }
+.tool-page button.tool-button--small { padding: 4px 8px; font-size: 12px; line-height: 18px; }
+.tool-page button.tool-button--success { color: #16845b; background: #edf8f4; border-color: #c9e7de; }
+.tool-page button.tool-button--warning { color: #946e16; background: #fff9ed; border-color: #f0e3c6; }
+.tool-page button.tool-button--danger { color: #b54536; background: #fff3f1; border-color: #f1d2cc; }
+.tool-page button.tool-button--success:not(:disabled):hover { background: #dff1e8; border-color: #98cdb6; }
+.tool-page button.tool-button--warning:not(:disabled):hover { background: #fff0cf; border-color: #daba70; }
+.tool-page button.tool-button--danger:not(:disabled):hover { background: #ffe7e1; border-color: #d9998d; }
+.tool-page button:is(.tool-button--success, .tool-button--warning, .tool-button--danger):disabled { color: #9aa5b4; background: #f5f7fa; border-color: #dce3ed; opacity: 1; }
 .tool-page button.primary { background: var(--tool-accent); border-color: var(--tool-accent); color: #fff; }
 .tool-page button.primary:hover { background: #2464ce; }
 .tool-page button.danger { color: #ca5353; }
