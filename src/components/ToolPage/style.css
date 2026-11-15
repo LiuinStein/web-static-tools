@@ -20,8 +20,9 @@
 :where(.tool-page) :is(.tool-eyebrow, .mr-eyebrow, .salary-eyebrow, .sf-eyebrow) { font-size: 11px; letter-spacing: 2.4px; color: var(--tool-accent); font-weight: 700; }
 :where(.tool-page) :is(.tool-heading, .mr-title, .salary-heading, .sf-heading) :is(h1, h2) { font-size: 28px; letter-spacing: .2px; margin: 10px 0 12px; font-weight: 600; }
 :where(.tool-page) :is(.tool-heading, .mr-title, .salary-heading, .sf-heading) p { color: var(--tool-muted); line-height: 1.7; margin: 6px 0 18px; }
-.tool-page button { font: inherit; cursor: pointer; background: var(--tool-surface); border: 1px solid var(--tool-control-border); border-radius: 6px; color: #40516a; padding: 9px 14px; transition: background .15s; }
-.tool-page button:hover { background: #f0f5ff; border-color: #aac7f8; }
+/* Defaults stay below specialized controls, regardless of lazy CSS load order. */
+:where(.tool-page) button { font: inherit; cursor: pointer; background: var(--tool-surface); border: 1px solid var(--tool-control-border); border-radius: 6px; color: #40516a; padding: 9px 14px; transition: background .15s; }
+:where(.tool-page) button:where(:hover) { background: #f0f5ff; border-color: #aac7f8; }
 .tool-page button:disabled { opacity: .5; cursor: not-allowed; }
 .tool-page button.primary { background: var(--tool-accent); border-color: var(--tool-accent); color: #fff; }
 .tool-page button.primary:hover { background: #2464ce; }
