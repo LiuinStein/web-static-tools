@@ -17,6 +17,8 @@ import {
   TradeChange,
   calculateFee,
   updatePricingDraft,
+  defaultStopPrice,
+  lowStopPricePercent,
   normalizeCodeInput,
   completeStockCode,
   stockCodeRule,
@@ -75,6 +77,7 @@ const blank = () => ({
   price: '',
   shares: '',
   stopPrice: '',
+  stopPriceManual: false,
   fee: '0.00',
   reason: '',
   brainstorm: false,
@@ -145,7 +148,8 @@ export default function TradingJournal() {
   const fee = automaticFee
     ? calculateFee(Number(draft.amount), Number(draft.price), Number(draft.shares))
     : Number(draft.fee);
-  const riskExposure = calculateRiskExposure(draft.stopPrice, draft.shares, draft.amount);
+  const stopPricePercent = lowStopPricePercent(draft.stopPrice, draft.price);
+  const riskExposure = calculateRiskExposure(draft.stopPrice, draft.shares, draft.amount) || '0';
   const showStopWarning = isStock(draft.type) && (!!editing?.reason.includes(stopWarning) || hasHistoricalStopBreach(
     all, { type: draft.type, code: draft.code, date: draft.date, price: Number(draft.price) }, editing?.id,
   ));
@@ -361,7 +365,8 @@ export default function TradingJournal() {
       amountManual: true,
       price: trade.price === undefined ? '' : String(trade.price),
       shares: trade.shares === undefined ? '' : String(trade.shares),
-      stopPrice: trade.stopPrice === undefined ? '' : String(trade.stopPrice),
+      stopPrice: trade.stopPrice === undefined ? defaultStopPrice(String(trade.price ?? '')) : String(trade.stopPrice),
+      stopPriceManual: trade.stopPrice !== undefined,
       fee: trade.fee.toFixed(2),
       reason: reasonWithoutStopWarning(trade.reason),
       brainstorm: !!trade.brainstorm,
@@ -386,7 +391,9 @@ export default function TradingJournal() {
   }
   const field = (key: keyof typeof draft, value: string) => setDraft(current =>
     key === 'price' || key === 'shares' || key === 'amount'
-      ? updatePricingDraft(current, key, value) : { ...current, [key]: value });
+      ? updatePricingDraft(current, key, value)
+      : key === 'stopPrice' ? { ...current, stopPrice: value, stopPriceManual: true }
+        : { ...current, [key]: value });
   const amountField = (
     <label className="j-field">
       交易总价（{draft.currency || '请选择币种'}） <em>*</em>
@@ -961,9 +968,10 @@ export default function TradingJournal() {
                 <label className="j-field">
                   <span>止损单价（{stockCurrency(draft.type)}） <em>*</em></span>
                   <AmountInput aria-label="止损单价" type="text" inputMode="decimal" required
+                    aria-describedby={stopPricePercent === undefined ? undefined : 'stop-price-percent-hint'}
                     onFocus={(e) => e.currentTarget.select()}
                     onClick={(e) => e.currentTarget.select()}
-                    placeholder="输入止损单价" value={draft.stopPrice}
+                    placeholder="默认单价 × 0.9，可修改" value={draft.stopPrice}
                     onChange={e => field('stopPrice', rawAmount(e.target.value))} />
                 </label>
                 <label className="j-field">
@@ -974,6 +982,7 @@ export default function TradingJournal() {
                     placeholder="自动计算" />
                 </label>
               </div>
+              {stopPricePercent !== undefined && <p id="stop-price-percent-hint" className="j-fee-help j-fee-help--warning" role="status">当前止损单价为单价的 {stopPricePercent}%</p>}
               <p className="j-fee-help">风险敞口自动计算：止损单价 × 份额 − 交易总价。</p>
             </>)}
             <label className="j-field">

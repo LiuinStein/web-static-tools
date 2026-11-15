@@ -177,6 +177,8 @@ export interface PricingDraft {
   shares: string;
   amount: string;
   amountManual: boolean;
+  stopPrice?: string;
+  stopPriceManual?: boolean;
 }
 export function updatePricingDraft<T extends PricingDraft>(draft: T, key: 'type' | 'price' | 'shares' | 'amount', value: string): T {
   const next = { ...draft, [key]: value, amountManual: key === 'amount' ? true : draft.amountManual };
@@ -186,7 +188,17 @@ export function updatePricingDraft<T extends PricingDraft>(draft: T, key: 'type'
       next.amount = price.isFinite() && shares.isFinite() && price.gt(0) && shares.gt(0) ? price.times(shares).toString() : '';
     } catch { next.amount = ''; }
   }
+  if ('stopPrice' in next && isStock(next.type) && !next.stopPriceManual) {
+    next.stopPrice = defaultStopPrice(next.price);
+  }
   return next;
+}
+
+export function defaultStopPrice(price: string): string {
+  try {
+    const value = new Decimal(price);
+    return value.isFinite() && value.gt(0) ? value.times('0.9').toString() : '';
+  } catch { return ''; }
 }
 
 const stockCodeRules = {
@@ -240,4 +252,13 @@ export function validateTradeEntry(trade: Trade): void {
   validateTrade(trade);
   // Legacy rows remain readable; every newly saved stock entry needs a stop price.
   if (isStock(trade.type) && trade.stopPrice === undefined) throw new Error('股票止损单价必填');
+}
+
+
+export function lowStopPricePercent(stopPrice: string, price: string): string | undefined {
+  try {
+    const stop = new Decimal(stopPrice), current = new Decimal(price);
+    if (!stop.isFinite() || !current.isFinite() || stop.lte(0) || current.lte(0) || stop.gte(current.times('0.9'))) return undefined;
+    return stop.div(current).times(100).toFixed(0, Decimal.ROUND_HALF_UP);
+  } catch { return undefined; }
 }

@@ -844,3 +844,19 @@ test('holdings use latest actual stop price regardless of input order', () => {
   const idea = { ...latest, id: 'idea', stopPrice: 200, brainstorm: true, date: '2026-10-30' };
   for (const rows of [[latest, row, idea], [row, idea, latest]]) assert.equal(calculateHoldings(rows)[0].stopPrice, 90);
 });
+
+
+test('stop defaults follow price until manually edited and preserve existing stop values', () => {
+  const { updatePricingDraft, defaultStopPrice } = require('../src/pages/TradingJournal/model.ts');
+  let draft = { type: '美股', price: '', shares: '', amount: '', amountManual: false, stopPrice: '', stopPriceManual: false };
+  draft = updatePricingDraft(draft, 'price', '0.1');
+  assert.equal(draft.stopPrice, '0.09');
+  draft = updatePricingDraft(draft, 'price', '100');
+  assert.equal(draft.stopPrice, '90');
+  draft = updatePricingDraft({ ...draft, stopPrice: '85', stopPriceManual: true }, 'price', '120');
+  assert.equal(draft.stopPrice, '85');
+  assert.equal(updatePricingDraft({ ...draft, stopPrice: '', stopPriceManual: true }, 'price', '130').stopPrice, '');
+  assert.equal(updatePricingDraft({ ...draft, stopPriceManual: false }, 'price', '').stopPrice, '');
+  for (const value of ['', '0', '-1', 'invalid', 'Infinity']) assert.equal(defaultStopPrice(value), '');
+  assert.equal(defaultStopPrice('123.45'), '111.105');
+});

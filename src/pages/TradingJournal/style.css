@@ -773,3 +773,7 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+.j-fee-help--warning {
+  color: #c62828;
+}
