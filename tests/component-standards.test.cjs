@@ -17,7 +17,7 @@ const blocked = (text, id) => assert.ok(check(text).some(issue => issue.rule ===
 const clean = text => assert.deepEqual(check(text), [], text);
 
 test('registry covers every shared family, without exempting whole feature pages', () => {
-  assert.deepEqual(rules.map(x => x.id), ['sortable-header', 'select', 'date-input', 'segmented', 'dialog', 'confirmation', 'page-header', 'tool-template', 'financial-template', 'comparison-table']);
+  assert.deepEqual(rules.map(x => x.id), ['confirm-popover', 'expandable-text', 'sortable-header', 'select', 'date-input', 'segmented', 'dialog', 'confirmation', 'page-header', 'tool-template', 'financial-template', 'comparison-table']);
   for (const rule of rules) {
     assert.ok(rule.entry && rule.review);
     assert.ok(fs.readFileSync(path.resolve(__dirname, '../docs/CODING_GUIDELINES.md'), 'utf8').includes('`' + rule.id + '`'), rule.id);
@@ -166,4 +166,15 @@ test('sortable headers protect their shared layout and allow sorting callbacks',
   clean(`import H from '@/components/ToolPage/SortableTableHeader'; const ui=<H label="XIRR" direction="asc" onClick={toggle}/>;`);
   blocked(`import H from '@/components/ToolPage/SortableTableHeader'; const ui=<H label="XIRR" style={{padding:0}}/>;`, 'sortable-header');
   assert.ok(css('.tool-sort-header button { padding: 10px; }', 'src/pages/Example/style.css').some(issue => issue.rule === 'sortable-header'));
+});
+
+test('expandable text preserves its shared presentation and allows text and label', () => {
+  clean(`import E from '@/components/ExpandableText'; const ui=<E text="备注" label="产品备注"/>;`);
+  blocked(`import E from '@/components/ExpandableText'; const ui=<E text="备注" style={{height:20}}/>;`, 'expandable-text');
+  assert.ok(css('.expandable-text summary { padding: 20px; }', 'src/pages/Example/style.css').some(issue => issue.rule === 'expandable-text'));
+});
+
+test('confirmation popovers protect their geometry and accept controlled confirmation callbacks', () => {
+  clean(`import C from '@/components/ConfirmPopover'; const ui=<C visible={open} onVisibleChange={setOpen} message="确认？" onConfirm={save}><button>取消</button></C>;`);
+  blocked(`import C from '@/components/ConfirmPopover'; const ui=<C style={{width:400}}/>;`, 'confirm-popover');
 });

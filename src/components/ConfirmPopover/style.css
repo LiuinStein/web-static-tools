@@ -1,0 +1,3 @@
+.tool-confirm-popover.tool-confirm-popover { width: 240px; max-width: calc(100vw - 24px); min-width: 0; padding: 12px; white-space: normal; font-size: 12px; line-height: 1.6; }
+.tool-confirm-popover.tool-confirm-popover p { margin: 0; overflow-wrap: anywhere; }
+.tool-confirm-popover__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }

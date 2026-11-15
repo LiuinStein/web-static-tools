@@ -1,0 +1,7 @@
+.expandable-text.expandable-text { margin: 0; padding: 0; border: 0; min-width: 0; font: inherit; line-height: inherit; color: inherit; }
+.expandable-text.expandable-text > summary { cursor: pointer; color: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; list-style-position: inside; min-height: 1lh; }
+.expandable-text__collapse { display: none; }
+.expandable-text[open] .expandable-text__preview { display: none; }
+.expandable-text[open] .expandable-text__collapse { display: inline; }
+.expandable-text__content { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.expandable-text.expandable-text > summary:focus-visible { outline: 2px solid #b9d2ff; outline-offset: 2px; }

@@ -1,7 +1,8 @@
 import { MonthlyWorkbook, Product } from './workbook';
 import { productKey } from './batch';
+import { currentProductProfit } from './liquidity-analysis';
 
-export type ProductSortField = 'name' | 'balance' | 'previous' | 'gain' | 'xirr' | 'twr';
+export type ProductSortField = 'name' | 'balance' | 'previous' | 'gain' | 'cumulativeProfit' | 'xirr' | 'twr';
 export interface ProductSort { field: ProductSortField; direction: 'asc' | 'desc'; }
 export function nextProductSort(current: ProductSort | null, field: ProductSortField): ProductSort | null {
   return current?.field !== field ? { field, direction: 'asc' } : current.direction === 'asc' ? { field, direction: 'desc' } : null;
@@ -12,6 +13,7 @@ export function sortedProducts(products: Product[], book: MonthlyWorkbook, sort:
     if (sort.field === 'name') return p.name;
     if (sort.field === 'previous') return p.previous;
     if (invalid.has(productKey(p))) return null;
+    if (sort.field === 'cumulativeProfit') return currentProductProfit(book, p);
     return sort.field === 'balance' ? p.balance : book.value(p.sheet, `${{ gain: 'J', xirr: 'K', twr: 'L' }[sort.field]}${p.row}`);
   };
   return products.map((product, index) => ({ product, index, value: value(product) })).sort((a, b) => {

@@ -22,6 +22,8 @@
 | 预设与自由输入 | `@/components/Select` 的 `SelectAutoComplete` |
 | 原生单日期输入 | [`@/components/DateInput`](../src/components/DateInput/README.md) |
 | 市场、币种、输入模式分段选项 | `@/components/SegmentedControl` |
+| 局部清空操作的气泡确认 | `@/components/ConfirmPopover` |
+| 单行预览与长文本展开 | `@/components/ExpandableText` |
 | 可排序表头 | `@/components/ToolPage/SortableTableHeader` |
 | 工具页弹窗 | `@/components/ToolPage/ToolDialog` |
 | 工具页操作确认 | `@/components/ToolPage/useToolConfirm` |
@@ -115,6 +117,8 @@ import DateInput from '@/components/DateInput';
 
 | 规则 ID | 组件／模板 | 自动检查范围 |
 | --- | --- | --- |
+| `confirm-popover` | ConfirmPopover | 私有样式及 style/className；业务传入可见状态、提示与确认回调 |
+| `expandable-text` | ExpandableText | 私有结构样式、受保护的 style/className；业务提供 text/label 与容器宽度 |
 | `sortable-header` | SortableTableHeader | 表头按钮私有样式、受保护的 style/className；业务只提供列名、方向与回调 |
 | `select` | Select 系列 | 原生 select、库导入及别名/子路径/命名空间/重新导出绕过、右侧留白与箭头属性、私有 CSS/变量 |
 | `date-input` | DateInput | 原生日期框、动态 type 和属性展开、组件固定属性、尺寸变体、WebKit 几何样式与变量 |

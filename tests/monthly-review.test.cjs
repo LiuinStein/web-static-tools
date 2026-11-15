@@ -1909,3 +1909,240 @@ test('quick product notes use actual currency, net transaction cost and the curr
   assert.equal(book.value(product.sheet, 'N' + product.row), beforeNote, 'batch edits remain isolated until saved');
   assert.equal(edited.book.value(product.sheet, 'N' + product.row), savedNote);
 });
+
+test('asset current profit and profit filters use net cost with zero classified as profitable and unknown values excluded', async () => {
+  const { currentProductProfit } = require('../src/pages/MonthlyReview/liquidity-analysis.ts');
+  const { matchesAssetReturnFilter } = require('../src/pages/MonthlyReview/filters.ts');
+  const { parseBenchmarks } = require('../src/pages/MonthlyReview/benchmarks.ts');
+  const book = await fixture(), config = parseBenchmarks(null);
+  for (const product of book.products()) book.saveTransactions(product, [{ date: '2026-10-01', amount: 1000, shares: 100, price: 10, kind: 'buy' }]);
+  const [a, b] = book.products();
+  book.set(a.sheet, 'K' + a.row, -0.2);
+  const positive = { ...a, balance: 1100 }, zero = { ...a, balance: 1000 }, negative = { ...b, balance: 900 };
+  const matches = (p, filter, invalid = false) => matchesAssetReturnFilter(book, p, config, filter, invalid);
+  assert.equal(currentProductProfit(book, positive), 100);
+  assert.equal(currentProductProfit(book, zero), 0);
+  assert.equal(currentProductProfit(book, negative), -100);
+  assert.equal(matches(positive, 'profitable'), true, 'profit is independent of a negative XIRR');
+  assert.equal(matches(zero, 'profitable'), true);
+  assert.equal(matches(zero, 'unprofitable'), false);
+  assert.equal(matches(negative, 'unprofitable'), true);
+  assert.equal(matches(negative, 'profitable'), false);
+  assert.equal(matches(positive, 'profitable', true), false);
+  assert.equal(matches(negative, 'unprofitable', true), false);
+  assert.equal(matches({ ...positive, block: undefined }, 'profitable'), false);
+  assert.equal(matches({ ...negative, block: undefined }, 'unprofitable'), false);
+  assert.equal(matches({ ...positive, block: undefined }, 'all'), true);
+  assert.equal(currentProductProfit(book, { ...a, balance: NaN }), null);
+  assert.equal(matches(positive, 'high'), false);
+  assert.equal(matches(positive, 'below'), true);
+  const unconfigured = { ...positive, category: 'Time Deposit' };
+  assert.equal(matches(unconfigured, 'profitable'), true, 'profit filters do not require a configured benchmark');
+  assert.equal(matches(unconfigured, 'high'), false);
+});
+
+test('asset table current profit column and per-currency totals align in normal, batch and notes views', async () => {
+  const extension = require.extensions['.tsx'];
+  require.extensions['.tsx'] = (m, f) => m._compile(ts.transpileModule(fs.readFileSync(f, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React, esModuleInterop: true } }).outputText, f);
+  try {
+    const React = require('react'), { renderToStaticMarkup } = require('react-dom/server');
+    const AssetsTable = require('../src/pages/MonthlyReview/AssetsTable.tsx').default;
+    const { parseBenchmarks } = require('../src/pages/MonthlyReview/benchmarks.ts');
+    const book = await fixture();
+    for (const product of book.products()) book.saveTransactions(product, [{ date: '2026-10-01', amount: 1000, shares: 100, price: 10, kind: 'buy' }]);
+    book.set('WTH', 'E3', 900);
+    const props = { book, products: book.products(), batch: null, busy: false, benchmarks: parseBenchmarks(null), reviewState: { changed: ['Assets:3'], reviewed: [] }, categoryNames: {}, money: n => typeof n === 'number' ? n.toFixed(2) : '—', pct: n => typeof n === 'number' ? (n * 100).toFixed(2) + '%' : '—', onBatch: () => {}, onError: () => {}, onEdit: () => {}, onTransactions: () => {}, onDelete: () => {} };
+    const render = patch => renderToStaticMarkup(React.createElement(AssetsTable, { ...props, ...patch }));
+    const html = render({});
+    const header = html.match(/<thead>(.*?)<\/thead>/s)[1];
+    assert.ok(header.indexOf('上期余额') < header.indexOf('累计收益'));
+    assert.ok(header.indexOf('累计收益') < header.indexOf('较上次收益'));
+    assert.ok(html.includes('RMB 100.00'));
+    assert.ok(html.includes('RMB -100.00'));
+    assert.ok(html.match(/<tfoot>.*RMB 0.00/s));
+    assert.ok(html.includes('mr-balance-changed'));
+    const countCells = row => (row.match(/<(?:td|th)\b/g) || []).length;
+    for (const markup of [html, render({ batch: new MonthlyBatch(book) }), render({ notes: true })]) {
+      const count = countCells(markup.match(/<thead><tr>(.*?)<\/tr>/s)[1]);
+      for (const row of markup.matchAll(/<tr[^>]*>(.*?)<\/tr>/gs)) assert.equal(countCells(row[1]), count);
+    }
+    assert.ok(!render({ notes: true }).includes('累计收益'));
+    const noteMarkup = render({ notes: true, onSaveNote: async () => {} });
+    const noteHead = noteMarkup.match(/<thead><tr>(.*?)<\/tr>/s)[1];
+    assert.ok(noteHead.endsWith('<th>备注</th><th>操作</th>'));
+    const noteRow = noteMarkup.match(/<tbody><tr[^>]*>(.*?)<\/tr>/s)[1];
+    const noteCells = [...noteRow.matchAll(/<td\b[^>]*>(.*?)<\/td>/gs)].map(match => match[1]);
+    assert.ok(noteCells.at(-2).includes('<details'));
+    assert.ok(!noteCells.at(-2).includes('<button'));
+    assert.ok(noteCells.at(-1).includes('>编辑</button>'));
+    assert.ok(noteCells.at(-1).includes('>取消</button>'));
+
+    const batch = new MonthlyBatch(book).stageBalances([['Assets:3', 'bad']]);
+    const invalid = render({ book: batch.book, products: batch.book.products(), batch });
+    assert.ok(invalid.includes('RMB —'));
+    assert.ok(invalid.match(/<tfoot>.*RMB -100.00/s), 'invalid product profit is excluded from the visible total');
+    assert.ok(render({ products: [props.products[0]] }).match(/<tfoot>.*RMB 100.00/s), 'totals follow the visible filter');
+  } finally {
+    if (extension) require.extensions['.tsx'] = extension; else delete require.extensions['.tsx'];
+  }
+});
+
+test('cancel note clears through the save callback, blocks repeated saves and keeps the original note on failure', async () => {
+  const React = require('react');
+  const original = { useState: React.useState, useEffect: React.useEffect, useRef: React.useRef };
+  const extension = require.extensions['.tsx'];
+  require.extensions['.tsx'] = (m, f) => m._compile(ts.transpileModule(fs.readFileSync(f, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React, esModuleInterop: true } }).outputText, f);
+  let states = [], refs = [], cursor = 0;
+  React.useState = initial => {
+    const index = cursor++;
+    if (!(index in states)) states[index] = typeof initial === 'function' ? initial() : initial;
+    return [states[index], next => { states[index] = typeof next === 'function' ? next(states[index]) : next; }];
+  };
+  React.useRef = initial => { const index = cursor++; return refs[index] || (refs[index] = { current: initial }); };
+  React.useEffect = () => {};
+  const nodes = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(nodes) : [node, ...nodes(node.props?.children)];
+  try {
+    const NoteCell = require('../src/pages/MonthlyReview/NoteCell.tsx').default;
+    let calls = [], finish;
+    const props = { name: '测试产品', note: '保留的备注', busy: false, onSave: value => { calls.push(value); return new Promise(resolve => { finish = resolve; }); } };
+    const render = () => { cursor = 0; return NoteCell(props); };
+    const button = label => nodes(render()).find(node => node.type === 'button' && node.props.children === label);
+    const popover = () => nodes(render()).find(node => node.type?.name === 'ConfirmPopover');
+    const confirmClear = () => { const node = popover(); return nodes(node.type(node.props)).find(child => child.type === 'button' && child.props.children === '确认清空').props.onClick(); };
+
+    assert.equal(nodes(render()).filter(node => node.type === 'td').length, 2);
+    assert.deepEqual(nodes(render()).filter(node => node.type === 'button').map(node => node.props.children), ['编辑', '取消']);
+    assert.ok(button('取消').props.className.includes('tool-button--danger'));
+    popover().props.onVisibleChange(true);
+    assert.equal(popover().props.visible, true);
+    assert.deepEqual(calls, [], 'requesting confirmation must not clear a note');
+    popover().props.onVisibleChange(false);
+    assert.deepEqual(calls, [], 'closing confirmation preserves the note');
+    popover().props.onVisibleChange(true);
+    const pending = confirmClear();
+    assert.deepEqual(calls, ['']);
+    assert.equal(button('取消').props.disabled, true);
+    assert.equal(button('编辑').props.disabled, true);
+    await confirmClear();
+    assert.equal(calls.length, 1);
+    finish(); await pending;
+    assert.equal(button('取消').props.disabled, false);
+    states = []; refs = [];
+    props.onSave = async value => { calls.push(value); throw new Error('保存失败'); };
+    await confirmClear();
+    const failed = render();
+    assert.equal(nodes(failed).find(node => node.props?.role === 'alert').props.children, '保存失败');
+    assert.equal(nodes(failed).find(node => node.type?.name === 'ExpandableText').props.text, '保留的备注');
+    assert.equal(button('取消').props.disabled, false);
+    props.busy = true;
+    assert.equal(button('取消').props.disabled, true);
+    const count = calls.length;
+    await confirmClear();
+    assert.equal(calls.length, count);
+    props.busy = false;
+    props.onSave = async value => { calls.push(value); };
+    button('编辑').props.onClick();
+    let editor = render();
+    nodes(editor).find(node => node.type === 'textarea').props.onChange({ target: { value: '更新备注' } });
+    editor = render();
+    nodes(editor).find(node => node.type === 'textarea').props.onKeyDown({ key: 'Enter', ctrlKey: true, nativeEvent: { isComposing: false }, preventDefault() {} });
+    await Promise.resolve();
+    assert.equal(calls.at(-1), '更新备注', 'ordinary note editing still saves the entered draft');
+  } finally {
+    Object.assign(React, original);
+    if (extension) require.extensions['.tsx'] = extension; else delete require.extensions['.tsx'];
+  }
+});
+
+test('cumulative profit sorting uses net cost, preserves stable ties and keeps unknown or invalid profits last', async () => {
+  const { sortedProducts, nextProductSort } = require('../src/pages/MonthlyReview/sorting.ts');
+  const book = await fixture();
+  for (const product of book.products()) book.saveTransactions(product, [{ date: '2026-10-01', amount: 1000, shares: 100, price: 10, kind: 'buy' }]);
+  const [a, b] = book.products();
+  const rows = [
+    { ...a, name: 'profit', balance: 1200 },
+    { ...b, name: 'loss', balance: 900 },
+    { ...a, name: 'zero', balance: 1000 },
+    { ...a, name: 'equal', balance: 1200 },
+    { ...a, name: 'unknown', block: undefined },
+  ];
+  const sort = direction => sortedProducts(rows, book, { field: 'cumulativeProfit', direction }).map(p => p.name);
+  assert.deepEqual(sort('asc'), ['loss', 'zero', 'profit', 'equal', 'unknown']);
+  assert.deepEqual(sort('desc'), ['profit', 'equal', 'zero', 'loss', 'unknown']);
+  assert.deepEqual(sortedProducts(rows, book, { field: 'cumulativeProfit', direction: 'asc' }, new Set(['WTH:3'])).map(p => p.name), ['zero', 'profit', 'equal', 'loss', 'unknown']);
+  let state = nextProductSort(null, 'cumulativeProfit'); assert.equal(state.direction, 'asc');
+  state = nextProductSort(state, 'cumulativeProfit'); assert.equal(state.direction, 'desc');
+  assert.equal(nextProductSort(state, 'cumulativeProfit'), null);
+  assert.deepEqual(rows.map(p => p.name), ['profit', 'loss', 'zero', 'equal', 'unknown']);
+});
+
+test('note-only saves avoid workbook parsing and full export and preserve every unrelated archive part and financial cell', async () => {
+  const { saveProductNote } = require('../src/pages/MonthlyReview/save-note.ts');
+  const { DOMParser, XMLSerializer } = require('@xmldom/xmldom');
+  const data = await (await fixture()).export();
+  const book = await MonthlyWorkbook.open(data), products = book.products(), [a, b] = products;
+  const draft = { id: 'note-draft', name: 'notes.xlsx', data, updated: '2026-11-15T00:00:00.000Z', revision: 'original', published: 'old', reviewState: { reviewed: ['Assets:3', 'WTH:3'], changed: ['WTH:3'], settingsChanged: ['salary'] } };
+  const financial = () => ['E', 'H', 'I', 'J', 'K', 'L'].map(col => book.cell(a.sheet, col + a.row));
+  const before = financial(), beforeNote = book.value(a.sheet, 'N' + a.row);
+  const open = MonthlyWorkbook.open, exportBook = MonthlyWorkbook.prototype.export, cleanup = MonthlyWorkbook.prototype.cleanupEmptySubtotals;
+  let writes = 0;
+  const persist = async (updated, baseline) => { assert.ok(baseline.revision); writes++; return { ...updated, revision: 'saved-' + writes }; };
+  let first, second, cleared;
+  try {
+    MonthlyWorkbook.open = async () => { throw new Error('unexpected full workbook parse'); };
+    MonthlyWorkbook.prototype.export = async () => { throw new Error('unexpected full workbook export'); };
+    MonthlyWorkbook.prototype.cleanupEmptySubtotals = () => { throw new Error('unexpected structural cleanup'); };
+    first = await saveProductNote(book, draft, a, '第一行 & <测试>\n第二行', persist);
+    second = await saveProductNote(first.book, first.draft, b, '另一产品的备注', persist);
+    cleared = await saveProductNote(second.book, second.draft, a, '', persist);
+    assert.equal(book.value(a.sheet, 'N' + a.row), beforeNote);
+    assert.deepEqual(financial(), before);
+    assert.deepEqual(first.draft.reviewState.reviewed, draft.reviewState.reviewed);
+    assert.deepEqual(first.draft.reviewState.changed, ['WTH:3', 'Assets:3']);
+    assert.deepEqual(first.draft.reviewState.settingsChanged, ['salary']);
+    assert.equal(first.draft.published, undefined);
+    assert.equal(cleared.book.value(b.sheet, 'N' + b.row), '另一产品的备注', 'later saves retain other products saved notes');
+    assert.equal(cleared.book.value(a.sheet, 'N' + a.row), '');
+    const conflict = new Error('此账本已在其他页面修改');
+    await assert.rejects(saveProductNote(first.book, first.draft, a, '不能覆盖', async () => { throw conflict; }), conflict);
+    assert.equal(first.book.value(a.sheet, 'N' + a.row), '第一行 & <测试>\n第二行');
+    await assert.rejects(saveProductNote(book, draft, { ...a, name: 'stale product' }, '不能错位', persist), /位置已变化/);
+  } finally {
+    MonthlyWorkbook.open = open; MonthlyWorkbook.prototype.export = exportBook; MonthlyWorkbook.prototype.cleanupEmptySubtotals = cleanup;
+  }
+  const originalZip = await JSZip.loadAsync(data), changedZip = await JSZip.loadAsync(first.draft.data);
+  const path = book.sheet(a.sheet).path;
+  for (const [name, entry] of Object.entries(originalZip.files)) {
+    if (entry.dir || name === path) continue;
+    assert.deepEqual(await changedZip.file(name).async('uint8array'), await entry.async('uint8array'), name);
+  }
+  const withoutNote = text => {
+    const doc = new DOMParser().parseFromString(text, 'application/xml');
+    for (const cell of [...doc.getElementsByTagNameNS('*', 'c')]) if (cell.getAttribute('r') === 'N' + a.row) cell.parentNode.removeChild(cell);
+    return new XMLSerializer().serializeToString(doc);
+  };
+  assert.equal(withoutNote(await changedZip.file(path).async('string')), withoutNote(await originalZip.file(path).async('string')), 'only the note cell changes in the target worksheet');
+  const restored = await MonthlyWorkbook.open(cleared.draft.data);
+  assert.equal(restored.value(a.sheet, 'N' + a.row), '');
+  assert.equal(restored.value(b.sheet, 'N' + b.row), '另一产品的备注');
+  assert.deepEqual(['E', 'H', 'I', 'J', 'K', 'L'].map(col => restored.cell(a.sheet, col + a.row)), before);
+});
+
+test('batch note edits preserve review state and pending inputs without structural cleanup or persistence', async () => {
+  const book = await fixture(), product = book.products()[0], key = productKey(product);
+  const batch = new MonthlyBatch(book).check([key], true);
+  const cleanup = MonthlyWorkbook.prototype.cleanupEmptySubtotals;
+  let next;
+  try {
+    MonthlyWorkbook.prototype.cleanupEmptySubtotals = () => { throw new Error('unexpected cleanup for a note edit'); };
+    next = batch.updateNote(product, '批量备注');
+  } finally { MonthlyWorkbook.prototype.cleanupEmptySubtotals = cleanup; }
+  assert.equal(next.book.value(product.sheet, 'N' + product.row), '批量备注');
+  assert.notEqual(book.value(product.sheet, 'N' + product.row), '批量备注');
+  assert.ok(next.reviewed.has(key)); assert.ok(next.changedKeys().has(key)); assert.equal(next.dirty, true);
+  assert.equal(next.book.value(product.sheet, 'E' + product.row), book.value(product.sheet, 'E' + product.row));
+  assert.throws(() => batch.stageBalances([[key, 'invalid']]).updateNote(product, '不能覆盖'), /无效余额/);
+  const staged = batch.stageBalances([[key, '1250']]).updateNote(product, '金额也保留');
+  assert.equal(staged.book.value(product.sheet, 'E' + product.row), 1250);
+  assert.equal(staged.book.value(product.sheet, 'N' + product.row), '金额也保留');
+});

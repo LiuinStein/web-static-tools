@@ -5,14 +5,15 @@ import ReturnAnalysis from './ReturnAnalysis';
 import RepaymentFields from './RepaymentFields';
 import { repaymentForm, encodeRepayment } from './repayment';
 import BenchmarkDialog from './BenchmarkDialog';
-import { Benchmarks, BENCHMARK_STORAGE_KEY, DEFAULT_BENCHMARKS, parseBenchmarks, BenchmarkBand, BENCHMARK_BANDS, benchmarkFor, benchmarkIntervalLabel, matchesBenchmarkBand } from './benchmarks';
+import { Benchmarks, BENCHMARK_STORAGE_KEY, DEFAULT_BENCHMARKS, parseBenchmarks, BENCHMARK_BANDS, benchmarkFor, benchmarkIntervalLabel } from './benchmarks';
 import AmountInput from './AmountInput';
 import { monthlyFileName } from './filename';
 import { isOneDriveAuthRequired } from '../../services/onedrive-auth';
 import { ReviewAccount, reviewAccounts, nextReviewAccount } from './account-navigation';
-import { linkedOptions } from './filters';
+import { linkedOptions, AssetReturnFilter, matchesAssetReturnFilter } from './filters';
 import { rawAmount, currencyCode } from './amount';
 import { productQuickNotes } from './quick-notes';
+import { saveProductNote } from './save-note';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Dialog from './MonthlyDialog';
 import { Prompt } from 'react-router-dom';
@@ -81,7 +82,7 @@ export default function MonthlyReview() {
   const [currency, setCurrency] = useState('全部');
   const [accountFilter, setAccountFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
-  const [benchmarkFilter, setBenchmarkFilter] = useState<BenchmarkBand | 'all'>('all');
+  const [benchmarkFilter, setBenchmarkFilter] = useState<AssetReturnFilter>('all');
   const [config, setConfig] = useState(initial.config);
   const [drive, setDrive] = useState<MonthlyDrive | null>(initial.user ? initial.service : null);
   const [scope, setScope] = useState(initial.scope);
@@ -215,11 +216,25 @@ export default function MonthlyReview() {
   }
   async function saveNote(product: Product, note: string) {
     let saved = false;
+    let failure: Error | undefined;
     await run(async () => {
-      await mutate(next => next.updateProductNote(product, note), productKey(product));
-      saved = true;
+      try {
+        if (!book || !draft) throw new Error('请先打开账本再编辑备注');
+        if (batch) {
+          setBatch(batch.updateNote(product, note));
+          setNotice('备注已加入本次批量记账，保存本机草稿后生效。');
+        } else {
+          const result = await saveProductNote(book, draft, product, note);
+          if (mounted.current) {
+            setBook(result.book); setDraft(result.draft);
+            setDrafts(current => [result.draft, ...current.filter(row => row.id !== result.draft.id && row.id !== draft.id)]);
+            setNotice('备注已保存到本机草稿。');
+          }
+        }
+        saved = true;
+      } catch (e) { failure = e; throw e; }
     });
-    if (!saved) throw new Error('备注未保存，请检查页面提示后重试。');
+    if (!saved) throw failure || new Error('备注未保存，请检查页面提示后重试。');
   }
   function startBatch(source = book, target = '资产') {
     if (!source) return;
@@ -311,7 +326,8 @@ export default function MonthlyReview() {
     if (book && member !== '全部' && !memberOptions.includes(member)) setMember('全部');
     if (book && currency !== '全部' && !currencyOptions.includes(currency)) setCurrency('全部');
   }, [book, products, accountFilter, categoryFilter, member, currency, memberOptions, currencyOptions]);
-  const filtered = products.filter(p => (member === '全部' || p.member === member) && (currency === '全部' || p.currency === currency) && (!accountFilter || p.account === accountFilter) && (!categoryFilter || p.category === categoryFilter) && (benchmarkFilter === 'all' || matchesBenchmarkBand(benchmarks, p.category, book?.value(p.sheet, `K${p.row}`), book?.value(p.sheet, `L${p.row}`), benchmarkFilter)) && matchesSearch(`${p.name} ${p.account} ${categoryNames[p.category] || p.category} ${p.member} ${p.currency} ${p.note}`, query));
+  const invalidAssetKeys = new Set(batch?.invalid || []);
+  const filtered = products.filter(p => (member === '全部' || p.member === member) && (currency === '全部' || p.currency === currency) && (!accountFilter || p.account === accountFilter) && (!categoryFilter || p.category === categoryFilter) && matchesAssetReturnFilter(book, p, benchmarks, benchmarkFilter, invalidAssetKeys.has(productKey(p))) && matchesSearch(`${p.name} ${p.account} ${categoryNames[p.category] || p.category} ${p.member} ${p.currency} ${p.note}`, query));
   const filterMetric = categoryFilter ? benchmarkFor(benchmarks, categoryFilter).metric : 'none';
   const filterMetricLabel = filterMetric === 'xirr' ? 'XIRR' : filterMetric === 'twr' ? '年化 TWR' : undefined;
   const visibleProducts = batch && onlyUnchecked ? filtered.filter(p => !batch.reviewed.has(productKey(p))) : filtered;
@@ -447,7 +463,7 @@ export default function MonthlyReview() {
         <LiquidityAnalysis book={book} products={products} invalidKeys={batch?.invalid || []} templateSummary={liquidity} categoryNames={categoryNames} onViewProduct={viewAssetProduct} />
         <LiabilityAnalysis book={book} invalidKeys={batch?.invalid || []} onViewLiabilities={() => setTab('负债')} />
       </>}
-      {tab === '资产' && <section className="mr-panel"><div className="mr-section-heading"><div><h2>资产</h2><p>更新余额，管理产品与现金流。金额均以产品原币显示。</p></div><div className="mr-toolbar-group">{!batch && <button disabled={busy || !products.length} onClick={() => startBatch()}>批量记账</button>}<button disabled={busy} onClick={() => { setError(''); setModal('group'); }}>＋ 新增分组</button><button className="primary" disabled={busy} onClick={newProduct}>＋ 新增产品</button></div></div><div className="mr-filters"><input aria-label="搜索产品" placeholder="搜索产品、账户或备注" value={query} onChange={e => setQuery(e.target.value)} /><Select aria-label="筛选成员" value={member} onChange={e => setMember(e.target.value)}><option value="全部">全部成员</option>{memberOptions.map(v => <option key={v} value={v}>{v}</option>)}</Select><Select aria-label="筛选币种" value={currency} onChange={e => setCurrency(e.target.value)}><option value="全部">全部币种</option>{currencyOptions.map(v => <option key={v} value={v}>{v}</option>)}</Select><Select aria-label="筛选账户" value={accountFilter} onChange={e => setAccountFilter(e.target.value)}><option value="">全部账户</option>{filterOptions.accounts.map(v => <option key={v} value={v}>{v}</option>)}</Select><Select aria-label="筛选产品类型" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}><option value="">全部产品类型</option>{categories.map(v => <option key={v} value={v}>{categoryNames[v] || v}</option>)}</Select><Select aria-label="筛选业绩基准区间" title="按各产品类型配置的指标和阈值筛选；未配置或收益率无效的产品不纳入区间" value={benchmarkFilter} onChange={event => setBenchmarkFilter(event.target.value as BenchmarkBand | 'all')}><option value="all">全部业绩基准区间</option>{BENCHMARK_BANDS.map(band => <option key={band} value={band}>{benchmarkIntervalLabel(band, filterMetricLabel)}</option>)}</Select><button disabled={busy} onClick={() => setBenchmarkDialog(true)}>业绩基准</button><button disabled={busy} onClick={clearAssetFilters}>清空筛选</button></div>{batch && <div className="mr-batch-help"><p>金额输入在失去焦点后重算。直接填写本期余额，按 Tab / 回车核对并跳至下一行，Esc 退出连续录入；可从 Excel 粘贴一列余额，按当前可见顺序从所选行开始填入。可点击产品名称、余额或收益表头排序，录入时行顺序保持不变。活期账户净投入自动计算且不可编辑；其他产品净投入可直接填写，投入为正、回款为负，保存买卖记录后会按流水重算。上期余额只读，其他信息仍可通过「编辑」修改。</p><div className="mr-toolbar-group"><label><input type="checkbox" checked={onlyUnchecked} onChange={e => setOnlyUnchecked(e.target.checked)} />仅看未核对</label><button disabled={busy || !visibleProducts.length} onClick={() => setBatch(batch.check(visibleProducts.map(productKey), true))}>将当前可见项标为已核对</button><button disabled={busy || !batch.reviewed.size} onClick={() => setBatch(batch.check(products.map(productKey), false))}>清除核对标记</button></div></div>}
+      {tab === '资产' && <section className="mr-panel"><div className="mr-section-heading"><div><h2>资产</h2><p>更新余额，管理产品与现金流。金额均以产品原币显示。</p></div><div className="mr-toolbar-group">{!batch && <button disabled={busy || !products.length} onClick={() => startBatch()}>批量记账</button>}<button disabled={busy} onClick={() => { setError(''); setModal('group'); }}>＋ 新增分组</button><button className="primary" disabled={busy} onClick={newProduct}>＋ 新增产品</button></div></div><div className="mr-filters"><input aria-label="搜索产品" placeholder="搜索产品、账户或备注" value={query} onChange={e => setQuery(e.target.value)} /><Select aria-label="筛选成员" value={member} onChange={e => setMember(e.target.value)}><option value="全部">全部成员</option>{memberOptions.map(v => <option key={v} value={v}>{v}</option>)}</Select><Select aria-label="筛选币种" value={currency} onChange={e => setCurrency(e.target.value)}><option value="全部">全部币种</option>{currencyOptions.map(v => <option key={v} value={v}>{v}</option>)}</Select><Select aria-label="筛选账户" value={accountFilter} onChange={e => setAccountFilter(e.target.value)}><option value="">全部账户</option>{filterOptions.accounts.map(v => <option key={v} value={v}>{v}</option>)}</Select><Select aria-label="筛选产品类型" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}><option value="">全部产品类型</option>{categories.map(v => <option key={v} value={v}>{categoryNames[v] || v}</option>)}</Select><Select aria-label="筛选业绩基准区间" title="基准区间按各类型配置评估；盈利按累计收益 ≥ 0、亏损按累计收益 < 0 筛选，成本或余额待核实的产品不纳入盈亏筛选" value={benchmarkFilter} onChange={event => setBenchmarkFilter(event.target.value as AssetReturnFilter)}><option value="all">全部业绩基准区间</option><option value="profitable">盈利（累计收益 ≥ 0）</option><option value="unprofitable">亏损（累计收益 &lt; 0）</option>{BENCHMARK_BANDS.map(band => <option key={band} value={band}>{benchmarkIntervalLabel(band, filterMetricLabel)}</option>)}</Select><button disabled={busy} onClick={() => setBenchmarkDialog(true)}>业绩基准</button><button disabled={busy} onClick={clearAssetFilters}>清空筛选</button></div>{batch && <div className="mr-batch-help"><p>金额输入在失去焦点后重算。直接填写本期余额，按 Tab / 回车核对并跳至下一行，Esc 退出连续录入；可从 Excel 粘贴一列余额，按当前可见顺序从所选行开始填入。可点击产品名称、余额或收益表头排序，录入时行顺序保持不变。活期账户净投入自动计算且不可编辑；其他产品净投入可直接填写，投入为正、回款为负，保存买卖记录后会按流水重算。上期余额只读，其他信息仍可通过「编辑」修改。</p><div className="mr-toolbar-group"><label><input type="checkbox" checked={onlyUnchecked} onChange={e => setOnlyUnchecked(e.target.checked)} />仅看未核对</label><button disabled={busy || !visibleProducts.length} onClick={() => setBatch(batch.check(visibleProducts.map(productKey), true))}>将当前可见项标为已核对</button><button disabled={busy || !batch.reviewed.size} onClick={() => setBatch(batch.check(products.map(productKey), false))}>清除核对标记</button></div></div>}
         <AssetsTable onExitForward={() => nextAccountButton.current?.focus()} benchmarks={benchmarks} reviewState={draft?.reviewState} book={book} products={visibleProducts} batch={batch} busy={busy} categoryNames={categoryNames} money={money} pct={pct} onBatch={next => { setBatch(next); setError(''); setNotice(''); }} onError={setError} onEdit={editProduct} onTransactions={p => { setSelected(p); setTransactions(p.block ? book.transactions(p.block) : []); setError(''); setModal('transactions'); }} onDelete={async p => { if (await confirm({ title: '删除产品', message: `删除“${p.name}”及其关联交易？这会更新本期汇总，历史月份不受影响。清仓请记录卖出。`, confirmLabel: '确认删除', danger: true })) run(() => mutate(next => next.deleteProduct(p))); }} />{batch && <div className="mr-account-navigation"><span aria-live="polite">{accountPosition >= 0 ? `${member} · ${accountFilter}（${accountPosition + 1} / ${accountOrder.length} 个账户）` : '选择账户后可依次记账'}</span><button className="primary" disabled={busy || !accountOrder.length} ref={nextAccountButton} onClick={advanceAccount}>下个账户</button></div>}</section>}
       {tab === '备注事项' && <section className="mr-panel"><h2>备注事项</h2><AssetsTable notes onSaveNote={saveNote} book={book} products={notedProducts} batch={null} busy={busy} categoryNames={categoryNames} money={money} pct={pct} onBatch={next => { setBatch(next); setError(''); setNotice(''); }} onError={setError} onEdit={editProduct} onTransactions={p => { setSelected(p); setTransactions(p.block ? book.transactions(p.block) : []); setError(''); setModal('transactions'); }} onDelete={async p => { if (await confirm({ title: '删除产品', message: `删除“${p.name}”及其关联交易？这会更新本期汇总，历史月份不受影响。清仓请记录卖出。`, confirmLabel: '确认删除', danger: true })) run(() => mutate(next => next.deleteProduct(p))); }} /></section>}
       {tab === '负债' && <LiabilitiesTable onAdd={() => { setSelectedLiability(null); setLiabilityForm({ account: '', balance: '0', repayment: repaymentForm(null) }); setError(''); setModal('liability'); }} reviewState={draft?.reviewState} book={book} batch={batch} busy={busy} money={money} onStart={() => startBatch(book, '负债')} onBatch={next => { setBatch(next); setError(''); setNotice(''); }} onError={setError} onEdit={editLiability} onZero={row => {

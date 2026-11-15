@@ -129,6 +129,13 @@ export class MonthlyBatch {
     if (touchedKey && moved.has(touchedKey)) touched.add(moved.get(touchedKey)!);
     return new MonthlyBatch(this.original, next, new Map(), reviewed, touched, true);
   }
+  updateNote(product: Product, note: string): MonthlyBatch {
+    if (this.invalid.length) throw new Error('请先修正表格中的无效余额或净投入，再编辑备注');
+    const current = this.commitInputs(), next = current.book.clone();
+    next.updateProductNote(product, note);
+    return new MonthlyBatch(current.original, next, current.inputs, current.reviewed,
+      new Set([...current.touched, productKey(product)]), true, current.flows);
+  }
   changedKeys(): Set<string> {
     let cache = differenceCache.get(this.original);
     if (!cache) { cache = new WeakMap(); differenceCache.set(this.original, cache); }

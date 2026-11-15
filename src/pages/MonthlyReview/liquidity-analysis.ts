@@ -61,6 +61,13 @@ export function liquidityCost(book: MonthlyWorkbook, product: Product): number |
   if (cost === 0 && !book.transactions(block).length) return null;
   return cost;
 }
+export function currentProductProfit(book: MonthlyWorkbook, product: Product): number | null {
+  const cost = liquidityCost(book, product);
+  if (cost === null || !Number.isFinite(product.balance) || product.balance < 0) return null;
+  const profit = new Decimal(product.balance).minus(cost).toNumber();
+  return Number.isFinite(profit) ? profit : null;
+}
+
 export function liquidityRows(book: MonthlyWorkbook, products: Product[], invalidKeys: string[] = [], asOf: Scalar = liquidityToday()): LiquidityRow[] {
   const bounds = liquidityBounds(asOf), invalid = new Set(invalidKeys);
   return products.map(product => {

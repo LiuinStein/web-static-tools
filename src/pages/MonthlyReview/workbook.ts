@@ -602,6 +602,25 @@ export class MonthlyWorkbook {
     if (!current || current.name !== p.name || current.account !== p.account) throw new Error('产品位置已变化，请重新打开备注后编辑');
     this.set(current.sheet, `N${current.row}`, note);
   }
+  async exportNoteChange(data: Uint8Array, product: Product): Promise<Uint8Array> {
+    // Note-only saves patch the latest persisted archive without financial export
+    // preparation, structural cleanup or refreshing cached formula results.
+    const sheet = this.sheet(product.sheet), address = `N${product.row}`;
+    const note = sheet.cells.get(address);
+    if (!note) throw new Error('备注单元格不存在，请重新打开产品后编辑');
+    const Zip = (await import('jszip')).default;
+    const archive = await Zip.loadAsync(data), file = archive.file(sheet.path);
+    if (!file) throw new Error('草稿缺少产品工作表，请重新打开账本');
+    const doc = parse(await file.async('string'));
+    const row = descendants(doc, 'row').find(node => node.getAttribute('r') === String(product.row));
+    if (!row) throw new Error('产品位置已变化，请重新打开备注后编辑');
+    const current = children(row, 'c').find(node => node.getAttribute('r') === address);
+    const replacement = doc.importNode(note, true);
+    if (current) row.replaceChild(replacement, current);
+    else row.insertBefore(replacement, children(row, 'c').find(node => column(node.getAttribute('r').replace(/\d+/, '')) > column('N')) || null);
+    archive.file(sheet.path, xml(doc));
+    return archive.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+  }
   updateProduct(p: Product, values: { name: string; account: string; balance: number; previous: number; flow: number | string; due: string; note: string }) {
     validateProductNames(values.name, values.account);
     if (!values.name.trim() || !values.account.trim() || !Number.isFinite(values.balance) || values.balance < 0 || !Number.isFinite(values.previous) || values.previous < 0) throw new Error('产品名称、账户或余额无效');
