@@ -10,6 +10,24 @@ export function tax(amount: number, bonus = false) {
 export const defaults = { salary: 50000, bonus: 200000, equity: 0, extra: 0, other: 0,
   maxBase: 36348, socialBase: 36348, fundBase: 36348, pension: 8, unemployment: .5, medical: 2, medicalFixed: 3, fund: 12, employerFund: 12 };
 export type SalaryInput = typeof defaults;
+// Compare full years with independent bonus months and shared deduction settings.
+export function calculateRaise(salary: number, bonusMonths: number, raisePercent: number, config: SalaryInput, autoBases: boolean, separateBonus: boolean, nextBonusMonths = bonusMonths) {
+  if (![bonusMonths, nextBonusMonths, raisePercent].every(Number.isFinite) || bonusMonths < 0 || bonusMonths > 1200 || nextBonusMonths < 0 || nextBonusMonths > 1200 || raisePercent < 0 || raisePercent > 10000) return null;
+  const nextSalary = round(salary * (1 + raisePercent / 100));
+  return calculateRaiseAmounts(salary, nextSalary, round(salary * bonusMonths), round(nextSalary * nextBonusMonths), config, autoBases, separateBonus);
+}
+export function calculateRaiseAmounts(salary: number, nextSalary: number, bonus: number, nextBonus: number, config: SalaryInput, autoBases: boolean, separateBonus: boolean) {
+  if (![salary, nextSalary, bonus, nextBonus].every(n => Number.isFinite(n) && n >= 0 && n <= 100000000) || salary <= 0 || nextSalary < salary || nextSalary / salary > 101) return null;
+  const scenario = (monthly: number, annualBonus: number) => {
+    const base = round(Math.min(config.maxBase, (monthly * 12 + annualBonus) / 12));
+    return calculate({ ...config, salary: monthly, bonus: annualBonus, equity: 0, ...(autoBases ? { socialBase: base, fundBase: base } : {}) }, separateBonus, true);
+  };
+  const before = scenario(salary, bonus), after = scenario(nextSalary, nextBonus);
+  const increase = round(after.cash - before.cash);
+  return { before, after, nextSalary, increase, cashRate: before.cash > 0 ? increase / before.cash * 100 : null,
+    totalRate: before.total > 0 ? (after.total - before.total) / before.total * 100 : null };
+}
+
 export function calculate(v: SalaryInput, separateBonus: boolean, separateEquity: boolean) {
   const sb = Math.min(v.maxBase, Math.max(7270, v.socialBase));
   const fb = Math.min(v.maxBase, Math.max(2540, v.fundBase));

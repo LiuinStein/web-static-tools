@@ -9,10 +9,11 @@ interface Props<T extends string> {
   'aria-label': string;
   className?: string;
   disabled?: boolean;
+  variant?: 'default' | 'content';
 }
 
-export default function SegmentedControl<T extends string>({ value, options, onChange, className, disabled, ...props }: Props<T>) {
-  return <div role="group" aria-label={props['aria-label']} className={['segmented-control', className].filter(Boolean).join(' ')}>
+export default function SegmentedControl<T extends string>({ value, options, onChange, className, disabled, variant = 'default', ...props }: Props<T>) {
+  return <div role="group" aria-label={props['aria-label']} className={['segmented-control', variant === 'content' && 'segmented-control--content', className].filter(Boolean).join(' ')}>
     {options.map(option => <button key={option.value} type="button" disabled={disabled || option.disabled}
       aria-pressed={value === option.value} onClick={() => onChange(option.value)}>{option.label}</button>)}
   </div>;

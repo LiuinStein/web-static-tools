@@ -73,6 +73,7 @@ test('component props are checked through aliases and constant style objects', (
   blocked(`import D from '@/components/DateInput'; const ui=<D style={{height:60}}/>;`, 'date-input');
   blocked(`import D from '@/components/DateInput'; const ui=<D density="custom"/>;`, 'date-input');
   blocked(`import S from '@/components/SegmentedControl'; const ui=<S variant="other"/>;`, 'segmented');
+  clean(`import S from '@/components/SegmentedControl'; const ui=<S variant="content"/>;`);
   blocked(`import D from '@/components/DateInput'; const p={['type']:'text'}; const ui=<D {...p}/>;`, 'date-input');
   blocked(`import S from '@/components/Select'; const ui=<S style={{paddingRight:0}}/>;`, 'select');
   blocked(`import S from '@/components/Select'; const styles={width:100,paddingInlineEnd:0}; const ui=<S style={styles}/>;`, 'select');
