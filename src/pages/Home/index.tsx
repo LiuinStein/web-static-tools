@@ -6,7 +6,7 @@ const tools = [
   { path: '/code/salary', title: '税后工资计算器', category: '开发工具', icon: '¥', description: '拆解工资、年终奖与股权激励，比较计税方案，单列公积金收入。', tags: ['北京社保', '个税', '公积金'], scene: '核对薪资与比较 Offer 时' },
   { path: '/monthly-review', title: '月度复盘', category: '复盘记录', icon: 'monthly-review', description: '汇总资产与负债，核对每月余额，回顾投入、收益和资产变化。', tags: ['资产负债', '批量记账', 'Excel / OneDrive'], scene: '每月整理财务时', featured: true },
   { path: '/trading-journal', title: '交易日记', category: '复盘记录', icon: 'trading-journal', description: '记录每笔交易与投资想法，整理持仓，让下一次决策有据可循。', tags: ['交易记录', '持仓管理', 'Excel / OneDrive'], scene: '交易之后，及时记录', featured: true },
-  { path: '/finance/return', title: '收益率计算', category: '金融计算', icon: '%', description: '用 XIRR 计算多笔、不规则现金流对应的年化收益率。', tags: ['XIRR', '年化收益'], scene: '想知道投资实际回报时' },
+  { path: '/finance/return', title: '成本及收益率', category: '金融计算', icon: '%', description: '计算调仓后的摊薄成本，以及多笔现金流对应的投资收益率。', tags: ['摊薄成本', 'XIRR', 'TWR'], scene: '核算持仓成本或投资回报时' },
   { path: '/finance/monetary', title: '货币与固收', category: '金融计算', icon: '¥', description: '换算万份收益与年化利率，计算按日利息、比较产品转换。', tags: ['利率换算', '利息计算'], scene: '比较理财产品时' },
   { path: '/finance/bond', title: '债券计算', category: '金融计算', icon: 'bond', description: '根据债券价格、利息和期限，辅助测算债券投资收益。', tags: ['债券', '收益测算'], scene: '评估债券投资时' },
   { path: '/finance/stock', title: '股票交易费用', category: '金融计算', icon: 'stock-fees', description: '计算港股、美股交易佣金与费用，提前了解交易成本。', tags: ['港股', '美股', '佣金'], scene: '股票下单之前' },

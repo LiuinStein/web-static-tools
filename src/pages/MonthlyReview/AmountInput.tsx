@@ -1,8 +1,13 @@
 import React, { useEffect, useState } from 'react';
+import { Input } from '@alifd/next';
 import { formatAmount, formatFixedAmount, rawAmount } from './amount';
 
+interface AmountInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+  appearance?: 'native' | 'fusion';
+}
+
 // Preserve intermediate text such as "1." while the parent updates numeric calculations.
-export default function AmountInput({ value, onFocus, onBlur, onChange, onClick, onKeyDown, ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
+export default function AmountInput({ value, onFocus, onBlur, onChange, onClick, onKeyDown, appearance = 'native', ...props }: AmountInputProps) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState('');
   useEffect(() => {
@@ -11,7 +16,7 @@ export default function AmountInput({ value, onFocus, onBlur, onChange, onClick,
       setText(formatAmount(String(value ?? '')));
     }
   }, [value]);
-  return <input {...props} type="text" inputMode="decimal" onClick={onClick}
+  const field = <input {...props} type="text" inputMode="decimal" onClick={onClick}
     value={editing ? text : formatFixedAmount(String(value ?? ''))}
     onFocus={event => { const formatted = formatAmount(String(value ?? '')); event.currentTarget.value = formatted; setText(formatted); setEditing(true); onFocus?.(event); }}
     onBlur={event => { setEditing(false); onBlur?.(event); }}
@@ -44,4 +49,17 @@ export default function AmountInput({ value, onFocus, onBlur, onChange, onClick,
       };
       input.setSelectionRange(position(start), position(end), direction);
     }} />;
+
+  if (appearance === 'native') return field;
+  return <Input disabled={props.disabled} inputRender={input => React.cloneElement(input, {
+    ...field.props,
+    onFocus: (event: React.FocusEvent<HTMLInputElement>) => {
+      input.props.onFocus?.(event);
+      field.props.onFocus(event);
+    },
+    onBlur: (event: React.FocusEvent<HTMLInputElement>) => {
+      input.props.onBlur?.(event);
+      field.props.onBlur(event);
+    },
+  })} />;
 }

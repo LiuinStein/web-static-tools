@@ -28,7 +28,7 @@ const asideMenuConfig = [
         path: '/finance/future'
       },
       {
-        name: '收益率',
+        name: '成本及收益率',
         path: '/finance/return'
       }
     ]
