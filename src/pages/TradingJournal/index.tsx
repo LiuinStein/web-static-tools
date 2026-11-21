@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Button, Pagination } from '@alifd/next';
 import zhCN from '@alifd/next/lib/locale/zh-cn';
 import PageHeader from '@/components/PageHeader';
+import ExpandableText from '@/components/ExpandableText';
 import ToolDialog from '@/components/ToolPage/ToolDialog';
 import '@/components/ToolPage/style.css';
 import {
@@ -33,12 +34,13 @@ import {
   stopWarning,
   reasonWithoutStopWarning,
   withStopWarning,
+  withClosingEstimate,
 } from './model';
 import { OneDriveJournal, journalDrive } from './onedrive';
 import type { DriveConfig } from './onedrive';
 import { exportTrades } from './workbook';
 import { oneDriveConfig } from './config';
-import { calculateHoldings, summarizeHoldingCosts } from './holdings';
+import { calculateHoldings, summarizeHoldingCosts, findClosingHolding, estimateClosingProfit } from './holdings';
 import { SyncQueue, completeSync } from './sync-queue';
 import { findRecordedSecurity, resolveSecurity, IdentityField } from './security-lookup';
 import StableTableArea from './StableTableArea';
@@ -144,6 +146,15 @@ export default function TradingJournal() {
   const pageHoldings = filteredHoldings.slice((currentHoldingsPage - 1) * pageSize, currentHoldingsPage * pageSize);
   useEffect(() => setTradePage(page => Math.min(page, tradePageCount)), [tradePageCount]);
   useEffect(() => setHoldingsPage(page => Math.min(page, holdingsPageCount)), [holdingsPageCount]);
+  const closingHolding = findClosingHolding(all, draft, editing);
+  const showStopFields = isStock(draft.type) && !(closingHolding && draft.direction === '卖出');
+  const closingEstimate = estimateClosingProfit(closingHolding, draft.shares, draft.amount);
+  useEffect(() => {
+    setDraft(current => {
+      const reason = withClosingEstimate(current.reason, closingEstimate);
+      return reason === current.reason ? current : { ...current, reason };
+    });
+  }, [closingEstimate, editing]);
   const automaticFee = isStock(draft.type);
   const fee = automaticFee
     ? calculateFee(Number(draft.amount), Number(draft.price), Number(draft.shares))
@@ -300,14 +311,17 @@ export default function TradingJournal() {
         amount: Number(draft.amount),
         price: draft.price === '' ? undefined : Number(draft.price),
         shares: draft.shares === '' ? undefined : Number(draft.shares),
-        stopPrice: isStock(draft.type) && draft.stopPrice !== '' ? Number(draft.stopPrice) : undefined,
+        stopPrice: showStopFields && draft.stopPrice !== '' ? Number(draft.stopPrice)
+          : !showStopFields && editing?.type === draft.type && editing.direction === draft.direction &&
+            editing.code.toUpperCase() === completeStockCode(draft.type, draft.code.toUpperCase())
+            ? editing.stopPrice : undefined,
         fee,
         reason: reasonWithoutStopWarning(draft.reason).trim(),
         brainstorm: draft.brainstorm || undefined,
       };
       if (!trade.reason) throw new Error('请填写交易原因');
       validateStockCode(trade.type, trade.code);
-      validateTradeEntry(trade);
+      validateTradeEntry(trade, showStopFields);
       const stored = readJSON(cacheKey, cache) as Cache;
       const historicalTrades = visibleTrades(stored.remote, stored.pending, stored.changes || []);
       trade.reason = withStopWarning(trade.reason, isStock(trade.type) &&
@@ -470,10 +484,9 @@ export default function TradingJournal() {
                 <span className="j-subtle">费用 {tradeCurrency(trade) || '未标记'} <TableNumber value={trade.fee} /></span>
               </td>
               <td>
-                <details className="journal-reason">
-                  <summary><span className="j-reason-preview">{reason ? reason.split('\n')[0] : '未填写原因'}</span></summary>
-                  <p>{reason}</p>
-                </details>
+                <div className="journal-reason">
+                  <ExpandableText text={reason || '未填写原因'} label="交易原因" expandedLabel="已展开" previewText={reason.split('\n')[0] || '未填写原因'} />
+                </div>
                 {labels && <span className="j-local-label">{labels}</span>}
               </td>
               <td className="journal-actions-column">
@@ -963,7 +976,7 @@ export default function TradingJournal() {
                 ? '单价与份额必填；总价默认 = 单价 × 份额，可手动调整；费用 = 总价 − 单价 × 份额。'
                 : '基金费用默认 0，请按实际成交费用填写。'}
             </p>
-            {isStock(draft.type) && (<>
+            {showStopFields && (<>
               <div className="j-form-grid">
                 <label className="j-field">
                   <span>止损单价（{stockCurrency(draft.type)}） <em>*</em></span>

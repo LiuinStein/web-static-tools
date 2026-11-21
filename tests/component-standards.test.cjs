@@ -170,7 +170,7 @@ test('sortable headers protect their shared layout and allow sorting callbacks',
 });
 
 test('expandable text preserves its shared presentation and allows text and label', () => {
-  clean(`import E from '@/components/ExpandableText'; const ui=<E text="备注" label="产品备注"/>;`);
+  clean(`import E from '@/components/ExpandableText'; const ui=<E text="备注" label="产品备注" expandedLabel="已展开" previewText="摘要"/>;`);
   blocked(`import E from '@/components/ExpandableText'; const ui=<E text="备注" style={{height:20}}/>;`, 'expandable-text');
   assert.ok(css('.expandable-text summary { padding: 20px; }', 'src/pages/Example/style.css').some(issue => issue.rule === 'expandable-text'));
 });

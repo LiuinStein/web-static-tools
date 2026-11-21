@@ -1,4 +1,5 @@
-import { AssetType, Trade, Currency, tradeCurrency, currencies, compareTrades } from './model';
+import Decimal from 'decimal.js';
+import { AssetType, Trade, Currency, tradeCurrency, currencies, compareTrades, completeStockCode, isStock } from './model';
 
 export interface Holding {
   code: string;
@@ -86,4 +87,34 @@ export function summarizeHoldingCosts(holdings: Holding[]): Record<Currency, num
     if (holding.currency && currencies.includes(holding.currency)) add(totals[holding.currency], holding.totalCost);
   });
   return { HKD: totals.HKD.value, USD: totals.USD.value, RMB: totals.RMB.value };
+}
+
+export function findClosingHolding(
+  trades: Trade[],
+  draft: Pick<Trade, 'code' | 'type' | 'date' | 'direction'>,
+  editing?: Trade | null,
+): Holding | undefined {
+  if (!isStock(draft.type) || !draft.code.trim()) return;
+  const code = completeStockCode(draft.type, draft.code.trim().toUpperCase());
+  const matching = trades.filter(trade => trade.type === draft.type &&
+    completeStockCode(trade.type, trade.code.trim().toUpperCase()) === code &&
+    trade.id !== editing?.id && trade.date <= draft.date &&
+    (!editing || draft.date !== editing.date || trade.date !== editing.date || compareTrades(trade, editing) > 0));
+  return calculateHoldings(matching.map(trade => ({ ...trade, code }))).find(holding =>
+    holding.shares !== undefined && (draft.direction === '卖出' ? holding.shares > 0 : holding.shares < 0));
+}
+
+export function estimateClosingProfit(holding: Holding | undefined, shares: string, amount: string): string {
+  if (!holding?.currency || !holding.shares || !Number.isFinite(holding.totalCost)) return '';
+  try {
+    const quantity = new Decimal(shares);
+    const total = new Decimal(amount);
+    if (!quantity.isFinite() || !total.isFinite() || quantity.lte(0) || total.lte(0)) return '';
+    const average = new Decimal(holding.totalCost).div(holding.shares);
+    const closedShares = Decimal.min(quantity, Math.abs(holding.shares));
+    const profit = total.div(quantity).minus(average).times(closedShares)
+      .times(holding.shares > 0 ? 1 : -1).toDecimalPlaces(2);
+    const formatted = profit.toFixed(2).replace(/\B(?=(\d{3})+\.)/g, ',');
+    return `预计盈亏：${holding.currency} ${profit.gt(0) ? '+' : ''}${formatted}`;
+  } catch { return ''; }
 }

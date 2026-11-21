@@ -860,3 +860,27 @@ test('stop defaults follow price until manually edited and preserve existing sto
   for (const value of ['', '0', '-1', 'invalid', 'Infinity']) assert.equal(defaultStopPrice(value), '');
   assert.equal(defaultStopPrice('123.45'), '111.105');
 });
+
+test('closing estimates use prior actual holdings, retain notes and cap the matched quantity', () => {
+  const { findClosingHolding, estimateClosingProfit } = require('../src/pages/TradingJournal/holdings.ts');
+  const { withClosingEstimate, withStopWarning, stopWarning, validateTradeEntry } = require('../src/pages/TradingJournal/model.ts');
+  const long = { ...trade(), type: '港股', code: '700', date: '2026-10-28', currency: 'HKD',
+    direction: '买入', amount: 1000, price: 10, shares: 100 };
+  const sell = { ...long, id: 'close', code: '00700', direction: '卖出', date: '2026-10-29' };
+  const future = { ...sell, id: 'future', date: '2026-10-30' };
+  const idea = { ...sell, id: 'idea', brainstorm: true };
+  const holding = findClosingHolding([long, sell, future, idea], sell, sell);
+  assert.equal(holding.shares, 100);
+  assert.equal(estimateClosingProfit(holding, '150', '1800'), '预计盈亏：HKD +200.00');
+  assert.equal(estimateClosingProfit(holding, '50', '450'), '预计盈亏：HKD -50.00');
+  assert.equal(estimateClosingProfit(holding, '', '450'), '');
+  assert.equal(findClosingHolding([long], { ...sell, type: 'A股' }), undefined);
+  const short = findClosingHolding([{ ...long, direction: '卖出' }], { ...sell, direction: '买入' });
+  assert.equal(estimateClosingProfit(short, '50', '400'), '预计盈亏：HKD +100.00');
+  assert.equal(estimateClosingProfit(short, '50', '550'), '预计盈亏：HKD -50.00');
+  const reason = withClosingEstimate('手写备注', '预计盈亏：HKD +100.00');
+  assert.equal(withClosingEstimate(reason, '预计盈亏：HKD -50.00'), '预计盈亏：HKD -50.00\n手写备注');
+  assert.equal(withClosingEstimate(reason, ''), '手写备注');
+  assert.equal(withStopWarning(reason, true), `预计盈亏：HKD +100.00\n${stopWarning}\n手写备注`);
+  assert.doesNotThrow(() => validateTradeEntry({ ...sell, stopPrice: undefined }, false));
+});

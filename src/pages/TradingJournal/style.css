@@ -328,24 +328,6 @@
   color: var(--color-text1-3, #666);
   line-height: 1.7;
 }
-.journal-reason summary {
-  cursor: pointer;
-  list-style-position: inside;
-  white-space: nowrap;
-}
-.j-reason-preview {
-  display: inline-block;
-  max-width: calc(100% - 18px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: bottom;
-}
-.journal-reason p {
-  margin: 7px 0 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
 .j-local-label {
   display: block;
   white-space: nowrap;

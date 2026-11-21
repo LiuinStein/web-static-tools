@@ -229,9 +229,21 @@ export const stopWarning = '当前已跌破历史止损单价';
 export function reasonWithoutStopWarning(reason: string): string {
   return reason.split('\n').filter(line => line.trim() !== stopWarning && line.trim() !== `！！！${stopWarning}！！！`).join('\n');
 }
+const estimateLine = /^预计盈亏：(HKD|USD|RMB) [+-]?[\d,]+\.\d{2}$/;
+
+export function withClosingEstimate(reason: string, estimate: string): string {
+  const lines = reason.split('\n');
+  if (estimateLine.test(lines[0])) lines.shift();
+  const notes = lines.join('\n');
+  return estimate ? `${estimate}\n${notes}` : notes;
+}
+
 export function withStopWarning(reason: string, warning: boolean): string {
   const text = reasonWithoutStopWarning(reason).trim();
-  return warning ? `${stopWarning}\n${text}` : text;
+  if (!warning) return text;
+  const lines = text.split('\n');
+  lines.splice(estimateLine.test(lines[0]) ? 1 : 0, 0, stopWarning);
+  return lines.join('\n');
 }
 export function calculateRiskExposure(stopPrice: string, shares: string, amount: string): string {
   try {
@@ -248,10 +260,10 @@ export function hasHistoricalStopBreach(trades: Trade[], draft: Pick<Trade, 'typ
     completeStockCode(trade.type, trade.code.trim().toUpperCase()) === code && trade.date <= draft.date &&
     trade.shares !== undefined && trade.shares > 0 && trade.stopPrice !== undefined && trade.stopPrice > draft.price!);
 }
-export function validateTradeEntry(trade: Trade): void {
+export function validateTradeEntry(trade: Trade, requiresStop = isStock(trade.type)): void {
   validateTrade(trade);
-  // Legacy rows remain readable; every newly saved stock entry needs a stop price.
-  if (isStock(trade.type) && trade.stopPrice === undefined) throw new Error('股票止损单价必填');
+  // Legacy rows remain readable; opening stock entries require a stop price.
+  if (requiresStop && trade.stopPrice === undefined) throw new Error('股票止损单价必填');
 }
 
 

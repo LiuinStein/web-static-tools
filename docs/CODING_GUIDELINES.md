@@ -120,7 +120,7 @@ import DateInput from '@/components/DateInput';
 | --- | --- | --- |
 | `hover-hint` | HoverHint | 气泡私有样式及 style/className；业务提供 content 与原生触发元素 |
 | `confirm-popover` | ConfirmPopover | 私有样式及 style/className；业务传入可见状态、提示与确认回调 |
-| `expandable-text` | ExpandableText | 私有结构样式、受保护的 style/className；业务提供 text/label 与容器宽度 |
+| `expandable-text` | ExpandableText | 私有结构样式、受保护的 style/className；业务提供 text/label、可选 expandedLabel/previewText 与容器宽度 |
 | `sortable-header` | SortableTableHeader | 表头按钮私有样式、受保护的 style/className；业务只提供列名、方向与回调 |
 | `select` | Select 系列 | 原生 select、库导入及别名/子路径/命名空间/重新导出绕过、右侧留白与箭头属性、私有 CSS/变量 |
 | `date-input` | DateInput | 原生日期框、动态 type 和属性展开、组件固定属性、尺寸变体、WebKit 几何样式与变量 |
