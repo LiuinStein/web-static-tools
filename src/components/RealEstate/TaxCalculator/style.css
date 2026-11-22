@@ -1,0 +1,20 @@
+@import "../../Financial/CalculatorLayout/style.css";
+.re-tax-calculator { color: #40516a; }
+.re-tax-calculator .re-tax-field-hint { display: block; margin-top: 7px; color: #8491a5; line-height: 1.6; }
+.re-tax-calculator .re-tax-summary { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 16px; padding: 20px; border: 1px solid #d5e4ff; border-radius: 8px; background: #f0f5ff; }
+.re-tax-calculator .re-tax-summary > div { display: flex; flex-direction: column; gap: 7px; }
+.re-tax-calculator .re-tax-summary span { color: #6e7d92; font-size: 12px; }
+.re-tax-calculator .re-tax-summary strong { color: #2968d1; font-size: 20px; font-variant-numeric: tabular-nums; }
+.re-tax-table-wrap { overflow-x: auto; border: 1px solid #e3eaf3; border-radius: 8px; }
+.re-tax-table-wrap table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.re-tax-table-wrap th, .re-tax-table-wrap td { padding: 12px; border-bottom: 1px solid #edf1f6; text-align: left; }
+.re-tax-table-wrap th { color: #62738b; font-weight: 500; background: #f7f9fc; }
+.re-tax-table-wrap td:last-child, .re-tax-table-wrap tfoot td { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.re-tax-table-wrap tfoot th, .re-tax-table-wrap tfoot td { background: #f0f5ff; color: #2968d1; }
+.re-tax-check { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.re-tax-policy { margin-top: 8px; padding: 16px 18px; border: 1px solid #e3eaf3; border-radius: 8px; color: #718096; font-size: 12px; line-height: 1.8; }
+.re-tax-policy summary { cursor: pointer; color: #53657d; }
+.re-tax-policy ul { padding-left: 18px; }
+.re-tax-sources { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.re-tax-sources a { color: #3577eb; }
+@media (max-width: 600px) { .re-tax-calculator .re-tax-summary { grid-template-columns: 1fr 1fr; }.re-tax-calculator .re-tax-summary > div:first-child { grid-column: 1/-1; } }

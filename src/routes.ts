@@ -12,6 +12,7 @@ const ReturnTools = lazy(() => import('@/pages/ReturnTools'));
 const EncodingTools = lazy(() => import('@/pages/EncodingTools'));
 const TradingJournal = lazy(() => import('@/pages/TradingJournal'));
 const MonthlyReview = lazy(() => import('@/pages/MonthlyReview'));
+const RealEstateTools = lazy(() => import('@/pages/RealEstateTools'));
 
 const routerConfig: IRouterConfig[] = [
   {
@@ -32,6 +33,7 @@ const routerConfig: IRouterConfig[] = [
         path: '/trading-journal',
         component: TradingJournal,
       },
+      { path: '/real-estate/tax', component: RealEstateTools },
       {
         path: '/common',
         component: CommonTools,

@@ -6,6 +6,7 @@ const tools = [
   { path: '/code/salary', title: '税后工资计算器', category: '开发工具', icon: '¥', description: '拆解工资、年终奖与股权激励，比较计税方案，单列公积金收入。', tags: ['北京社保', '个税', '公积金'], scene: '核对薪资与比较 Offer 时' },
   { path: '/monthly-review', title: '月度复盘', category: '复盘记录', icon: 'monthly-review', description: '汇总资产与负债，核对每月余额，回顾投入、收益和资产变化。', tags: ['资产负债', '批量记账', 'Excel / OneDrive'], scene: '每月整理财务时', featured: true },
   { path: '/trading-journal', title: '交易日记', category: '复盘记录', icon: 'trading-journal', description: '记录每笔交易与投资想法，整理持仓，让下一次决策有据可循。', tags: ['交易记录', '持仓管理', 'Excel / OneDrive'], scene: '交易之后，及时记录', featured: true },
+  { path: '/real-estate/tax', title: '房地产税费计算器', category: '房地产工具', icon: '¥', description: '按北京住房交易政策估算新房契税及二手房买卖双方税费。', tags: ['新房', '二手房', '北京'], scene: '准备购房或出售住房时' },
   { path: '/finance/return', title: '成本及收益率', category: '金融计算', icon: '%', description: '计算调仓后的摊薄成本，以及多笔现金流对应的投资收益率。', tags: ['摊薄成本', 'XIRR', 'TWR'], scene: '核算持仓成本或投资回报时' },
   { path: '/finance/monetary', title: '货币与固收', category: '金融计算', icon: '¥', description: '换算万份收益与年化利率，计算按日利息、比较产品转换。', tags: ['利率换算', '利息计算'], scene: '比较理财产品时' },
   { path: '/finance/bond', title: '债券计算', category: '金融计算', icon: 'bond', description: '根据债券价格、利息和期限，辅助测算债券投资收益。', tags: ['债券', '收益测算'], scene: '评估债券投资时' },
@@ -14,7 +15,7 @@ const tools = [
   { path: '/common', title: '日期计算', category: '日常工具', icon: 'calendar', description: '计算两个日期之间的间隔，处理日常日期与期限问题。', tags: ['日期间隔', '天数'], scene: '需要核对日期时' },
   { path: '/code/encoding', title: '文本编解码', category: '开发工具', icon: '</>', description: '快速进行 Base64、URL 编码与解码，处理常见文本转换。', tags: ['Base64', 'URL'], scene: '开发调试、处理链接时' },
 ];
-const categories = ['全部', '复盘记录', '金融计算', '日常工具', '开发工具'];
+const categories = ['全部', '复盘记录', '金融计算', '房地产工具', '日常工具', '开发工具'];
 
 function ToolIcon({ icon }: { icon: string }) {
   const illustrations: Record<string, React.ReactNode> = {
