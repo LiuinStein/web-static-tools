@@ -5,13 +5,14 @@ import AmountInput from '@/pages/MonthlyReview/AmountInput';
 import { rawAmount } from '@/pages/MonthlyReview/amount';
 import type { HomeCount, HomeType } from './model';
 import { calculatePropertyTaxes, deedTaxRate } from './model';
+import LoanCalculator from '@/components/RealEstate/LoanCalculator';
 import './style.css';
 
 const money = (value: number) => value.toLocaleString('zh-CN', { style: 'currency', currency: 'CNY', maximumFractionDigits: 2 });
 
 export default function TaxCalculator() {
   const [homeType, setHomeType] = React.useState<HomeType>('resale');
-  const [price, setPrice] = React.useState('3000000');
+  const [price, setPrice] = React.useState('6000000');
   const [area, setArea] = React.useState('90');
   const [homeCount, setHomeCount] = React.useState<HomeCount>('first');
   const [monthsHeld, setMonthsHeld] = React.useState('60');
@@ -116,5 +117,6 @@ export default function TaxCalculator() {
         </div>
       </section>
     </div>
+    <LoanCalculator homeType={homeType} purchasePrice={deal} homeCount={homeCount} />
   </main>;
 }

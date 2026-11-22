@@ -1,0 +1,52 @@
+.loan-calculator {
+  margin-top: 20px;
+  min-width: 0;
+}
+.loan-calculator > h2 {
+  margin: 0 0 18px;
+  font-size: 17px;
+  font-weight: 600;
+}
+.loan-layout {
+  align-items: stretch;
+}
+.loan-fields {
+  margin-top: 18px;
+}
+.loan-field {
+  min-width: 0;
+}
+.loan-field-wide {
+  grid-column: 1/-1;
+}
+.loan-results {
+  align-content: start;
+}
+.loan-error {
+  margin: 16px 0 0;
+  color: #b83c3c;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.loan-result-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #d5e4ff;
+}
+.loan-result-meta p {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  color: #7e8a9e;
+  font-size: 12px;
+}
+.loan-result-meta b {
+  color: var(--tool-text);
+  font-size: 16px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
