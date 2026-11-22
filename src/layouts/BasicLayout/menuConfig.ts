@@ -34,12 +34,6 @@ const asideMenuConfig = [
     ]
   },
   {
-    name: '房地产工具',
-    path: '/real-estate',
-    icon: 'chart-bar',
-    children: [{ name: '税费计算器', path: '/real-estate/tax' }]
-  },
-  {
     name: '复盘工具',
     path: '/review',
     icon: 'edit',
@@ -65,6 +59,12 @@ const asideMenuConfig = [
       },
       { name: '税后工资计算器', path: '/code/salary' }
     ]
+  },
+  {
+    name: '房地产工具',
+    path: '/real-estate',
+    icon: 'chart-bar',
+    children: [{ name: '税费计算器', path: '/real-estate/tax' }]
   },
 ];
 
