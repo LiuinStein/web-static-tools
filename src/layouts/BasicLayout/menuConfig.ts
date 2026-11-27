@@ -64,7 +64,10 @@ const asideMenuConfig = [
     name: '房地产工具',
     path: '/real-estate',
     icon: 'chart-bar',
-    children: [{ name: '税费计算器', path: '/real-estate/tax' }]
+    children: [
+      { name: '税费计算器', path: '/real-estate/tax' },
+      { name: '贷款计算器', path: '/real-estate/loan' },
+    ]
   },
 ];
 

@@ -13,13 +13,13 @@ const money = (value: number) => value.toLocaleString('zh-CN', {
   maximumFractionDigits: 2,
 });
 
-interface LoanCalculatorProps {
-  homeType: 'new' | 'resale';
-  purchasePrice: number;
-  homeCount: 'first' | 'second' | 'other';
-}
+type HomeType = 'new' | 'resale';
+type HomeCount = 'first' | 'second' | 'other';
 
-export default function LoanCalculator({ homeType, purchasePrice, homeCount }: LoanCalculatorProps) {
+export default function LoanCalculator() {
+  const [homeType, setHomeType] = React.useState<HomeType>('resale');
+  const [purchasePrice, setPurchasePrice] = React.useState('6000000');
+  const [homeCount, setHomeCount] = React.useState<HomeCount>('first');
   const [loanMode, setLoanMode] = React.useState<LoanMode>('combined');
   const [repaymentMode, setRepaymentMode] = React.useState<RepaymentMode>('equalPrincipalAndInterest');
   const [downPaymentMode, setDownPaymentMode] = React.useState<DownPaymentMode>('rate');
@@ -35,12 +35,12 @@ export default function LoanCalculator({ homeType, purchasePrice, homeCount }: L
   const [valuationManual, setValuationManual] = React.useState(false);
 
   React.useEffect(() => {
-    if (!valuationManual) setValuation(String(purchasePrice > 0 ? purchasePrice : 0));
+    if (!valuationManual) setValuation(String(Number(rawAmount(purchasePrice)) || 0));
   }, [purchasePrice, valuationManual]);
 
   React.useEffect(() => {
     if (downPaymentMode === 'amount' && downPaymentAmount === '') {
-      setDownPaymentAmount(String(Math.round(purchasePrice * 0.3)));
+      setDownPaymentAmount(String(Math.round((Number(rawAmount(purchasePrice)) || 0) * 0.3)));
     }
   }, [purchasePrice]);
 
@@ -54,12 +54,13 @@ export default function LoanCalculator({ homeType, purchasePrice, homeCount }: L
     if (mode === downPaymentMode) return;
     if (mode === 'amount') {
       const amount = downPaymentMode === 'rate'
-        ? purchasePrice * (Number(downPaymentRate) || 0) / 100
+        ? (Number(rawAmount(purchasePrice)) || 0) * (Number(downPaymentRate) || 0) / 100
         : Number(downPaymentAmount) || 0;
       setDownPaymentAmount(String(Math.round(amount)));
     } else {
-      const amount = Number(downPaymentAmount) || purchasePrice * 0.3;
-      setDownPaymentRate(purchasePrice > 0 ? String(Number((amount / purchasePrice * 100).toFixed(2))) : '30');
+      const housePrice = Number(rawAmount(purchasePrice)) || 0;
+      const amount = Number(downPaymentAmount) || housePrice * 0.3;
+      setDownPaymentRate(housePrice > 0 ? String(Number((amount / housePrice * 100).toFixed(2))) : '30');
     }
     setDownPaymentMode(mode);
   };
@@ -76,8 +77,8 @@ export default function LoanCalculator({ homeType, purchasePrice, homeCount }: L
 
   React.useEffect(() => {
     const purchaseValue = homeType === 'resale'
-      ? Math.min(purchasePrice, Number(rawAmount(valuation)) || purchasePrice)
-      : purchasePrice;
+      ? Math.min(Number(rawAmount(purchasePrice)) || 0, Number(rawAmount(valuation)) || Number(rawAmount(purchasePrice)) || 0)
+      : Number(rawAmount(purchasePrice)) || 0;
     const downPayment = downPaymentMode === 'rate'
       ? purchaseValue * (Number(downPaymentRate) || 0) / 100
       : Number(rawAmount(downPaymentAmount)) || 0;
@@ -94,8 +95,8 @@ export default function LoanCalculator({ homeType, purchasePrice, homeCount }: L
   ]);
 
   const result = calculateLoan({
-    purchasePrice,
-    valuation: homeType === 'resale' ? Number(rawAmount(valuation)) || 0 : purchasePrice,
+    purchasePrice: Number(rawAmount(purchasePrice)) || 0,
+    valuation: homeType === 'resale' ? Number(rawAmount(valuation)) || 0 : Number(rawAmount(purchasePrice)) || 0,
     downPaymentMode,
     downPaymentRate: Number(downPaymentRate) || 0,
     downPaymentAmount: Number(rawAmount(downPaymentAmount)) || 0,
@@ -124,12 +125,23 @@ export default function LoanCalculator({ homeType, purchasePrice, homeCount }: L
     </label>
   );
 
-  return <section className="loan-calculator">
-    <h2>贷款计算器</h2>
+  return <main className="loan-calculator tool-page">
+    <header className="salary-heading"><div><div className="salary-eyebrow">房地产 / 住房贷款</div><h1>贷款计算器</h1><p>估算北京公积金贷款、商业贷款与组合贷的还款金额。</p></div></header>
+    <div className="salary-notice">贷款结果仅供预算参考，实际额度、利率和审批结果以公积金中心及贷款银行为准。</div>
     <div className="salary-layout loan-layout">
       <section className="salary-panel loan-input-panel">
-        <h2>贷款参数</h2>
+        <h2>01　贷款参数</h2>
+        <SegmentedControl<HomeType> aria-label="住房类型" value={homeType} onChange={setHomeType} options={[
+          { value: 'resale', label: '二手房' }, { value: 'new', label: '新房' },
+        ]} />
         <div className="tool-fields loan-fields">
+          {amountField('合同成交价（元）', purchasePrice, setPurchasePrice, next => setPurchasePrice(scaleTenThousand(next)), true)}
+          <label className="tool-field loan-field">
+            <span>本次购房后家庭住房套数</span>
+            <Select aria-label="本次购房后家庭住房套数" value={homeCount} onChange={event => setHomeCount(event.target.value as HomeCount)}>
+              <option value="first">首套</option><option value="second">二套</option><option value="other">三套及以上</option>
+            </Select>
+          </label>
           <label className="tool-field loan-field loan-field-wide">
             <span>贷款方式</span>
             <SegmentedControl<LoanMode>
@@ -253,7 +265,7 @@ export default function LoanCalculator({ homeType, purchasePrice, homeCount }: L
           </div>
         </div>
         <div className="salary-panel">
-          <h2>还款概览</h2>
+          <h2>02　还款概览</h2>
           {[
             ['首付', result.downPayment],
             ['公积金贷款', result.fundAmount],
@@ -267,5 +279,5 @@ export default function LoanCalculator({ homeType, purchasePrice, homeCount }: L
         </div>
       </section>
     </div>
-  </section>;
+  </main>;
 }

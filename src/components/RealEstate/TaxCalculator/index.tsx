@@ -5,7 +5,6 @@ import AmountInput from '@/pages/MonthlyReview/AmountInput';
 import { rawAmount } from '@/pages/MonthlyReview/amount';
 import type { HomeCount, HomeType } from './model';
 import { calculatePropertyTaxes, deedTaxRate } from './model';
-import LoanCalculator from '@/components/RealEstate/LoanCalculator';
 import './style.css';
 
 const money = (value: number) => value.toLocaleString('zh-CN', { style: 'currency', currency: 'CNY', maximumFractionDigits: 2 });
@@ -18,6 +17,7 @@ export default function TaxCalculator() {
   const [monthsHeld, setMonthsHeld] = React.useState('60');
   const [onlyHome, setOnlyHome] = React.useState(true);
   const [originalPrice, setOriginalPrice] = React.useState('0');
+  const [includeBrokerage, setIncludeBrokerage] = React.useState(true);
   const deal = Number(rawAmount(price)) || 0;
   const size = Number(rawAmount(area)) || 0;
   const months = Number(rawAmount(monthsHeld)) || 0;
@@ -26,6 +26,7 @@ export default function TaxCalculator() {
     homeType, price: deal, area: size, homeCount, monthsHeld: months, onlyHome,
     originalPrice: Number(rawAmount(originalPrice)) || 0,
     stampRelief: true,
+    includeBrokerage,
   });
   const total = taxes.reduce((sum, tax) => sum + tax.amount, 0);
   const buyersTotal = taxes.filter(tax => tax.payer === '买方' || tax.payer === '买卖双方').reduce((sum, tax) => sum + tax.amount, 0);
@@ -85,6 +86,14 @@ export default function TaxCalculator() {
               </Select>
             </label>
             {field('卖方购入原值（元）', originalPrice, setOriginalPrice, undefined, true)}
+            <label className="re-tax-check">
+              <input
+                type="checkbox"
+                checked={includeBrokerage}
+                onChange={event => setIncludeBrokerage(event.target.checked)}
+              />
+              包含中介费（买卖双方各按成交价 1% 估算）
+            </label>
           </>}
         </div>
       </section>
@@ -105,7 +114,7 @@ export default function TaxCalculator() {
               <li>契税：家庭唯一住房，140㎡及以下 1%、以上 1.5%；家庭第二套，140㎡及以下 1%、以上 2%。不符合优惠条件按北京市 3% 税率估算。</li>
               <li>二手房增值税：个人销售购买不足 2 年住房按含税成交价换算为 3% 征收率；满 2 年免征。</li>
               <li>个人所得税：自用满 5 年且为家庭唯一生活用房免征；卖方购入原值为 0 时按成交价 1%估算；原值大于 0 时按扣除增值税和购入原值后的转让所得 20%估算。</li>
-              <li>个人住房买卖暂免印花税。结果不含中介费、登记费、贷款费用、住宅专项维修资金等非税项目；计税价格、扣除项目及资格以税务机关核定为准。</li>
+              <li>个人住房买卖暂免印花税。勾选中介费时，买卖双方各按成交价 1%估算。结果不含登记费、贷款费用、住宅专项维修资金等项目；计税价格、扣除项目及资格以税务机关核定为准。</li>
             </ul>
             <div className="re-tax-sources">
               <a href="https://www.beijing.gov.cn/zhengce/zhengcefagui/qtwj/202512/t20251231_4381541.html" target="_blank" rel="noreferrer">个人销售住房增值税政策（北京政府网）</a>
@@ -117,6 +126,5 @@ export default function TaxCalculator() {
         </div>
       </section>
     </div>
-    <LoanCalculator homeType={homeType} purchasePrice={deal} homeCount={homeCount} />
   </main>;
 }

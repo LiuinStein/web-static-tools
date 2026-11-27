@@ -10,6 +10,7 @@ export interface TaxInputs {
   onlyHome: boolean;
   originalPrice: number;
   stampRelief: boolean;
+  includeBrokerage: boolean;
 }
 
 export interface TaxItem {
@@ -45,5 +46,9 @@ export function calculatePropertyTaxes(input: TaxInputs): TaxItem[] {
     taxes.push({ name: '个人所得税', payer: '卖方', rate: input.originalPrice <= 0 ? '成交价 × 1%' : '应纳税所得额 × 20%', amount: incomeTax });
   }
   taxes.push({ name: '印花税', payer: '买卖双方', rate: input.stampRelief ? '个人住房暂免' : '住房买卖合同暂免', amount: 0 });
+  if (input.includeBrokerage) {
+    taxes.push({ name: '中介费', payer: '买方', rate: '成交价 × 1%', amount: input.price * 0.01 });
+    taxes.push({ name: '中介费', payer: '卖方', rate: '成交价 × 1%', amount: input.price * 0.01 });
+  }
   return taxes;
 }

@@ -5,6 +5,8 @@
 .re-tax-form { margin-top: 18px; }
 .re-tax-field { min-width: 0; }
 .re-tax-field small { grid-column: 1/-1; }
+.re-tax-check { display: flex; align-items: center; gap: 8px; margin-top: 2px; color: #53657d; font-size: 13px; cursor: pointer; }
+.re-tax-check input { accent-color: #3577eb; }
 .re-tax-results { align-content: start; }
 .re-tax-detail-panel { margin: 0; }
 .re-tax-detail-panel h2 { margin-bottom: 14px; }
